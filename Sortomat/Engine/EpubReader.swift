@@ -22,10 +22,11 @@ struct EpubReader {
 
         // Find the OPF package document.
         var opfName: String?
-        if let container = zip.entry(named: "META-INF/container.xml") ?? zip.firstEntry(withSuffixes: ["container.xml"]),
+        if let container = zip.entry(named: "META-INF/container.xml")
+            ?? zip.firstEntry(withSuffixes: ["container.xml"]),
            let data = zip.data(for: container),
            let root = Self.parseXML(data),
-           let rootfile = (try? root.nodes(forXPath: "//*[local-name()='rootfile']"))?.first as? XMLElement,
+           let rootfile = Self.elements(in: root, localName: "rootfile").first,
            let full = rootfile.attribute(forName: "full-path")?.stringValue, !full.isEmpty {
             opfName = full
         }
@@ -42,22 +43,39 @@ struct EpubReader {
         )
     }
 
+    // MARK: - Namespace-agnostic tree walking
+
+    /// All descendant elements whose local name matches (ignoring any `dc:` or
+    /// `opf:` prefix). Foundation's XPath `local-name()` support is unreliable, so
+    /// we walk the tree ourselves.
+    static func elements(in root: XMLElement, localName: String) -> [XMLElement] {
+        var result: [XMLElement] = []
+        func walk(_ node: XMLNode) {
+            if let element = node as? XMLElement,
+               (element.localName ?? element.name) == localName {
+                result.append(element)
+            }
+            for child in node.children ?? [] { walk(child) }
+        }
+        walk(root)
+        return result
+    }
+
     // MARK: - Metadata
 
     private static func parseMetadata(_ root: XMLElement) -> Metadata {
         var meta = Metadata()
-        func dcAll(_ tag: String) -> [String] {
-            let nodes = (try? root.nodes(forXPath: "//*[local-name()='\(tag)']")) ?? []
-            return nodes.compactMap {
+        func text(_ tag: String) -> [String] {
+            elements(in: root, localName: tag).compactMap {
                 $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
             }.filter { !$0.isEmpty }
         }
-        meta.title = dcAll("title").first ?? ""
-        meta.creators = dcAll("creator")
-        meta.subjects = dcAll("subject")
-        meta.language = dcAll("language").joined(separator: ", ")
-        meta.publisher = dcAll("publisher").joined(separator: ", ")
-        if let desc = dcAll("description").first {
+        meta.title = text("title").first ?? ""
+        meta.creators = text("creator")
+        meta.subjects = text("subject")
+        meta.language = text("language").joined(separator: ", ")
+        meta.publisher = text("publisher").joined(separator: ", ")
+        if let desc = text("description").first {
             meta.description = String(HTMLText.strip(desc).prefix(1500))
         }
         return meta
@@ -68,10 +86,8 @@ struct EpubReader {
     private static func extractSample(
         zip: ZipArchive, opfRoot: XMLElement, opfPath: String, limit: Int
     ) -> String {
-        // manifest id -> href
         var manifest: [String: String] = [:]
-        let items = (try? opfRoot.nodes(forXPath: "//*[local-name()='manifest']/*[local-name()='item']")) ?? []
-        for case let item as XMLElement in items {
+        for item in elements(in: opfRoot, localName: "item") {
             if let id = item.attribute(forName: "id")?.stringValue,
                let href = item.attribute(forName: "href")?.stringValue {
                 manifest[id] = href
@@ -82,11 +98,10 @@ struct EpubReader {
         var chunks: [String] = []
         var collected = 0
 
-        let refs = (try? opfRoot.nodes(forXPath: "//*[local-name()='spine']/*[local-name()='itemref']")) ?? []
-        for case let ref as XMLElement in refs {
+        for ref in elements(in: opfRoot, localName: "itemref") {
             guard let idref = ref.attribute(forName: "idref")?.stringValue,
-                  let href = manifest[idref]?.removingPercentEncoding ?? manifest[idref]
-            else { continue }
+                  let rawHref = manifest[idref] else { continue }
+            let href = rawHref.removingPercentEncoding ?? rawHref
 
             let docPath = resolvePath(dir: opfDir, href: href)
             guard let entry = zip.entry(named: docPath),
@@ -103,7 +118,6 @@ struct EpubReader {
 
     private static func resolvePath(dir: String, href: String) -> String {
         let joined = dir.isEmpty ? href : "\(dir)/\(href)"
-        // Normalize any ./ or ../ segments.
         var stack: [String] = []
         for part in joined.split(separator: "/", omittingEmptySubsequences: true) {
             if part == "." { continue }
@@ -119,7 +133,6 @@ struct EpubReader {
         if let doc = try? XMLDocument(data: data, options: [.nodePreserveWhitespace]) {
             return doc.rootElement()
         }
-        // Retry tidily — real-world EPUBs are frequently non-conforming.
         if let doc = try? XMLDocument(data: data, options: [.documentTidyXML]) {
             return doc.rootElement()
         }

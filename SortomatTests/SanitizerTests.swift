@@ -28,10 +28,15 @@ final class SanitizerTests: XCTestCase {
 
     func testBuildsNestedDestination() throws {
         let url = try Sanitizer.destination(
-            target: target, relativePath: "Fantasy/Tolkien, J.R.R./Hobbit.epub",
+            target: target, relativePath: "Fantasy/Tolkien, John/Hobbit.epub",
             originalExtension: "epub"
         )
-        XCTAssertEqual(url.path, "/tmp/sortomat-target/Fantasy/Tolkien, J.R.R./Hobbit.epub")
+        XCTAssertEqual(url.path, "/tmp/sortomat-target/Fantasy/Tolkien, John/Hobbit.epub")
+    }
+
+    func testTrailingDotInComponentIsStripped() {
+        // Trailing dots are unsafe on macOS/Windows and are removed.
+        XCTAssertEqual(Sanitizer.sanitizeComponent("Tolkien, J.R.R."), "Tolkien, J.R.R")
     }
 
     func testForcesOriginalExtension() throws {

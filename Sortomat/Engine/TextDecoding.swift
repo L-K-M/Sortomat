@@ -14,11 +14,10 @@ enum TextDecoding {
         if data.starts(with: [0xEF, 0xBB, 0xBF]) {
             return String(decoding: data.dropFirst(3), as: UTF8.self)
         }
-        if data.starts(with: [0xFF, 0xFE]) {
-            return String(data: data, encoding: .utf16LittleEndian) ?? fallback(data)
-        }
-        if data.starts(with: [0xFE, 0xFF]) {
-            return String(data: data, encoding: .utf16BigEndian) ?? fallback(data)
+        // `.utf16` reads the BOM to pick endianness and strips it (unlike the
+        // fixed-endian variants, which would leave a U+FEFF at the start).
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data, encoding: .utf16) ?? fallback(data)
         }
 
         var candidates: [String.Encoding] = []
