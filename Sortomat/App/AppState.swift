@@ -18,8 +18,13 @@ final class AppState: ObservableObject {
     @Published var apiKeyMissing: Bool
     @Published var usage = TokenUsage()
     /// The rule currently open in the editor. It is not executed while being
-    /// edited, so a half-typed rule can't fire mid-edit.
-    @Published var editingRuleID: UUID?
+    /// edited, so a half-typed rule can't fire mid-edit. Derived from the three
+    /// inputs below rather than set directly, so it's correct however the user
+    /// leaves the editor (switch tab, switch rule, close the window).
+    @Published private(set) var editingRuleID: UUID?
+    private var settingsWindowOpen = false
+    private var rulesTabActive = false
+    private var selectedRuleID: UUID?
 
     private let pipeline = Pipeline()
     private var watchers: [FSEventsWatcher] = []
@@ -112,6 +117,34 @@ final class AppState: ObservableObject {
             }
     }
 
+    // MARK: - Editing lock
+
+    /// A rule is "being edited" only while the Settings window is open AND the
+    /// Rules tab is showing AND that rule is selected. Any of those changing
+    /// recomputes the lock; when a rule is freed we kick a scan so it runs
+    /// promptly rather than waiting for the next timer tick.
+    func setSettingsWindowOpen(_ open: Bool) {
+        settingsWindowOpen = open
+        recomputeEditing()
+    }
+
+    func setRulesTabActive(_ active: Bool) {
+        rulesTabActive = active
+        recomputeEditing()
+    }
+
+    func setSelectedRule(_ id: UUID?) {
+        selectedRuleID = id
+        recomputeEditing()
+    }
+
+    private func recomputeEditing() {
+        let newValue = (settingsWindowOpen && rulesTabActive) ? selectedRuleID : nil
+        guard newValue != editingRuleID else { return }
+        editingRuleID = newValue
+        requestScan()
+    }
+
     // MARK: - Scanning
 
     private func startTimer() {
@@ -145,8 +178,10 @@ final class AppState: ObservableObject {
             if config.providerRequiresKey && apiKey.isEmpty { return }
 
             let snapshot = config
-            let editing = editingRuleID
-            for rule in snapshot.rules where rule.enabled && rule.id != editing {
+            for rule in snapshot.rules where rule.enabled {
+                // Re-read per rule so selecting a rule to edit mid-pass takes
+                // effect immediately (rather than one stale execution).
+                if rule.id == editingRuleID { continue }
                 let result = await pipeline.scan(rule: rule, config: snapshot, apiKey: apiKey)
                 ingest(result)
             }

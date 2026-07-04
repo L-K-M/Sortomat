@@ -13,9 +13,9 @@ struct RulesTab: View {
         }
         .onAppear {
             if selection == nil { selection = state.config.rules.first?.id }
-            state.editingRuleID = selection
+            state.setSelectedRule(selection)
         }
-        .onChange(of: selection) { newValue in state.editingRuleID = newValue }
+        .onChange(of: selection) { newValue in state.setSelectedRule(newValue) }
     }
 
     private var sidebar: some View {

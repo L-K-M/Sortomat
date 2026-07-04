@@ -33,12 +33,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func present(_ window: NSWindow) {
         ActivationPolicy.showRegular()
         window.makeKeyAndOrderFront(nil)
+        state.setSettingsWindowOpen(true)
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Editing is over — let the rule run again and scan promptly.
-        state.editingRuleID = nil
-        state.requestScan()
+        // Editing is over — let the edited rule run again (recompute + rescan).
+        state.setSettingsWindowOpen(false)
         ActivationPolicy.revertToAccessoryIfNoOrdinaryWindows(excluding: window)
     }
 }
