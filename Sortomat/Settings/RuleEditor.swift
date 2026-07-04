@@ -3,7 +3,11 @@ import SwiftUI
 struct RuleEditor: View {
     @EnvironmentObject private var state: AppState
     @Binding var rule: Rule
+    // Raw edit buffers: editing these directly (rather than a computed binding
+    // that reparses on every keystroke) is what lets Return actually insert a
+    // newline in the taxonomy field and keeps the extensions text stable.
     @State private var extensionsText = ""
+    @State private var taxonomyText = ""
 
     var body: some View {
         Form {
@@ -49,10 +53,16 @@ struct RuleEditor: View {
             }
 
             Section(L10n.t("rule.taxonomy.section")) {
-                TextEditor(text: taxonomyBinding)
+                TextEditor(text: $taxonomyText)
                     .font(.callout)
                     .frame(minHeight: 80)
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+                    .onChange(of: taxonomyText) { newValue in
+                        rule.taxonomy = newValue
+                            .split(whereSeparator: \.isNewline)
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                    }
                 Text(L10n.t("rule.taxonomy.help"))
                     .font(.caption).foregroundStyle(.secondary)
                 TextField(L10n.t("rule.quarantine"), text: $rule.quarantineSubfolder)
@@ -67,11 +77,19 @@ struct RuleEditor: View {
             Section(L10n.t("rule.preRules.section")) {
                 Text(L10n.t("rule.preRules.help"))
                     .font(.caption).foregroundStyle(.secondary)
-                ForEach($rule.preRules) { $preRule in
-                    PreRuleRow(preRule: $preRule) {
-                        rule.preRules.removeAll { $0.id == preRule.id }
+                ForEach(rule.preRules) { preRule in
+                    if let index = rule.preRules.firstIndex(where: { $0.id == preRule.id }) {
+                        PreRuleCard(
+                            preRule: $rule.preRules[index],
+                            position: index + 1,
+                            canMoveUp: index > 0,
+                            canMoveDown: index < rule.preRules.count - 1,
+                            onMoveUp: { move(preRule.id, by: -1) },
+                            onMoveDown: { move(preRule.id, by: 1) },
+                            onDelete: { rule.preRules.removeAll { $0.id == preRule.id } }
+                        )
+                        .padding(.vertical, 4)
                     }
-                    Divider()
                 }
                 Button {
                     rule.preRules.append(PreRule())
@@ -83,67 +101,154 @@ struct RuleEditor: View {
         }
         .formStyle(.grouped)
         .padding()
-        .onAppear { extensionsText = rule.extensions.joined(separator: ", ") }
+        .onAppear {
+            extensionsText = rule.extensions.joined(separator: ", ")
+            taxonomyText = rule.taxonomy.joined(separator: "\n")
+        }
         .onChange(of: rule) { _ in state.persistAndApply() }
     }
 
-    private var taxonomyBinding: Binding<String> {
-        Binding(
-            get: { rule.taxonomy.joined(separator: "\n") },
-            set: { newValue in
-                rule.taxonomy = newValue
-                    .split(whereSeparator: \.isNewline)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-            }
-        )
+    private func move(_ id: UUID, by offset: Int) {
+        guard let i = rule.preRules.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + offset
+        guard rule.preRules.indices.contains(j) else { return }
+        rule.preRules.swapAt(i, j)
     }
 }
 
-struct PreRuleRow: View {
+/// One deterministic pre-rule, presented as a roomy card: a numbered header with
+/// reorder/delete controls, aligned Match / Pattern / Action rows with inline
+/// help, and a plain-language summary of what it does.
+struct PreRuleCard: View {
     @Binding var preRule: PreRule
+    let position: Int
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                TextField(L10n.t("rule.preRule.match"), text: $preRule.name, prompt: Text("Name"))
-                    .frame(maxWidth: 140)
-                Picker("", selection: $preRule.match) {
-                    Text(L10n.t("match.glob")).tag(PreRule.Match.glob)
-                    Text(L10n.t("match.regex")).tag(PreRule.Match.regex)
-                    Text(L10n.t("match.kind")).tag(PreRule.Match.kind)
-                    Text(L10n.t("match.olderThanDays")).tag(PreRule.Match.olderThanDays)
-                    Text(L10n.t("match.newerThanDays")).tag(PreRule.Match.newerThanDays)
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 10) {
+                GridRow {
+                    label(L10n.t("rule.preRule.match"))
+                    Picker("", selection: $preRule.match) {
+                        Text(L10n.t("match.glob")).tag(PreRule.Match.glob)
+                        Text(L10n.t("match.regex")).tag(PreRule.Match.regex)
+                        Text(L10n.t("match.kind")).tag(PreRule.Match.kind)
+                        Text(L10n.t("match.olderThanDays")).tag(PreRule.Match.olderThanDays)
+                        Text(L10n.t("match.newerThanDays")).tag(PreRule.Match.newerThanDays)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .frame(maxWidth: 150)
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
+                GridRow {
+                    label(L10n.t("rule.preRule.pattern"))
+                    VStack(alignment: .leading, spacing: 3) {
+                        TextField("", text: $preRule.pattern, prompt: Text(patternPrompt))
+                        Text(patternHelp).font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
-                .buttonStyle(.borderless)
+                GridRow {
+                    label(L10n.t("rule.preRule.action"))
+                    Picker("", selection: $preRule.action) {
+                        Text(L10n.t("action.route")).tag(PreRule.Action.route)
+                        Text(L10n.t("action.skip")).tag(PreRule.Action.skip)
+                        Text(L10n.t("action.useLLM")).tag(PreRule.Action.useLLM)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                if preRule.action == .route {
+                    GridRow {
+                        label(L10n.t("rule.preRule.route"))
+                        VStack(alignment: .leading, spacing: 3) {
+                            TextField("", text: $preRule.routePath,
+                                      prompt: Text("Photos/{year}-{month}"))
+                            Text(L10n.t("preRule.route.help")).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
-            TextField(L10n.t("rule.preRule.pattern"), text: $preRule.pattern,
-                      prompt: Text(patternPrompt))
-            Picker(L10n.t("rule.preRule.action"), selection: $preRule.action) {
-                Text(L10n.t("action.route")).tag(PreRule.Action.route)
-                Text(L10n.t("action.skip")).tag(PreRule.Action.skip)
-                Text(L10n.t("action.useLLM")).tag(PreRule.Action.useLLM)
-            }
-            if preRule.action == .route {
-                TextField(L10n.t("rule.preRule.route"), text: $preRule.routePath,
-                          prompt: Text("Folder/{year}-{month}"))
-            }
+            summary
         }
-        .padding(.vertical, 2)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor).opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("\(position)")
+                .font(.caption.bold().monospacedDigit())
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Color.accentColor))
+            TextField("", text: $preRule.name, prompt: Text(L10n.t("preRule.name.prompt")))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 220)
+            Spacer()
+            Button(action: onMoveUp) { Image(systemName: "chevron.up") }
+                .disabled(!canMoveUp).help(L10n.t("preRule.moveUp"))
+            Button(action: onMoveDown) { Image(systemName: "chevron.down") }
+                .disabled(!canMoveDown).help(L10n.t("preRule.moveDown"))
+            Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
+                .help(L10n.t("preRule.delete"))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private var summary: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "arrow.turn.down.right").foregroundStyle(.secondary)
+            Text(summaryText).font(.caption).italic().foregroundStyle(.secondary)
+        }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .gridColumnAlignment(.trailing)
+            .foregroundStyle(.secondary)
     }
 
     private var patternPrompt: String {
         switch preRule.match {
         case .glob: return "IMG_*.jpg"
         case .regex: return "^Invoice-\\d+"
-        case .kind: return "image, pdf, ebook, video…"
+        case .kind: return "image, pdf, ebook…"
         case .olderThanDays, .newerThanDays: return "30"
         }
+    }
+
+    private var patternHelp: String {
+        switch preRule.match {
+        case .glob: return L10n.t("preRule.help.glob")
+        case .regex: return L10n.t("preRule.help.regex")
+        case .kind: return L10n.t("preRule.help.kind")
+        case .olderThanDays, .newerThanDays: return L10n.t("preRule.help.days")
+        }
+    }
+
+    private var summaryText: String {
+        let pattern = preRule.pattern.isEmpty ? L10n.t("preRule.sum.placeholder") : preRule.pattern
+        let condition: String
+        switch preRule.match {
+        case .glob: condition = L10n.t("preRule.sum.glob", pattern)
+        case .regex: condition = L10n.t("preRule.sum.regex", pattern)
+        case .kind: condition = L10n.t("preRule.sum.kind", pattern)
+        case .olderThanDays: condition = L10n.t("preRule.sum.olderThanDays", pattern)
+        case .newerThanDays: condition = L10n.t("preRule.sum.newerThanDays", pattern)
+        }
+        let action: String
+        switch preRule.action {
+        case .route:
+            let route = preRule.routePath.isEmpty ? L10n.t("preRule.sum.placeholder") : preRule.routePath
+            action = L10n.t("preRule.sum.route", route)
+        case .skip: action = L10n.t("preRule.sum.skip")
+        case .useLLM: action = L10n.t("preRule.sum.useLLM")
+        }
+        return L10n.t("preRule.sum.template", condition, action)
     }
 }

@@ -17,6 +17,9 @@ final class AppState: ObservableObject {
     @Published var lastScan: Date?
     @Published var apiKeyMissing: Bool
     @Published var usage = TokenUsage()
+    /// The rule currently open in the editor. It is not executed while being
+    /// edited, so a half-typed rule can't fire mid-edit.
+    @Published var editingRuleID: UUID?
 
     private let pipeline = Pipeline()
     private var watchers: [FSEventsWatcher] = []
@@ -142,7 +145,8 @@ final class AppState: ObservableObject {
             if config.providerRequiresKey && apiKey.isEmpty { return }
 
             let snapshot = config
-            for rule in snapshot.rules where rule.enabled {
+            let editing = editingRuleID
+            for rule in snapshot.rules where rule.enabled && rule.id != editing {
                 let result = await pipeline.scan(rule: rule, config: snapshot, apiKey: apiKey)
                 ingest(result)
             }

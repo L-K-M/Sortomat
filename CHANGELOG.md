@@ -3,6 +3,22 @@
 All notable changes to Sortomat are documented here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow the git tags.
 
+## [Unreleased]
+
+UX fixes from first hands-on use:
+- Installed a real **Edit menu** so ⌘X/⌘C/⌘V/⌘A/⌘Z work in text fields (a
+  menu-bar agent has no menu bar of its own by default).
+- The **menu-bar icon is now the funnel** from the app icon (a template image
+  that tints for light/dark menu bars).
+- The **taxonomy field accepts Return** for new lines (it no longer re-parses and
+  strips the in-progress newline on every keystroke). Same fix stabilizes the
+  extensions field when switching between rules.
+- **A rule no longer executes while it's open in the editor** — it resumes when
+  you switch away or close Settings.
+- **Redesigned the deterministic pre-rules UI**: roomy numbered cards with
+  reorder (first match wins), aligned Match/Pattern/Action rows, inline help, and
+  a plain-language summary of what each pre-rule does.
+
 ## [1.0.0] — first full release
 
 Rebuilds the menu-bar prototype into a complete, safe-by-default app.

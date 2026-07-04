@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Don't boot the full app under XCTest — the test host stays quiet.
         guard !Self.isRunningTests else { return }
 
+        // A real Edit menu so ⌘X/⌘C/⌘V/⌘A/⌘Z work in text fields.
+        NSApp.mainMenu = MainMenu.build()
+
         state = AppState()
         updateChecker = UpdateChecker(configuration: .init(
             owner: AppInfo.repoOwner,

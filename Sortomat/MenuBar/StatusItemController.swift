@@ -39,10 +39,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func updateIcon() {
         guard let button = statusItem.button else { return }
-        let symbol = state.paused ? "tray" : "tray.full"
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Sortomat")
-        button.image?.isTemplate = true
+        button.image = Self.funnelImage()
         button.appearsDisabled = state.paused
+    }
+
+    /// The same "sorting funnel" as the app icon, drawn as a template image so it
+    /// tints correctly for light/dark menu bars.
+    static func funnelImage(width: CGFloat = 18) -> NSImage {
+        let size = NSSize(width: width, height: width)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let w = rect.width, h = rect.height
+            // y measured from the top (converted to AppKit's bottom-left origin).
+            func p(_ x: CGFloat, _ topY: CGFloat) -> NSPoint {
+                NSPoint(x: rect.minX + x * w, y: rect.minY + (1 - topY) * h)
+            }
+            let path = NSBezierPath()
+            path.move(to: p(0.10, 0.18))
+            path.line(to: p(0.90, 0.18))
+            path.line(to: p(0.60, 0.52))
+            path.line(to: p(0.60, 0.82))
+            path.line(to: p(0.40, 0.82))
+            path.line(to: p(0.40, 0.52))
+            path.close()
+            NSColor.black.setFill()
+            path.fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     // MARK: - NSMenuDelegate

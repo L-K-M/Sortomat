@@ -36,6 +36,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Editing is over — let the rule run again and scan promptly.
+        state.editingRuleID = nil
+        state.requestScan()
         ActivationPolicy.revertToAccessoryIfNoOrdinaryWindows(excluding: window)
     }
 }

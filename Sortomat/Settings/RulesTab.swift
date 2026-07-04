@@ -11,7 +11,11 @@ struct RulesTab: View {
             editor
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { if selection == nil { selection = state.config.rules.first?.id } }
+        .onAppear {
+            if selection == nil { selection = state.config.rules.first?.id }
+            state.editingRuleID = selection
+        }
+        .onChange(of: selection) { newValue in state.editingRuleID = newValue }
     }
 
     private var sidebar: some View {
@@ -68,6 +72,9 @@ struct RulesTab: View {
     private var editor: some View {
         if let index = state.config.rules.firstIndex(where: { $0.id == selection }) {
             RuleEditor(rule: $state.config.rules[index])
+                // A fresh editor per rule so its @State edit buffers (extensions,
+                // taxonomy) reset correctly when switching rules.
+                .id(state.config.rules[index].id)
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "tray.and.arrow.down")
