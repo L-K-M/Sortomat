@@ -1,3 +1,65 @@
-.build/
-build/
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+
+# Xcode — build artifacts
+build/
+dist/
+DerivedData/
+*.o
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+TestResults.xcresult
+
+# Xcode — user-specific
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+
+# Keep shared schemes, ignore user schemes
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Signing material — never commit
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+*.p8
+
+# Python cache (icon generator)
+__pycache__/
+*.pyc
+
+# Editor / tooling metadata
+.idea/
+.codenomad/
+.vscode/
+
+# Misc
+*.log
+*.swp
+*~

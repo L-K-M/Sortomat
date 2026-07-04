@@ -1,0 +1,337 @@
+import Foundation
+
+/// A tiny in-code localization table. English is the base; German overrides it
+/// when the user's preferred language is German. An in-code table (rather than
+/// `.strings`/String-catalog resources) keeps the executable target free of
+/// resource-bundling quirks while still shipping a genuinely bilingual UI.
+public enum L10n {
+    /// Overridden in tests to force a language; otherwise follows the system.
+    public static var forcedLanguage: String?
+
+    public static var language: String {
+        if let forced = forcedLanguage { return forced }
+        let pref = Locale.preferredLanguages.first ?? "en"
+        return pref.hasPrefix("de") ? "de" : "en"
+    }
+
+    /// Localized string for `key`. Falls back to the English table, then to the
+    /// key itself (so a missing key is visible but never crashes).
+    public static func t(_ key: String) -> String {
+        if language == "de", let s = german[key] { return s }
+        return english[key] ?? german[key] ?? key
+    }
+
+    /// Localized format string with positional `%@`/`%d`-style arguments.
+    public static func t(_ key: String, _ args: CVarArg...) -> String {
+        String(format: t(key), arguments: args)
+    }
+
+    // MARK: - English (base)
+
+    static let english: [String: String] = [
+        // App / menubar
+        "app.status.active": "Active — %d rule(s)",
+        "app.status.paused": "Paused",
+        "app.status.noKey": "⚠️ No API key set",
+        "app.lastScan": "Last check: %@",
+        "menu.resume": "Resume",
+        "menu.pause": "Pause",
+        "menu.scanNow": "Check now",
+        "menu.previewNow": "Preview changes…",
+        "menu.noActivity": "No activity yet",
+        "menu.recentActivity": "Recent activity",
+        "menu.openLog": "Open log",
+        "menu.settings": "Rules & Settings…",
+        "menu.quit": "Quit",
+        "menu.spend": "Estimated spend: %@",
+        "menu.pendingReview": "%d change(s) awaiting review…",
+
+        // Settings tabs
+        "settings.window.title": "Sortomat — Rules",
+        "tab.rules": "Rules",
+        "tab.general": "Settings",
+        "tab.about": "About",
+
+        // Rules list
+        "rules.empty.title": "Select a rule, or add one with +",
+        "rules.add": "Add rule",
+        "rules.addFromTemplate": "Add from template…",
+        "rules.remove": "Remove rule",
+        "rules.duplicate": "Duplicate",
+
+        // Rule editor
+        "rule.name": "Name:",
+        "rule.enabled": "Rule enabled",
+        "rule.dryRun": "Preview only (don't move files)",
+        "rule.priority": "Priority:",
+        "rule.watchFolder": "Watched folder:",
+        "rule.targetFolder": "Target folder:",
+        "rule.recursive": "Include subfolders",
+        "rule.extensions": "File extensions:",
+        "rule.extensions.prompt": "e.g. epub, pdf — empty = all files",
+        "rule.copy": "Copy instead of move",
+        "rule.privacy": "Privacy:",
+        "rule.privacy.full": "Send name, metadata & content excerpt",
+        "rule.privacy.metadataOnly": "Send name & metadata only (contents stay local)",
+        "rule.prompt.section": "Sorting instruction (prompt)",
+        "rule.prompt.help": "Describe which files are affected and what the target structure should look like, e.g. «{Genre}/{Last, First}/{Title}.epub».",
+        "rule.taxonomy.section": "Allowed top-level folders (taxonomy)",
+        "rule.taxonomy.help": "One per line. If set, the model may only file into these top folders; anything else goes to the quarantine folder.",
+        "rule.taxonomy.prompt": "Leave empty to let the model choose freely",
+        "rule.quarantine": "Quarantine subfolder:",
+        "rule.confidence": "Confidence threshold: %d%%",
+        "rule.confidence.help": "Classifications below this confidence are routed to the quarantine folder instead of being filed. 0 disables the check.",
+        "rule.preRules.section": "Deterministic pre-rules",
+        "rule.preRules.help": "Checked in order before the model. First match wins. Free and predictable — the model only handles what falls through.",
+        "rule.preRules.add": "Add pre-rule",
+        "rule.preRule.match": "Match",
+        "rule.preRule.pattern": "Pattern",
+        "rule.preRule.action": "Action",
+        "rule.preRule.route": "Route to",
+
+        "match.glob": "Name glob",
+        "match.regex": "Name regex",
+        "match.kind": "Kind",
+        "match.olderThanDays": "Older than (days)",
+        "match.newerThanDays": "Newer than (days)",
+        "action.route": "Route to folder",
+        "action.skip": "Skip",
+        "action.useLLM": "Ask the model",
+
+        // General tab
+        "general.provider.section": "Model provider",
+        "general.apiKey": "API key:",
+        "general.apiKey.save": "Save",
+        "general.apiKey.saved": "Saved to the Keychain.",
+        "general.apiKey.placeholder.missing": "No key set yet",
+        "general.apiKey.placeholder.set": "••••••••  (saved)",
+        "general.model": "Model:",
+        "general.apiBase": "API base URL:",
+        "general.requiresKey": "This provider needs an API key",
+        "general.localHint": "For a local model (Ollama, LM Studio) point the base URL at it and turn off «needs an API key», e.g. http://localhost:11434.",
+        "general.pricing.section": "Cost estimation",
+        "general.pricing.input": "Input $/1M tokens:",
+        "general.pricing.output": "Output $/1M tokens:",
+        "general.watch.section": "Watching",
+        "general.interval": "Check interval: %d s",
+        "general.interval.help": "Folders are also checked immediately when something changes. The interval is only the safety net.",
+        "general.concurrency": "Max concurrent classifications: %d",
+        "general.budget": "Max model calls per check (0 = unlimited): %d",
+        "general.notifications": "Show a notification for each filed / failed file",
+        "general.privacyNote": "Note: a file's name, metadata and (unless a rule is metadata-only) a text excerpt are sent to the model to classify it.",
+
+        // Preview / dry-run
+        "preview.title": "Preview changes",
+        "preview.empty": "Nothing to file right now.",
+        "preview.column.file": "File",
+        "preview.column.action": "Planned action",
+        "preview.column.destination": "Destination",
+        "preview.apply": "Apply selected",
+        "preview.applyAll": "Apply all",
+        "preview.refresh": "Refresh",
+        "preview.cancel": "Close",
+        "preview.applied": "Applied %d change(s).",
+        "preview.plan.move": "Move",
+        "preview.plan.copy": "Copy",
+        "preview.plan.skip": "Skip",
+        "preview.plan.quarantine": "Quarantine",
+
+        // Journal / undo
+        "journal.title": "History",
+        "journal.empty": "No moves recorded yet.",
+        "journal.undo": "Undo",
+        "journal.undoAll": "Undo last check",
+        "journal.undone": "Undone: %@",
+        "journal.undoFailed": "Couldn't undo %@: %@",
+
+        // Activity messages (logged)
+        "activity.skipped": "[%@] Skipped: %@ — %@",
+        "activity.moved": "[%@] %@ → %@",
+        "activity.copied": "[%@] Copied %@ → %@",
+        "activity.duplicate": "[%@] Duplicate: %@ already exists as %@",
+        "activity.quarantined": "[%@] Quarantined: %@ → %@ (%@)",
+        "activity.preRuleSkip": "[%@] Pre-rule skip: %@ (%@)",
+        "activity.preRuleRoute": "[%@] %@ → %@ (pre-rule «%@»)",
+        "activity.error": "[%@] ERROR on %@: %@",
+        "activity.missingWatch": "[%@] Watched folder missing: %@",
+        "activity.wouldMove": "[%@] Would move %@ → %@",
+        "activity.wouldSkip": "[%@] Would skip %@ — %@",
+        "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
+
+        // Errors
+        "error.unsafePath": "Unsafe destination path: %@",
+        "error.tooManyCollisions": "Too many name collisions: %@",
+        "error.badApiBase": "Invalid API base URL",
+        "error.noKey": "No API key (Keychain or MISTRAL_API_KEY / SORTOMAT_API_KEY).",
+        "error.http": "Model API HTTP %d: %@",
+        "error.badResponse": "Unexpected API response: %@",
+        "error.missingPath": "relative_path missing for action=move",
+        "error.sourceVanished": "Source file vanished before it could be filed",
+        "error.verifyFailed": "Cross-volume copy could not be verified; original kept",
+
+        // Templates
+        "template.ebooks.title": "E-books",
+        "template.ebooks.summary": "Sort EPUBs into Genre / Author / Title.",
+        "template.screenshots.title": "Screenshots",
+        "template.screenshots.summary": "Route screenshots to the matching project folder.",
+        "template.invoices.title": "Invoices & receipts",
+        "template.invoices.summary": "File PDFs under Year / Sender / Date Subject.",
+        "template.blank.title": "Blank rule",
+        "template.blank.summary": "Start from scratch.",
+
+        // About
+        "about.tagline": "Hazel, but the rule is a sentence.",
+        "about.version": "Version %@",
+        "about.privacy": "Privacy",
+        "about.help": "Help",
+    ]
+
+    // MARK: - German
+
+    static let german: [String: String] = [
+        "app.status.active": "Aktiv – %d Regel(n)",
+        "app.status.paused": "Pausiert",
+        "app.status.noKey": "⚠️ Kein API-Key hinterlegt",
+        "app.lastScan": "Letzte Prüfung: %@",
+        "menu.resume": "Fortsetzen",
+        "menu.pause": "Pausieren",
+        "menu.scanNow": "Jetzt prüfen",
+        "menu.previewNow": "Änderungen vorschauen…",
+        "menu.noActivity": "Noch keine Aktivität",
+        "menu.recentActivity": "Letzte Aktivität",
+        "menu.openLog": "Protokoll öffnen",
+        "menu.settings": "Regeln & Einstellungen…",
+        "menu.quit": "Beenden",
+        "menu.spend": "Geschätzte Kosten: %@",
+        "menu.pendingReview": "%d Änderung(en) zur Prüfung…",
+
+        "settings.window.title": "Sortomat – Regeln",
+        "tab.rules": "Regeln",
+        "tab.general": "Einstellungen",
+        "tab.about": "Über",
+
+        "rules.empty.title": "Regel auswählen oder mit + anlegen",
+        "rules.add": "Regel hinzufügen",
+        "rules.addFromTemplate": "Aus Vorlage hinzufügen…",
+        "rules.remove": "Regel entfernen",
+        "rules.duplicate": "Duplizieren",
+
+        "rule.name": "Name:",
+        "rule.enabled": "Regel aktiv",
+        "rule.dryRun": "Nur Vorschau (keine Dateien bewegen)",
+        "rule.priority": "Priorität:",
+        "rule.watchFolder": "Überwachter Ordner:",
+        "rule.targetFolder": "Zielordner:",
+        "rule.recursive": "Unterordner einbeziehen",
+        "rule.extensions": "Dateiendungen:",
+        "rule.extensions.prompt": "z.B. epub, pdf – leer = alle Dateien",
+        "rule.copy": "Kopieren statt verschieben",
+        "rule.privacy": "Datenschutz:",
+        "rule.privacy.full": "Name, Metadaten & Textauszug senden",
+        "rule.privacy.metadataOnly": "Nur Name & Metadaten senden (Inhalt bleibt lokal)",
+        "rule.prompt.section": "Sortier-Anweisung (Prompt)",
+        "rule.prompt.help": "Beschreibe, welche Dateien betroffen sind und wie die Zielstruktur aussehen soll, z.B. «{Genre}/{Nachname, Vorname}/{Titel}.epub».",
+        "rule.taxonomy.section": "Erlaubte oberste Ordner (Taxonomie)",
+        "rule.taxonomy.help": "Einer pro Zeile. Wenn gesetzt, darf das Modell nur in diese obersten Ordner einsortieren; alles andere landet im Quarantäne-Ordner.",
+        "rule.taxonomy.prompt": "Leer lassen, damit das Modell frei wählt",
+        "rule.quarantine": "Quarantäne-Unterordner:",
+        "rule.confidence": "Konfidenz-Schwelle: %d%%",
+        "rule.confidence.help": "Klassifikationen unter dieser Konfidenz landen im Quarantäne-Ordner statt einsortiert zu werden. 0 deaktiviert die Prüfung.",
+        "rule.preRules.section": "Deterministische Vorregeln",
+        "rule.preRules.help": "Werden vor dem Modell der Reihe nach geprüft. Erste Übereinstimmung gewinnt. Kostenlos und vorhersehbar – das Modell übernimmt nur, was durchfällt.",
+        "rule.preRules.add": "Vorregel hinzufügen",
+        "rule.preRule.match": "Prüfung",
+        "rule.preRule.pattern": "Muster",
+        "rule.preRule.action": "Aktion",
+        "rule.preRule.route": "Ablegen in",
+
+        "match.glob": "Name-Glob",
+        "match.regex": "Name-Regex",
+        "match.kind": "Art",
+        "match.olderThanDays": "Älter als (Tage)",
+        "match.newerThanDays": "Neuer als (Tage)",
+        "action.route": "In Ordner ablegen",
+        "action.skip": "Überspringen",
+        "action.useLLM": "Modell fragen",
+
+        "general.provider.section": "Modell-Anbieter",
+        "general.apiKey": "API-Key:",
+        "general.apiKey.save": "Sichern",
+        "general.apiKey.saved": "Im Schlüsselbund gespeichert.",
+        "general.apiKey.placeholder.missing": "Noch kein Key hinterlegt",
+        "general.apiKey.placeholder.set": "••••••••  (gespeichert)",
+        "general.model": "Modell:",
+        "general.apiBase": "API-Basis-URL:",
+        "general.requiresKey": "Dieser Anbieter benötigt einen API-Key",
+        "general.localHint": "Für ein lokales Modell (Ollama, LM Studio) die Basis-URL darauf zeigen lassen und «benötigt API-Key» ausschalten, z.B. http://localhost:11434.",
+        "general.pricing.section": "Kostenschätzung",
+        "general.pricing.input": "Eingabe $/1M Tokens:",
+        "general.pricing.output": "Ausgabe $/1M Tokens:",
+        "general.watch.section": "Überwachung",
+        "general.interval": "Prüfintervall: %d s",
+        "general.interval.help": "Ordner werden zusätzlich sofort geprüft, wenn sich etwas ändert. Das Intervall ist nur das Sicherheitsnetz.",
+        "general.concurrency": "Max. gleichzeitige Klassifikationen: %d",
+        "general.budget": "Max. Modell-Aufrufe pro Prüfung (0 = unbegrenzt): %d",
+        "general.notifications": "Mitteilung für jede einsortierte / fehlgeschlagene Datei",
+        "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet.",
+
+        "preview.title": "Änderungen vorschauen",
+        "preview.empty": "Momentan nichts einzusortieren.",
+        "preview.column.file": "Datei",
+        "preview.column.action": "Geplante Aktion",
+        "preview.column.destination": "Ziel",
+        "preview.apply": "Ausgewählte anwenden",
+        "preview.applyAll": "Alle anwenden",
+        "preview.refresh": "Aktualisieren",
+        "preview.cancel": "Schliessen",
+        "preview.applied": "%d Änderung(en) angewendet.",
+        "preview.plan.move": "Verschieben",
+        "preview.plan.copy": "Kopieren",
+        "preview.plan.skip": "Überspringen",
+        "preview.plan.quarantine": "Quarantäne",
+
+        "journal.title": "Verlauf",
+        "journal.empty": "Noch keine Bewegungen aufgezeichnet.",
+        "journal.undo": "Rückgängig",
+        "journal.undoAll": "Letzte Prüfung rückgängig",
+        "journal.undone": "Rückgängig gemacht: %@",
+        "journal.undoFailed": "«%@» konnte nicht rückgängig gemacht werden: %@",
+
+        "activity.skipped": "[%@] Übersprungen: %@ – %@",
+        "activity.moved": "[%@] %@ → %@",
+        "activity.copied": "[%@] Kopiert %@ → %@",
+        "activity.duplicate": "[%@] Duplikat: %@ existiert bereits als %@",
+        "activity.quarantined": "[%@] Quarantäne: %@ → %@ (%@)",
+        "activity.preRuleSkip": "[%@] Vorregel-Skip: %@ (%@)",
+        "activity.preRuleRoute": "[%@] %@ → %@ (Vorregel «%@»)",
+        "activity.error": "[%@] FEHLER bei %@: %@",
+        "activity.missingWatch": "[%@] Überwachter Ordner fehlt: %@",
+        "activity.wouldMove": "[%@] Würde verschieben %@ → %@",
+        "activity.wouldSkip": "[%@] Würde überspringen %@ – %@",
+        "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
+
+        "error.unsafePath": "Unsicherer Zielpfad: %@",
+        "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",
+        "error.badApiBase": "Ungültige API-Basis-URL",
+        "error.noKey": "Kein API-Key (Schlüsselbund oder MISTRAL_API_KEY / SORTOMAT_API_KEY).",
+        "error.http": "Modell-API HTTP %d: %@",
+        "error.badResponse": "Unerwartete API-Antwort: %@",
+        "error.missingPath": "relative_path fehlt bei action=move",
+        "error.sourceVanished": "Quelldatei verschwand, bevor sie einsortiert werden konnte",
+        "error.verifyFailed": "Volumen-übergreifende Kopie nicht verifizierbar; Original behalten",
+
+        "template.ebooks.title": "E-Books",
+        "template.ebooks.summary": "EPUBs nach Genre / Autor / Titel sortieren.",
+        "template.screenshots.title": "Screenshots",
+        "template.screenshots.summary": "Screenshots dem passenden Projektordner zuordnen.",
+        "template.invoices.title": "Rechnungen & Belege",
+        "template.invoices.summary": "PDFs nach Jahr / Absender / Datum Betreff ablegen.",
+        "template.blank.title": "Leere Regel",
+        "template.blank.summary": "Von Grund auf beginnen.",
+
+        "about.tagline": "Hazel, aber die Regel ist ein Satz.",
+        "about.version": "Version %@",
+        "about.privacy": "Datenschutz",
+        "about.help": "Hilfe",
+    ]
+}

@@ -178,6 +178,25 @@ Path-traversal guard ordering, `O_EVTONLY` descriptor "leak", XML entity-expansi
 
 ---
 
+## Status — this build
+
+The prototype has been rebuilt into a full app. The confirmed data-loss and
+reliability bugs are fixed, the "trust trio" and most of the robustness and
+differentiation roadmap are implemented, and the whole thing is an Xcode project
+with a CI/release pipeline and a real test suite — matching the conventions of
+the sibling menu-bar apps (Zap / MacDring / Gans).
+
+| Area | State |
+|---|---|
+| **Phase 1 — correctness & safety** | ✅ per-rule ledger keys (no cross-rule poisoning); content-hash dedup (not size-only); in-flight reservation + vanished-source guard; verified cross-volume fallback; in-process EPUB/zip reader (no `unzip` subprocess); FSEvents watcher that survives unmount/rename. |
+| **Phase 2 — trust trio** | ✅ dry-run/preview window (approve to apply); move journal + one-click undo; persistent skip/dedup ledger across relaunches. |
+| **Phase 3 — robustness & scale** | ✅ FSEvents (recursive-capable); concurrency cap + per-scan budget; encoding detection (cp1252/UTF-16); rule priority; failure notifications. |
+| **Phase 4 — productization** | ✅ CI (build+test) + tag-driven release with **automatic Developer-ID signing + notarization when secrets exist**, `.zip` + `.dmg`; automated test target; EN + DE localization; onboarding rule templates; cost/usage display; app icon. |
+| **Phase 5 — differentiation** | ✅ deterministic pre-rules (glob/regex/kind/age) with LLM fallback; enumerated **taxonomies** per rule; OpenAI-compatible client → **local-model** mode; **metadata-only** privacy mode; confidence → **quarantine**. |
+
+Still open / future: mock-server end-to-end tests in CI, App Sandbox
+(distribution is Developer-ID today), and richer onboarding.
+
 ## Roadmap
 
 Phases are ordered by trust impact. Each is independently shippable.
@@ -253,13 +272,20 @@ Turn it from "runs" into "trustworthy".
 ## Repository layout
 
 ```
-sort-epubs/
-├── PLAN.md                 ← this file
-├── sort_epubs.py           ← original batch EPUB sorter (Python, working)
-├── README.md               ← script usage
-└── Sortomat/               ← macOS menubar app (Swift prototype)
-    ├── Package.swift
-    ├── build.sh            ← build + ad-hoc sign Sortomat.app
-    ├── README.md
-    └── Sources/Sortomat/   ← app sources (see table above)
+Sortomat/
+├── PLAN.md                     ← this file
+├── README.md                   ← user + build docs
+├── AGENTS.md                   ← architecture / contributor guide
+├── CICD.md, .github/CICD.md    ← release process
+├── LICENSE                     ← The Unlicense
+├── sort_epubs.py               ← original batch EPUB sorter (Python, working)
+├── Sortomat.xcodeproj/         ← Xcode project (file-system-synchronized groups)
+├── .github/workflows/          ← ci.yml, release.yml
+├── scripts/                    ← build.sh, release.sh (stubs over lkm-build/lkm-release)
+├── Tools/                      ← generate_icon.py, GenerateAppIcon.swift
+├── Sortomat/                   ← app sources
+│   ├── App/  Model/  Engine/  Watch/  MenuBar/
+│   ├── Settings/  Preview/  Updates/  Common/
+│   └── Resources/Assets.xcassets/
+└── SortomatTests/              ← XCTest suite (pure logic)
 ```
