@@ -84,4 +84,40 @@ final class MoverTests: XCTestCase {
             XCTAssertEqual(error as? MoveError, .sourceVanished)
         }
     }
+
+    // MARK: - Cross-volume fallback
+
+    func testCopyVerifyDeleteMovesContentAndRemovesSource() throws {
+        let source = try makeFile("in.txt", "payload")
+        let dest = root.appendingPathComponent("out/there.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Mover.copyVerifyDelete(source: source, to: dest)
+        XCTAssertEqual(try String(contentsOf: dest, encoding: .utf8), "payload")
+        XCTAssertFalse(fm.fileExists(atPath: source.path))
+    }
+
+    func testUnhashableFileYieldsNilDigestNotAMatch() {
+        // The fail-closed guard in copyVerifyDelete relies on digest returning
+        // nil (never a colliding value) for an unreadable file.
+        XCTAssertNil(ContentHash.digest(of: root.appendingPathComponent("nope.bin")))
+    }
+
+    func testFullContentDigestSeesDifferencesBeyondTheDedupPrefix() throws {
+        // Two files identical for the first 4 MiB and equal in size, differing
+        // only afterwards: the bounded dedup digest can't tell them apart, but
+        // the full-content digest used for cross-volume verification must.
+        let prefix = Data(repeating: 0xAB, count: 4 * 1024 * 1024)
+        var a = prefix; a.append(Data("tail-A".utf8))
+        var b = prefix; b.append(Data("tail-B".utf8))
+        let urlA = root.appendingPathComponent("a.bin")
+        let urlB = root.appendingPathComponent("b.bin")
+        try a.write(to: urlA)
+        try b.write(to: urlB)
+
+        XCTAssertEqual(ContentHash.digest(of: urlA), ContentHash.digest(of: urlB),
+                       "bounded prefix digest is expected to collide here")
+        XCTAssertNotEqual(ContentHash.digest(of: urlA, limit: .max),
+                          ContentHash.digest(of: urlB, limit: .max),
+                          "full-content digest must distinguish the files")
+    }
 }
