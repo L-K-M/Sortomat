@@ -4,6 +4,7 @@ struct GeneralTab: View {
     @EnvironmentObject private var state: AppState
     @State private var apiKey = ""
     @State private var keySaved = false
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
         Form {
@@ -58,6 +59,15 @@ struct GeneralTab: View {
                     Text(L10n.t("general.budget", state.config.perScanBudget))
                 }
                 Toggle(L10n.t("general.notifications"), isOn: $state.config.notificationsEnabled)
+                // README promised this toggle all along; the SMAppService
+                // wrapper existed but was never wired to any UI.
+                Toggle(L10n.t("general.launchAtLogin"), isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { enabled in
+                        LaunchAtLogin.set(enabled)
+                        // Registration can be refused (e.g. by System Settings
+                        // restrictions); reflect what actually took effect.
+                        launchAtLogin = LaunchAtLogin.isEnabled
+                    }
             }
 
             Section {
@@ -68,5 +78,7 @@ struct GeneralTab: View {
         .formStyle(.grouped)
         .padding()
         .onChange(of: state.config) { _ in state.persistAndApply() }
+        // The user may have toggled login items in System Settings meanwhile.
+        .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
     }
 }
