@@ -26,6 +26,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 720, height: 460)
         window.delegate = self
         window.center()
+        // Restore last position/size across launches (center() is the fallback
+        // for the very first one).
+        window.setFrameAutosaveName("SortomatSettingsWindow")
         self.window = window
         present(window)
     }
