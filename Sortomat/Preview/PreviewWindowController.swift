@@ -25,6 +25,9 @@ final class PreviewWindowController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 640, height: 380)
         window.delegate = self
         window.center()
+        // Restore last position/size across launches (center() is the fallback
+        // for the very first one).
+        window.setFrameAutosaveName("SortomatPreviewWindow")
         self.window = window
         present(window)
     }
