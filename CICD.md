@@ -63,7 +63,9 @@ release to every user), then builds Release.
 - **Signed + notarized** — when the Developer ID and App Store Connect secrets
   below exist, the app is codesigned with a Developer ID (`--options runtime`,
   hardened runtime is already on), submitted to `notarytool --wait`, and
-  stapled. The DMG is stapled too. It opens with **no** Gatekeeper warning.
+  stapled. (Only the app is notarized — the DMG wrapper itself is not, so its
+  staple step is best-effort; the stapled app inside opens with **no**
+  Gatekeeper warning either way.)
 - **Unsigned (default)** — with no secrets, the app is **ad-hoc** signed
   (`codesign --sign -`), which is only enough to launch on Apple Silicon.
   Gatekeeper warns; the release notes tell users to right-click → Open or run
@@ -71,7 +73,10 @@ release to every user), then builds Release.
 
 Both paths produce a `Sortomat-<version>.zip` (via `ditto`) and a
 `Sortomat-<version>.dmg` (via `create-dmg`), attached to a GitHub Release named
-`Sortomat <version>` with auto-generated notes.
+`Sortomat <version>` with auto-generated notes. A tag containing a `-`
+(e.g. `v1.2.0-beta.1`) is published as a **pre-release**, so it never becomes
+the repo's "latest" release and the in-app updater (stable-only) won't offer
+it to users.
 
 ## Secrets
 
