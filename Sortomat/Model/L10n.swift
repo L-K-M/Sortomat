@@ -58,6 +58,9 @@ public enum L10n {
         "rules.addFromTemplate": "Add from template…",
         "rules.remove": "Remove rule",
         "rules.duplicate": "Duplicate",
+        "rules.delete.title": "Delete the rule «%@»?",
+        "rules.delete.message": "Its prompt, taxonomy and pre-rules are deleted with it, and Sortomat forgets which files it already handled. This cannot be undone.",
+        "rules.delete.confirm": "Delete rule",
 
         // Rule editor
         "rule.name": "Name:",
@@ -230,6 +233,9 @@ public enum L10n {
         "tab.about": "Über",
 
         "rules.empty.title": "Regel auswählen oder mit + anlegen",
+        "rules.delete.title": "Regel «%@» löschen?",
+        "rules.delete.message": "Prompt, Taxonomie und Vorregeln werden mitgelöscht, und Sortomat vergisst, welche Dateien sie bereits behandelt hat. Das kann nicht rückgängig gemacht werden.",
+        "rules.delete.confirm": "Regel löschen",
         "rules.add": "Regel hinzufügen",
         "rules.addFromTemplate": "Aus Vorlage hinzufügen…",
         "rules.remove": "Regel entfernen",
