@@ -47,13 +47,31 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
                 enabled: false,
                 prompt: Self.screenshotPrompt,
                 extensions: ["png", "jpg", "jpeg", "heic"],
+                // The old single pre-rule sent screenshot-named files to the
+                // LLM — which is the fall-through anyway, so it changed
+                // nothing: every image in the folder was classified (and paid
+                // for). Now only screenshot-named files (English and German
+                // conventions) reach the model; the catch-all skip keeps
+                // everything else off the paid path.
                 preRules: [
                     PreRule(
                         name: "Screenshots",
                         match: .glob,
                         pattern: "*creenshot*",
                         action: .useLLM
-                    )
+                    ),
+                    PreRule(
+                        name: "Bildschirmfotos",
+                        match: .glob,
+                        pattern: "*ildschirmfoto*",
+                        action: .useLLM
+                    ),
+                    PreRule(
+                        name: L10n.t("template.screenshots.preSkip"),
+                        match: .glob,
+                        pattern: "*",
+                        action: .skip
+                    ),
                 ],
                 dryRun: true
             )
