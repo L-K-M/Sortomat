@@ -151,7 +151,10 @@ final class AppState: ObservableObject {
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 let interval = await MainActor.run { self?.config.scanIntervalSeconds ?? 60 }
-                try? await Task.sleep(nanoseconds: UInt64(max(interval, 10) * 1_000_000_000))
+                // Clamp before converting: a hand-edited absurd interval must
+                // not trap in the UInt64(Double) conversion at launch.
+                let seconds = interval.isFinite ? min(max(interval, 10), 86_400) : 60
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 await MainActor.run { self?.requestScan() }
             }
         }
@@ -178,7 +181,7 @@ final class AppState: ObservableObject {
             if config.providerRequiresKey && apiKey.isEmpty { return }
 
             let snapshot = config
-            for rule in snapshot.rules where rule.enabled {
+            for rule in snapshot.rules.inExecutionOrder() {
                 // Re-read per rule so selecting a rule to edit mid-pass takes
                 // effect immediately (rather than one stale execution).
                 if rule.id == editingRuleID { continue }
@@ -218,7 +221,7 @@ final class AppState: ObservableObject {
         let apiKey = Keychain.apiKey() ?? ""
         if config.providerRequiresKey && apiKey.isEmpty { return }
         let snapshot = config
-        for rule in snapshot.rules where rule.enabled {
+        for rule in snapshot.rules.inExecutionOrder() {
             let result = await pipeline.scan(
                 rule: rule, config: snapshot, apiKey: apiKey, forcePreview: true
             )
@@ -226,6 +229,7 @@ final class AppState: ObservableObject {
         }
         lastScan = Date()
     }
+
 
     func apply(_ plans: [PlannedAction]) async {
         let rulesByID = Dictionary(uniqueKeysWithValues: config.rules.map { ($0.id, $0) })

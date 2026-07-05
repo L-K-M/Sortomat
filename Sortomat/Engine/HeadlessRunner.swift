@@ -29,7 +29,7 @@ enum HeadlessRunner {
 
         let pipeline = Pipeline()
         var hadError = false
-        for rule in config.rules where rule.enabled {
+        for rule in config.rules.inExecutionOrder() {
             let result = await pipeline.scan(
                 rule: rule, config: config, apiKey: apiKey, forcePreview: !apply
             )
