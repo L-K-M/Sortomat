@@ -140,6 +140,7 @@ public enum L10n {
         "general.concurrency": "Max concurrent classifications: %d",
         "general.budget": "Max model calls per check (0 = unlimited): %d",
         "general.notifications": "Show a notification for each filed / failed file",
+        "general.launchAtLogin": "Launch Sortomat at login",
         "general.privacyNote": "Note: a file's name, metadata and (unless a rule is metadata-only) a text excerpt are sent to the model to classify it.",
 
         // Preview / dry-run
@@ -329,6 +330,7 @@ public enum L10n {
         "general.concurrency": "Max. gleichzeitige Klassifikationen: %d",
         "general.budget": "Max. Modell-Aufrufe pro Prüfung (0 = unbegrenzt): %d",
         "general.notifications": "Mitteilung für jede einsortierte / fehlgeschlagene Datei",
+        "general.launchAtLogin": "Sortomat beim Anmelden starten",
         "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet.",
 
         "preview.title": "Änderungen vorschauen",
