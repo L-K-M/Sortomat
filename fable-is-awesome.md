@@ -1,623 +1,388 @@
 # Sortomat — Full Review
 
-*A thorough review of Sortomat as of `3623512`, produced by Claude (Fable). Method:
-a complete hand-read of every Swift file plus a fan-out of specialized review
-agents (engine correctness, I/O & parsing, concurrency, UX/visuals, performance,
-security/privacy, build/CI/docs, feature gaps) and three idea panels. Every
-finding below was verified against the actual code — file and line references
-point at the evidence. A few claims the process raised and then refuted are
-listed at the end for transparency.*
+*A living review of Sortomat by Claude (Fable), now spanning two waves.*
 
-The short version: the foundation is genuinely good. The safety architecture
-(sanitize → plan → preview → journal → undo, content-hash dedup, taxonomy +
-quarantine) is the right shape, the engine is testable and mostly tested, and
-the code reads cleanly. But there are several real data-safety holes in exactly
-the code the README calls "deliberately conservative", a handful of
-promised-but-unwired features, and a long tail of UX and robustness gaps that
-stand between "works for the author" and "trustworthy product".
+*Wave 1 reviewed the app as of `3623512`: a complete hand-read of every Swift
+file plus a fan-out of specialized review agents, adversarially verified. Its
+16 fix-PRs (#1–#16) are all merged.*
 
-Legend: **[B#]** bug · **[P#]** performance · **[U#]** UX/visual · **[F#]**
-feature gap · **[C#]** CI/build/docs · **[I#]** idea.
-Items marked **→ branch** are implemented in a dedicated branch (see
-[Implementation plan](#implementation-plan)).
+*Wave 2 (this update) reviews the app as of `85065c6` — i.e. **including** the
+wave-1 fixes. Method: a second complete hand-read of every Swift file, the full
+wave-1 diff re-reviewed for regressions, every previously-documented-but-unfixed
+item re-verified against current code, plus idea panels. (A 15-agent
+adversarial verification fleet was launched for this wave but mostly cut short
+by an API session limit; one specialist panel survived. Every finding below is
+therefore anchored to code read directly — file and line references point at
+the evidence at `85065c6`.)*
 
----
+The short version, updated: the foundation is genuinely good and wave 1
+removed the worst data-safety holes. What's left splits into four piles:
+**(a)** a handful of places where a wave-1 fix is *incomplete* — right idea,
+one call-site short; **(b)** engine edge cases and responsiveness gaps that
+were documented but deliberately deferred; **(c)** the trust/product features
+(persistent previews, quarantine UI, batch undo, portability) that separate
+"works" from "product"; **(d)** polish. Wave 2 ships branches for a large cut
+of (a), (b) and (c) — see the [implementation plan](#wave-2-implementation-plan).
 
-## 1. Data-safety bugs (the ones that matter most)
-
-**[B1] Cross-volume move verification passes when both hashes are `nil`.**
-`Mover.place` falls back to copy-then-delete for cross-volume moves and guards
-deletion with `ContentHash.digest(of: source) == ContentHash.digest(of: target)`
-(`Sortomat/Engine/Mover.swift:55`). `digest(of:)` returns `nil` when the file
-can't be opened. `nil == nil` is `true`, so if *both* reads fail (permissions,
-volume hiccup, file busy) the "verification" passes and the original is
-**deleted after an unverified copy**. Exactly the failure the guard exists to
-prevent. Fix: fail closed — only delete when both digests are non-nil and equal.
-**→ branch `claude/fix-cross-volume-verify`**
-
-**[B2] Cross-volume verification only hashes the first 4 MiB.**
-`ContentHash.digest` hashes a 4 MiB prefix plus the byte count by default
-(`Sortomat/Engine/ContentHash.swift:12`). That's a sensible *dedup* heuristic,
-but `Mover` uses the same bounded digest to decide whether a cross-volume copy
-is intact before deleting the original (`Mover.swift:55`). A copy of a 2 GB
-video truncated-then-padded or corrupted anywhere past 4 MiB passes
-verification and the original is deleted. Verification must hash the full
-content (dedup can keep the fast prefix). **→ branch `claude/fix-cross-volume-verify`**
-
-**[B3] Corrupt `config.json` silently wipes every rule.**
-`ConfigStore.load()` ends with `(try? decode) ?? Config()`
-(`Sortomat/Model/ConfigStore.swift:32`). A truncated or malformed config file
-(crash mid-write, disk-full, hand-edit) yields a *default* config; the next
-debounced save then overwrites the file — the user's rules, prompts and
-taxonomies are gone. The doc comment above it claims decoding "never silently
-wipes a user's rules", but that only holds for missing fields, not undecodable
-files. Fix: keep the broken file as `config.json.corrupt-<timestamp>` and
-surface the failure. **→ branch `claude/fix-config-corruption`**
-
-**[B4] Undo ping-pong: an undone move is re-classified and re-moved on the next scan.**
-`Journal.undo` moves the file back (`Sortomat/Engine/Journal.swift:59`) but
-records nothing in the ledger (`Pipeline.apply` intentionally writes no ledger
-entry for moves, since the file left the watch folder — `Pipeline.swift:277-287`).
-The restored file therefore looks brand-new to the very rule that moved it, and
-the next scan pass re-classifies it (paying again) and moves it right back.
-Undo is structurally defeated for enabled non-preview rules. Fix: on undo,
-record a `skipped` ledger entry for the restored file so the rule leaves it
-alone until it changes. **→ branch `claude/fix-journal-undo`**
-
-**[B5] Undo can delete a file it didn't create.**
-For a copy, `Journal.undo` does `removeItem(at: entry.destination)`
-(`Journal.swift:64-66`) without checking that what's there *now* is still the
-journaled copy. If the user has since edited that copy — or something else now
-occupies the path — undo destroys it. Fix: for copies, compare content hashes
-with the surviving source and refuse (with a clear error) when they differ.
-**→ branch `claude/fix-journal-undo`**
-
-**[B6] Undone entries resurrect in the History tab.**
-`HistoryTab.undo` removes the entry only from its local `@State` array
-(`Sortomat/Preview/PreviewView.swift:183-189`); nothing marks the journal entry
-as undone. Reopen the window (or press Refresh) and the undone move is listed
-again, Undo button and all — clicking it now yields "The moved file is no
-longer at: …". The journal needs reversal records (tombstones) that
-`Journal.recent` folds away. **→ branch `claude/fix-journal-undo`**
-
-**[B7] Duplicate detection can strand distinct files.**
-Because dedup uses the same 4 MiB-prefix hash ([B2]), two *different* large
-files with equal size and identical first 4 MiB (VM images, disk dumps, large
-DBs with header-only diffs) are declared duplicates in
-`Mover.resolvePlacement` (`Mover.swift:90`) — the second file is never filed
-and sits in the watch folder forever (its ledger entry says `done`). Low
-probability, but worth knowing about; the full-hash verify from [B1]/[B2]
-leaves dedup's fast path unchanged, so this stays a documented trade-off.
-
-**[B8] Keychain save can silently destroy the stored key.**
-`Keychain.set` is delete-then-add and ignores both OSStatus results
-(`Sortomat/Engine/Keychain.swift:32-38`). If `SecItemAdd` fails after
-`SecItemDelete` succeeded, the old key is gone, the new one was never stored —
-and the UI already printed "Saved to the Keychain." Fix: update-in-place via
-`SecItemUpdate`, add only when missing, and check the status.
-**→ branch `claude/fix-keychain-set`**
-
-**[B9] Journal/ledger are last-writer-wins across processes.** The GUI and a
-`scan-once` launchd job share `ledger.json` (whole-file atomic overwrite,
-`Ledger.save`) and append to `journal.jsonl` without `O_APPEND` semantics
-guarantees across processes (`Journal.record`). Concurrent runs can clobber
-each other's ledger records (→ double classification, double moves) and
-interleave journal writes. PLAN Phase 1 claims the double-move class is fixed,
-but the in-flight reservation is process-local. Needs a config-dir lock file
-or single-instance enforcement. *(Documented; not fixed in this pass — needs
-design.)*
+Legend: **[B#]/[P#]/[U#]/[F#]/[C#]/[L#]/[I#]** — wave-1 numbering (bug /
+performance / UX / feature / CI / localization / idea), kept stable so nothing
+needs re-learning. **[R#]** — wave-2 regression or incomplete fix.
+**[N#]** — wave-2 new finding. Items marked **→ branch** are implemented in a
+dedicated wave-2 branch. Items marked **✅ #n** shipped in that wave-1 PR.
 
 ---
 
-## 2. Correctness bugs
+## 0. Wave-1 scoreboard
 
-**[B10] `LLMClient` retries non-retryable HTTP errors.**
-The retry loop's `guard [429,500,502,503,504].contains(status) else { throw lastError }`
-throws from *inside* the `do` block, where `catch let error as LLMError`
-catches it and only rethrows **non**-HTTP LLM errors
-(`Sortomat/Engine/LLMClient.swift:99-118`). Net effect: 400/401/403 (bad key,
-bad model name, malformed request) are retried four times with backoff —
-~12 wasted seconds per file, multiplied by every file in the scan.
-**→ branch `claude/fix-llm-client`**
+All sixteen wave-1 PRs merged cleanly. For the record:
 
-**[B11] Percent-style confidences defeat the quarantine threshold.**
-`Classification.decodeConfidence` normalizes `"85"` (string) to `0.85`, but a
-*numeric* `85` is returned as-is (`Sortomat/Model/Classification.swift:70-77`).
-`Pipeline.decide` then checks `confidence < rule.confidenceThreshold` → `85 <
-0.7` is false, so a model reporting percentages sails past the low-confidence
-quarantine, and the preview shows "8500%". Fix: apply the same `>1 → /100`
-normalization to the numeric path. **→ branch `claude/fix-classification-parsing`**
-
-**[B12] Unknown model actions are treated as "move".**
-`var isMove: Bool { action != "skip" }` (`Classification.swift:44`). A model
-answering `"action": "ignore"`, `"none"`, or `"delete"` with a path present
-gets its file **moved**. The safe default for an unrecognized action in a
-file-moving product is *skip*, not *move*.
-**→ branch `claude/fix-classification-parsing`**
-
-**[B13] Rule priority is a complete no-op.**
-`Rule.priority` is documented ("Higher priority rules claim a file first",
-`Models.swift:85`), editable (stepper in `RuleEditor.swift:18`), claimed
-shipped (CHANGELOG "Rule priority", PLAN Phase 3 ✅) — and never read.
-`AppState.runScans` (`AppState.swift:181`) and `HeadlessRunner.scanOnce`
-iterate rules in array order. With overlapping watch folders, whichever rule
-was created first wins, whatever the steppers say.
-**→ branch `claude/fix-rule-priority`**
-
-**[B14] The per-scan LLM budget can overshoot by up to 7 calls.**
-`Pipeline.scan` computes `allowLLM = budgetRemaining > 0` once per batch of up
-to 8 files and decrements only after the batch completes
-(`Pipeline.swift:63-86`). With budget 1 and concurrency 8, up to 8 calls fire.
-Also, the budget is enforced *per rule per pass*, not per pass as the settings
-copy implies — five enabled rules each get the full budget.
-**→ branch `claude/fix-budget-overshoot`** (batch-size cap; per-pass semantics documented)
-
-**[B15] A 64 KiB read boundary turns UTF-8 excerpts into mojibake.**
-`FileContext.readPlainText` reads exactly 64 KiB (`FileContext.swift:88-94`);
-if that boundary splits a multi-byte UTF-8 character, `String(data:, .utf8)`
-fails for the *whole* buffer and `TextDecoding.decode` falls through to
-CP1252 — the entire excerpt sent to the model becomes garbage for any non-ASCII
-text file over 64 KiB. Fix: trim the trailing partial UTF-8 sequence before
-decoding. **→ branch `claude/fix-text-extraction`**
-
-**[B16] `<style>`/`<script>` bodies leak into classification samples.**
-`HTMLText.strip`'s regex `<(script|style)[^>]*>.*?</\1>` has no `dotMatchesLineSeparators`
-(`HTMLText.swift:16-19`), so any multi-line style/script block — i.e. nearly
-all of them — survives tag-stripping as literal CSS/JS "text" in the excerpt
-the model sees. Fix: add dotall. **→ branch `claude/fix-text-extraction`**
-
-**[B17] `ZipArchive`'s per-entry memory cap doesn't cover stored entries.**
-`data(for:)` checks `uncompressedSize <= maxEntryBytes` but for method 0
-returns `compressedSize` bytes (`ZipArchive.swift:57-66`). A hostile central
-directory can declare a tiny `uncompressedSize` with a huge `compressedSize`
-and bypass the 16 MiB cap (bounded only by the 200 MB archive cap). Fix: cap
-both. **→ branch `claude/fix-text-extraction`**
-
-**[B18] "Check now" stays clickable while paused — and silently does nothing.**
-`BlockMenuItem(title:…, enabled: !state.paused)` sets `isEnabled`, but the
-containing `NSMenu` has `autoenablesItems = true` (default), which re-enables
-any item whose target responds to its action
-(`MenuBar/BlockMenuItem.swift:12`, `StatusItemController.swift:95`). The
-disabled state is cosmetic-only intent that never renders; clicking fires
-`requestScan()`, which returns immediately because `paused` guards it.
-**→ branch `claude/menu-polish`**
-
-**[B19] Duplicate rows in the Review tab render a raw format string.**
-`PlanRow.actionLabel` uses `L10n.t("activity.duplicate")` — a three-argument
-format string — with no arguments (`PreviewView.swift:110`), so the row shows
-`[%@] Duplicate: %@ already exists as %@`. **→ branch `claude/preview-polish`**
-
-**[B20] Update-check alerts strand a Dock icon.**
-All three UpdateChecker alerts call `ActivationPolicy.showRegular()` before
-`runModal()` (`UpdateChecker.swift:79,95,104`) and nothing ever reverts to
-`.accessory` (reversion only lives in the window controllers'
-`windowWillClose`). "Check for Updates…" with no window open leaves a
-permanent Dock icon on a menu-bar-only app. **→ branch `claude/fix-update-checker`**
-
-**[B21] UpdateChecker misleads on failure and under-checks by design.**
-Three related issues (`UpdateChecker.swift:34-67`): (a) when version parsing
-fails it shows the "You're up to date" alert; (b) `lastCheck` is stamped
-*before* the network call, so a failed launch-time check (offline Mac waking
-up) suppresses retries for 24 h; (c) the "once a day" check only actually runs
-at *launch* — a menu-bar agent that stays up for weeks never re-checks,
-contradicting CICD.md's "polls once a day".
-**→ branch `claude/fix-update-checker`**
-
-**[B22] `FSEventsWatcher` callback can use-after-free.**
-The FSEvents callback context uses `Unmanaged.passUnretained(self)`
-(`Watch/FSEventsWatcher.swift:22-29`) and teardown happens in `deinit` —
-triggered whenever `rebuildWatchers()` drops the old array
-(`AppState.swift:110-118`), which happens on every debounced config save. If
-an event callback is in flight on the utility queue at that moment, it calls
-into a deallocating object. Low probability per save, nonzero over months of
-uptime. *(Documented; the fix — retained context + stop-before-release — is
-concurrency-sensitive and left for a Mac-verified pass.)*
-
-**[B23] Miscellaneous small ones (documented, not fixed):**
-- `startTimer` does `UInt64(interval * 1_000_000_000)` — a hand-edited absurd
-  `scanIntervalSeconds` traps at launch (`AppState.swift:154`). (Clamped in
-  **→ branch `claude/fix-rule-priority`** while touching the file.)
-- Files with a *future* modification date never pass `isStable`
-  (`Pipeline.swift:375`) and are silently never processed.
-- `TextDecoding.decode(_:declared:)`'s `declared` tier is dead code — no caller
-  passes it, so XML/HTML charset declarations are ignored (`TextDecoding.swift:24`).
-- `findEOCD` scans backwards and will lock onto a fake EOCD signature embedded
-  in an archive comment, rejecting a valid EPUB (`ZipArchive.swift:117-126`).
-- A dangling symlink at a destination defeats collision handling:
-  `fileExists` says free, `moveItem` then throws, forever (`Mover.swift:73`).
-- `JournalTests` calls `setenv("SORTOMAT_CONFIG_DIR", …)` in `setUp`
-  (`SortomatTests/JournalTests.swift:11`), but `ProcessInfo.environment` is
-  cached the moment `AppDelegate.isRunningTests` reads it at host launch — the
-  override is very likely invisible and the tests touch the developer's real
-  `~/Library/Application Support/Sortomat`.
-- `sort_epubs.py` (the legacy script the README still links) declares two
-  books duplicates on byte-size alone (`sort_epubs.py:449`) — the exact bug
-  the Swift app fixed.
-- Preview-then-approve executes a plan against whatever now sits at the source
-  path; `PlannedAction` carries no content fingerprint to re-validate.
+| Shipped | Items | PR |
+| --- | --- | --- |
+| Cross-volume verify fails closed, hashes full content | B1, B2 | #1 |
+| Non-retryable LLM errors surface immediately; `/v1` base URLs | B10 | #2 |
+| Numeric percent confidences normalized; unknown actions skip | B11, B12 | #3 |
+| Corrupt config backed up instead of wiped | B3 | #4 |
+| `Rule.priority` actually honored; interval clamp | B13, B23a | #5 |
+| LLM budget cap holds; target subtree skipped | B14, P7d | #6 |
+| UTF-8 tail trim, `<style>/<script>` dotall, zip stored-entry cap | B15, B16, B17 | #7 |
+| Keychain update-in-place with checked statuses | B8 | #8 |
+| Update checker: Dock icon, honest alerts, post-success stamp, 6 h cadence | B20, B21 | #9 |
+| Preview window: dismiss, honest empty state, feedback, richer rows, frames | U1–U4, U10, B19 | #10 |
+| Menu-bar badge, real disabled states, ⌘W, foreground notifications | U5, U7, U9, B18 | #11 |
+| Rule deletion confirmation + toolbar tooltips | U6 | #12 |
+| Launch-at-login toggle | F1 | #13 |
+| Pre-release tags publish as GitHub pre-releases; DMG-staple docs | C1, C2 | #14 |
+| Undo: ledger pinning, diverged-copy refusal, tombstones | B4, B5, B6 | #15 |
+| Localized defaults and template prompts | L1 | #16 |
 
 ---
 
-## 3. Performance & responsiveness
+## 1. Wave 2 — regressions & incomplete fixes in the merged work
 
-**[P1] Dry-run classifications are never persisted — relaunch re-pays for everything.**
-The `previewed` set is in-memory (`Pipeline.swift:15-18`) and preview decisions
-are deliberately not written to the ledger. Every app relaunch (and every
-headless run) re-classifies — and re-pays for — every pending dry-run file.
-For the recommended way to use the app (start everything in preview!), this is
-the single biggest cost bug. *(Needs a persisted pending-plans store; design
-sketched under [F2].)*
+The most valuable review a second wave can do is audit the first. These are
+places where a wave-1 fix is right in spirit but incomplete or has a new cost.
 
-**[P2] One stuck file stalls the whole rule.** `Pipeline.scan` processes files
-in strict batches with a barrier (`Pipeline.swift:59-86`): the next batch
-starts only when the slowest member of the current one finishes. One file
-hitting the 90 s timeout × 4 retries (see [B10]) holds up to 7 neighbors
-hostage for ~6 minutes. A sliding-window (task-group with replenishment) fixes
-this cheaply.
+**[R1] The copy-undo "don't destroy edits" guard only looks at the first 4 MiB.**
+PR #15 taught `Journal.undo` to refuse deleting a copy that diverged from the
+surviving original — but the comparison uses `ContentHash.digest(of:)` with its
+*default 4 MiB prefix* limit (`Sortomat/Engine/Journal.swift:84-85`), the exact
+bounded-digest trap B2 fixed in `Mover` with `limit: .max`. Edit a >4 MiB copy
+anywhere past the prefix, press Undo, and the guard passes — the edited copy is
+deleted. **→ branch `claude/undo-hardening`**
 
-**[P3] `isStable` sleeps 700 ms per file *inside* the batch slot**
-(`Pipeline.swift:369-379`). 10 000 backlog files ≈ 58 minutes of pure sleeping
-even with zero LLM calls. The stability probe should run concurrently for the
-whole candidate set (or compare against the previous scan's snapshot) rather
-than napping per-file.
+**[R2] CLI undo still ping-pongs.** The B4 fix routes *GUI* undo through
+`AppState.undo`, which pins the restored file as `skipped` in the ledger
+(`AppState.swift:256-261`). `HeadlessRunner.undoLast` still calls
+`Journal.undo(entry)` directly (`Sortomat/Engine/HeadlessRunner.swift:57`) —
+no ledger pin, so the next `scan-once` re-classifies (re-pays) and re-moves
+every file the CLI just restored. The bug class B4 closed is alive on the
+second of its two paths. **→ branch `claude/undo-hardening`**
 
-**[P4] New files wait for the *next* timer tick.** FSEvents fires ~1 s after a
-download lands, the debounced scan runs 2 s later — and `isStable` rejects the
-file because it's younger than 5 s (`Pipeline.swift:375`). Nothing re-queues a
-follow-up, so the file waits for the periodic scan (up to 60 s+). The README's
-"instant reaction" is really "next tick". Fix: when a scan skips unstable
-candidates, schedule one follow-up pass ~6 s out.
+**[R3] "Saved to the Keychain." can still be a lie.** PR #8 made
+`Keychain.set` return whether the write succeeded — and no caller reads it.
+`AppState.saveAPIKey` ignores the result (`AppState.swift:72-76`) and
+`GeneralTab` unconditionally shows the success caption (`GeneralTab.swift:19-28`).
+The storage bug is fixed; the UI honesty half of B8 never landed. Also still
+here: the caption never clears while typing a new key (U12a).
+**→ branch `claude/keychain-feedback`**
 
-**[P5] Unbounded growth everywhere.** `ledger.json` is never pruned (stale
-`path|size|mtime` keys accumulate forever — and a renamed file re-pays
-classification since the key is path-based), `journal.jsonl` and `activity.log`
-are append-only with no rotation, and `Journal.recent` reads + decodes the
-whole journal on the main thread every time the History tab appears
-(`Journal.swift:37`, `Ledger`, `ConfigStore.appendLog`). The ledger is also
-re-encoded and rewritten after every scan pass even when nothing changed
-(`Ledger.save`, called from `AppState.runScans`).
+**[R4] The budget cap serializes everything once the budget runs low.**
+PR #6's `batchCap = max(1, min(cap, budgetRemaining))`
+(`Sortomat/Engine/Pipeline.swift:74`) correctly stops overshoot — by shrinking
+*the whole batch*, including files that pre-rules would handle for free. With
+`perScanBudget: 1` (the cautious configuration) every file in a backlog is
+processed in a batch of one, each paying the ~700 ms stability probe serially:
+a 1 000-file folder spends ~12 minutes mostly sleeping where wave-0 code ran
+8-wide. The cap should bound *LLM-eligible* slots per batch, not batch width.
+**→ branch `claude/budget-and-keyless`**
 
-**[P6] Watcher churn on every keystroke-ish.** `persistAndApply()` (debounced
-800 ms) unconditionally tears down and recreates *every* FSEvents stream
-(`AppState.swift:61-70,110-118`) even for config edits unrelated to watching.
-Should diff the (enabled, path) set and rebuild only on change. Also
-interacts badly with [B22].
+**[R5] `inExecutionOrder()` promises a stability Swift doesn't.** The doc
+comment says "stable for equal priorities" (`Sortomat/Model/Models.swift:169-175`),
+but `sorted(by:)`'s stability is an implementation detail Swift explicitly does
+not guarantee. Equal-priority rules could reorder between runs on a toolchain
+change. One-line fix: sort `enumerated()` pairs with an index tiebreak.
+**→ branch `claude/budget-and-keyless`**
 
-**[P7] Assorted:** whole EPUB loaded into memory twice per classification
-(`Data` + `[UInt8]` copy, `ZipArchive.swift:24-31`); Spotlight
-`kMDItemTextContent` regex-normalized in full before truncation to 4 000 chars
-(`FileContext.swift:73-75`); collision resolution re-hashes up to 4 MiB of
-every same-named neighbor on each placement (`Mover.swift:82-93`); recursive
-scans enumerate the entire target subtree just to reject every file
-(`Pipeline.swift:346-358`); one fat `AppState` `ObservableObject` means every
-keystroke in the rule editor invalidates every visible view; a fresh
-`ISO8601DateFormatter` per log line on the main actor (`ConfigStore.swift:50`).
+**[R6] `UpdateChecker.lastResult` is hardcoded English — and dead.** Two
+user-facing-looking strings ("Update available: …", "You're up to date (…)",
+`Sortomat/Updates/UpdateChecker.swift:83,86`) bypass L10n; meanwhile nothing in
+the app ever displays `lastResult`. Localize or delete.
+**→ branch `claude/l10n-stragglers`** (localized; kept published for a future About display)
 
----
-
-## 4. UX, visual & layout issues
-
-**[U1] There is no way to say "no" to a suggestion.** The Review tab offers
-Apply / Apply All / Refresh — `AppState.dismiss(_:)` exists
-(`AppState.swift:243`) but no UI calls it. Declining one wrong move means
-either applying it anyway or leaving it to haunt the list.
-**→ branch `claude/preview-polish`**
-
-**[U2] No feedback during Refresh / after Apply.** `busy` only disables
-buttons (`PreviewView.swift:47-67`); a refresh that's mid-LLM-call looks
-identical to "nothing happening", and applying gives no confirmation. Add a
-`ProgressView` and a result line. **→ branch `claude/preview-polish`**
-
-**[U3] The empty state lies when no API key is set.** With a missing key,
-`refreshPreview` returns before doing anything (`AppState.swift:218-219`) and
-the window shows "Nothing to file right now." — the user thinks all is well.
-Show the real blocker. **→ branch `claude/preview-polish`**
-
-**[U4] Review rows hide *which rule* and *why*.** `PlanRow` shows file,
-destination, reason and confidence, but not the rule name or the decision
-origin (pre-rule vs model vs taxonomy-redirect) — with several rules active
-you can't tell who claimed what (`PreviewView.swift:77-131`).
-**→ branch `claude/preview-polish`**
-
-**[U5] Menu-bar icon never reflects state.** `StatusItemController` subscribes
-to `$pendingActions` precisely to update the icon (`StatusItemController.swift:36`)
-— but `updateIcon()` only sets the funnel and `appearsDisabled`. Pending
-reviews are invisible until you open the menu. A count badge next to the
-funnel is the obvious affordance. **→ branch `claude/menu-polish`**
-
-**[U6] Deleting a rule is instant and unrecoverable.** The "−" button
-immediately removes the rule and forgets its ledger
-(`RulesTab.swift:53-56`, `AppState.remove`). One mis-click destroys a
-carefully-tuned prompt and taxonomy. Needs a confirmation dialog.
-**→ branch `claude/confirm-rule-deletion`**
-
-**[U7] Notifications never appear while the app is frontmost.** No
-`UNUserNotificationCenterDelegate` is installed anywhere, so macOS suppresses
-banners while Sortomat is active (`Common/Notifier.swift`) — i.e. exactly when
-the user has the Preview/Settings window open and would want to see "3 files
-filed". **→ branch `claude/menu-polish`**
-
-**[U8] The notifications toggle overpromises.** Its label says "Show a
-notification for each filed / failed file" (`L10n.swift:139`), but the code
-posts only the *first failure* per scan result and nothing on success
-(`AppState.notify`, `AppState.swift:206-212`). Align copy or behavior — and
-note a missing watch folder currently re-notifies on *every* pass with no
-cooldown.
-
-**[U9] No ⌘W / Escape to close windows.** `MainMenu` builds only App + Edit
-menus (`MenuBar/MainMenu.swift`), so the standard Close shortcut doesn't exist;
-windows are mouse-close only. **→ branch `claude/menu-polish`**
-
-**[U10] Windows forget their frame.** Neither window controller sets a frame
-autosave name (`SettingsWindowController.swift:25-28`,
-`PreviewWindowController.swift:24-27`); size/position reset every launch.
-**→ branch `claude/preview-polish`**
-
-**[U11] Editing a rule silently stops it.** The editing lock (a good idea!)
-means the *selected* rule doesn't run while the Rules tab is open
-(`AppState.swift:184`) — with zero UI indication. Leave Settings open over
-lunch and you'll wonder why nothing sorted. A small "paused while editing"
-badge on the rule row would do.
-
-**[U12] Assorted polish:** "Saved to the Keychain." confirmation never clears
-while typing a new key (`GeneralTab.swift:25`); rules-list toolbar buttons are
-icon-only with no tooltips except Duplicate (`RulesTab.swift:39-65`); the
-settings window is titled "Sortomat — Rules" while the menu item says
-"Rules & Settings…" (`L10n.swift:50`); `1 change(s) awaiting review…` plural
-hack (`L10n.swift:33,47`); the taxonomy hint string
-(`rule.taxonomy.prompt`) exists but is never displayed since `TextEditor` has
-no placeholder support; no validation feedback anywhere in the rule editor
-(nonexistent paths, watch == target, invalid regex pre-rules all fail
-silently — watch-inside-target silently yields zero candidates forever,
-`Pipeline.swift:346`).
-
-**[U13] First-run is a shrug.** The app launches into… nothing visible (menu
-bar only), with a disabled German example rule and no pointer to the icon, no
-"add your key → pick a folder → watch a preview" path. See [I1]/[I3].
+**[R7] History undo has no re-entrancy guard and now hashes on the main actor.**
+`HistoryTab.undo` fires an unguarded Task per click (`PreviewView.swift:229-240`);
+a double-click double-undoes (the second attempt can only fail, surfacing a
+scary error) — and `AppState.undo` runs `Journal.undo`'s content hashing *on
+the main actor*, which after R1's full-content fix would mean hashing a
+multi-GB copy on the UI thread. Undo gets a busy state and hops off-main.
+**→ branch `claude/undo-hardening`**
 
 ---
 
-## 5. Localization
+## 2. Wave 2 — new findings
 
-**[L1] English UI, German soul.** New rules are named "Neue Regel"
-(`Models.swift:113,150`), the quarantine folder defaults to `_Quarantäne`
-(`Models.swift:125`), and all three template prompts — including the seeded
-first-run rule — are German-only (`Templates.swift:86-106`) regardless of UI
-language. An English-speaking user gets German folder names and a German
-prompt steering their model. **→ branch `claude/localize-defaults`**
+**[N1] Approving a preview executes against whatever is at the path *now*.**
+(Promoted from wave-1 footnote B23h — it deserves better than a footnote.)
+`PlannedAction` carries no fingerprint of the file it was computed for;
+`applyApproved` recomputes `Ledger.fingerprint(plan.source)` at apply time and
+executes regardless (`Sortomat/Engine/Pipeline.swift:315-322`). A file can be
+fully replaced between "Sortomat suggests X" and the user clicking Apply — the
+replacement is then filed under the stale suggestion. Plans now capture the
+fingerprint at decide time and apply refuses (with a clear activity entry) when
+the file changed. **→ branch `claude/apply-revalidation`**
 
-**[L2] Hardcoded-English stragglers in a bilingual app:** "Check for
-Updates…" (`StatusItemController.swift:112`), every UpdateChecker alert,
-`PathField`'s "Choose…" + `/path/to/folder`, the entire `MainMenu`,
-`Journal.UndoError` messages, `HeadlessRunner`'s "Nothing to undo.". The
-CHANGELOG's "English + German localization" is ~90 % true.
-*(Menu + updates strings fixed in `claude/menu-polish` / `claude/fix-update-checker`;
-the rest documented.)*
+**[N2] Pending previews go stale and never die.** `ingest` de-duplicates
+pending plans by (source, ruleID) (`AppState.swift:198`), but nothing ever
+*removes* a plan whose file has since vanished (applying it just errors), and
+editing a rule invalidates neither its queued plans nor the pipeline's
+`previewed` cache (`Pipeline.swift:15-18`) — so after rewriting a prompt, the
+Review tab keeps showing (and the badge keeps counting) suggestions from the
+old prompt until relaunch. **→ branch `claude/preview-hygiene`**
 
-**[L3] The Screenshots template is a double no-op.** Its only pre-rule is glob
-`*creenshot*` → action `useLLM` (`Templates.swift:50-57`) — but `useLLM` is
-already the fall-through, so the pre-rule changes nothing; and the glob
-wouldn't match German "Bildschirmfoto" anyway. Meanwhile the prompt tells the
-model to use "visible text and the image description" — content the app never
-sends (no OCR/vision path; see [F7]).
+**[N3] Quit loses in-memory ledger records.** There is no
+`applicationWillTerminate` (`Sortomat/App/AppDelegate.swift`); the ledger is
+persisted only at the end of a scan pass (`AppState.swift:191`). Quit mid-pass
+and every `skipped` verdict the model was just paid for is forgotten — and
+re-paid next launch. **→ branch `claude/spend-persistence`** (terminate flush)
 
----
+**[N4] Files dated in the future are never processed.** (B23b, re-verified.)
+`isStable` requires `Date().timeIntervalSince(modified) > 5`
+(`Pipeline.swift:396`) — a camera with a wrong clock or a badly-stamped
+download yields a negative interval forever. Fix: compare `abs(…)`, still
+requiring the size-stability probe. **→ branch `claude/engine-edge-cases`**
 
-## 6. Missing features & broken promises
+**[N5] A dangling symlink at the destination defeats placement forever.**
+(B23e, re-verified.) `resolvePlacement` probes with `fm.fileExists(atPath:)`
+(`Sortomat/Engine/Mover.swift:90,104`), which *follows* symlinks — a dangling
+link reports "free", `moveItem` then throws, and the file retries into the same
+wall every 30 minutes. Probe with `attributesOfItem` (lstat semantics) instead.
+**→ branch `claude/engine-edge-cases`**
 
-**[F1] Launch at login: promised, implemented, unwired.** README line 63:
-"Launch at login is a toggle inside the app." `Common/LaunchAtLogin.swift`
-wraps `SMAppService` completely — and is referenced by zero views. There is no
-toggle. **→ branch `claude/add-launch-at-login`**
+**[N6] A fake EOCD signature in a zip comment rejects a valid EPUB.** (B23d,
+re-verified.) `findEOCD` takes the *last* signature-looking bytes it meets
+scanning backwards (`Sortomat/Engine/ZipArchive.swift:121-130`) — bytes
+`PK\x05\x06` inside the archive comment win over the real record. Validate the
+candidate (comment length must reach exactly EOF) and keep scanning otherwise.
+**→ branch `claude/engine-edge-cases`**
 
-**[F2] Pending previews don't survive a relaunch.** `pendingActions` lives
-only in `AppState`; quit and every queued review is gone (and re-paid, [P1]).
-For a "preview-first" product the pending queue should persist (a
-`pending.json` beside the journal, invalidated by rule edits).
+**[N7] `Sanitizer` speaks German in every locale.** The fallback for a
+component that sanitizes to nothing is a hardcoded `"Unbekannt"`
+(`Sortomat/Engine/Sanitizer.swift:34`) — an English user whose model returns a
+weird folder name gets a German folder. **→ branch `claude/engine-edge-cases`**
 
-**[F3] Quarantine is a roach motel.** Files go *into*
-`target/_Quarantäne` (`Pipeline.swift:243`), and no UI ever shows, re-files,
-or even counts them. The README sells taxonomy+quarantine as a headline
-safety feature; the product needs a Quarantine tab — list, reason shown,
-"re-classify with hint" and "move where I say" actions. (See [I6].)
+**[N8] No cap on model output.** The request payload sets `temperature` and
+`response_format` but no `max_tokens` (`Sortomat/Engine/LLMClient.swift:79-87`);
+a rambling model bills unbounded completion tokens for what should be a
+five-line JSON answer. **→ branch `claude/llm-hardening`**
 
-**[F4] No batch undo in the GUI, and the CLI's "batch" is 5 seconds.**
-`HeadlessRunner.undoLast` takes entries within 5 s of the newest
-(`HeadlessRunner.swift:53`) — a scan whose LLM calls stretch over minutes gets
-partially undone. `JournalEntry` needs a `batchID` (one per scan pass);
-History gets "Undo last batch". *(Tombstones + safe copy-undo land in
-`claude/fix-journal-undo`; batch IDs documented for a follow-up.)*
+**[N9] Dead L10n keys.** Defined and never referenced:
+`rules.addFromTemplate`, `about.privacy`, `activity.preRuleRoute`,
+`journal.undone`, `journal.undoAll`, `preview.column.file/.action/.destination`,
+`preview.cancel` (`Sortomat/Model/L10n.swift`). Two get *used* by wave-2
+branches (`journal.undoAll` → batch undo; `journal.undone` → its status line);
+the rest are pruned. **→ branches `claude/undo-hardening`, `claude/l10n-stragglers`**
 
-**[F5] One global model/provider for all rules.** `Config` has a single
-`model`/`apiBase`/`providerRequiresKey` (`Models.swift:172-175`), so the
-privacy story "point sensitive rules at a local model" can't coexist with
-cloud rules. Per-rule override (defaulting to global) is the natural shape.
-
-**[F6] Deterministic-only rules still demand an API key.** `runScans` bails
-app-wide when the provider needs a key and none is set
-(`AppState.swift:177-178`), even if every enabled rule would be fully served
-by pre-rules. Free, deterministic sorting shouldn't be hostage to a key field.
-
-**[F7] No image/OCR support.** `FileContext.extractSample` handles text, PDF,
-EPUB — for images it sends metadata only (plus whatever Spotlight OCR happened
-to index), while the bundled Screenshots template *asks* the model about
-visible text ([L3]). Vision framework OCR (`VNRecognizeTextRequest`) is a
-system-framework-only fit for this codebase, and vision-capable models are one
-`image_url` content-part away.
-
-**[F8] No spend persistence.** `usage` (and therefore "Estimated spend")
-resets to zero every launch (`AppState.swift:19`); there's no monthly ledger,
-no per-rule attribution, no budget alarm. Cost-awareness is a README bullet —
-make it real ([I8]).
-
-**[F9] Rules are not portable.** No export/import (Hazel has `.hazelrules`;
-organize-tool has shareable YAML). A rule — prompt + taxonomy + pre-rules — is
-exactly the kind of artifact people want to share.
-
-**[F10] No exclusion patterns for recursive rules** (pre-rules match filename
-only, `DeterministicEngine.swift:44`); no per-rule conflict policy (rename vs
-skip vs replace — hardcoded to suffixing); no rename-in-place action (target ==
-watch yields zero candidates, `Pipeline.swift:346`); failed files retry every
-30 minutes forever with no backoff or "stuck files" surface
-(`Ledger.swift:62`, PLAN's promised stuck-file view was never built).
+**[N10] `menuNeedsUpdate`'s "Preview changes…" always fires a refresh** — even
+while paused or keyless (harmless thanks to the guards, but it looks like a
+button that does nothing; documented, not fixed).
 
 ---
 
-## 7. CI / build / release / docs
+## 3. Standing backlog, re-verified at `85065c6`
 
-**[C1] Prerelease tags publish as full releases.** `release.yml` triggers on
-`v*` — including `v1.2.0-beta.1` — and neither publish step passes
-`prerelease:` to `softprops/action-gh-release`
-(`.github/workflows/release.yml:5,146-176`). A beta tag therefore becomes the
-repo's *latest* release and the in-app UpdateChecker (stable-only by default,
-`allowPrereleases: false`) happily offers it to every user.
-**→ branch `claude/fix-release-prerelease`**
+Every wave-1 "documented, not fixed" item was re-checked against current code.
+Status and what wave 2 does about it:
 
-**[C2] "Staple the DMG" can never succeed.** Only the *zip of the .app* is
-notarized (`release.yml:109-115`); the DMG is created afterwards from the app
-and `stapler staple "$DMG"` fails — silently, thanks to `|| true`
-(`release.yml:142-144`). Harmless in practice (the app inside is stapled) but
-CICD.md's "The DMG is stapled too" is false. **→ branch `claude/fix-release-prerelease`**
-
-**[C3] Docs drift, small but telling:** CICD.md documents `APPLE_TEAM_ID` as a
-signing gate but the workflow gates only on the P12 + AC key; `scripts/build.sh`
-and `release.sh` hard-depend on an external `lkm-build` tool the README
-presents as a working path; README's "watches folders… instant reaction"
-oversells given [P4]; AGENTS.md tells agents the update cadence is daily
-([B21] says otherwise).
+| Item | Status | Wave-2 action |
+| --- | --- | --- |
+| B7 dedup 4 MiB-prefix collisions can strand a distinct file | still present (`Mover.swift:94,107`) | documented trade-off; unchanged |
+| B9 GUI ↔ `scan-once` clobber ledger/journal cross-process | still present | **→ branch `claude/process-lock`** (flock on the config dir; headless refuses politely) |
+| B22 FSEvents callback can use-after-free on watcher rebuild | still present (`FSEventsWatcher.swift:21,59`) | **→ branch `claude/watching-robustness`** (retained context box + explicit stop) |
+| B23b future-mtime files never stabilize | still present | **→ `claude/engine-edge-cases`** (N4) |
+| B23c `TextDecoding.decode(_:declared:)` declared-tier dead code | still present (`TextDecoding.swift:13`, no caller passes it) | documented; wiring XML/HTML charset detection is follow-up |
+| B23d EOCD fake-signature lockup | still present | **→ `claude/engine-edge-cases`** (N6) |
+| B23e dangling-symlink collision blindness | still present | **→ `claude/engine-edge-cases`** (N5) |
+| B23f `JournalTests` setenv vs cached environment | **refuted** on re-read: `ConfigStore.directory` reads the env var per access (`ConfigStore.swift:8`), so the `setUp` override is honored | — |
+| B23g `sort_epubs.py` size-only dedup | still present (`sort_epubs.py`) | legacy script; README already frames it as historical |
+| B23h preview-approve TOCTOU | still present | **promoted to N1 → branch `claude/apply-revalidation`** |
+| P1 preview classifications re-paid every relaunch | still present (`Pipeline.swift:15-18`) | needs persistent pending store (F2); designed, not blind-built |
+| P2 batch barrier lets one stuck file stall its batch | still present (`Pipeline.swift:78-89`) | documented; sliding-window rewrite deserves a Mac |
+| P3 700 ms stability sleep | still present, **but wave-1 overstated it**: the sleeps overlap within a batch, so the cost is ~700 ms per *batch* — except where R4 collapses batches to width 1, which is the actual fix that matters | **→ `claude/budget-and-keyless`** (R4) |
+| P4 new files wait for the next timer tick | still present (`Pipeline.swift:396` + no follow-up scheduling) | **→ branch `claude/watching-robustness`** (scan reports deferred-unstable files; AppState schedules one follow-up pass) |
+| P5 unbounded ledger / journal / activity.log; main-thread journal reads; ledger rewritten when clean | still present (`Ledger.swift:75-82`, `ConfigStore.swift:70-81`, `Journal.swift:43-52`) | **→ branch `claude/maintenance-rotation`** (log rotation, ledger pruning of vanished paths, dirty-flag saves); journal rotation deliberately *not* done (it's the undo history) |
+| P6 watcher teardown/rebuild on every debounced save | still present (`AppState.swift:61-70,110-118`) | **→ `claude/watching-robustness`** (diff the (path, enabled) set) |
+| P7a EPUB double memory copy | still present (`ZipArchive.swift:25-28`) | micro; documented |
+| P7b Spotlight text normalized before truncation | still present (`FileContext.swift:73-75`) | micro; documented |
+| P7c collision loop re-hashes neighbors per placement | still present (`Mover.swift:99-110`) | documented |
+| P7e fat `AppState` invalidates every view per keystroke | still present | needs UI profiling on a Mac; documented |
+| P7f fresh `ISO8601DateFormatter` per log line | still present (`ConfigStore.swift:72`) | **→ `claude/spend-persistence`** (cached formatter) |
+| U8 notification toggle overpromises; missing-folder spam | still present (`AppState.swift:209-215`; `activity.missingWatch` re-fires every pass) | **→ branch `claude/notifications-honesty`** (success summaries, failure summaries, once-per-outage folder alerts) |
+| U11 editing lock is invisible | still present (`AppState.swift:24`, no UI reads `editingRuleID`) | **→ branch `claude/rule-editor-guardrails`** (inline "paused while editing" note) |
+| U12a stale "Saved" caption | still present | **→ `claude/keychain-feedback`** (R3) |
+| U12b window title ≠ menu wording | still present (`L10n.swift:52` vs `:44`) | **→ `claude/l10n-stragglers`** |
+| U12c `%d change(s)` plural hacks | still present (`L10n.swift:47,160,161,33`) | **→ `claude/l10n-stragglers`** (tiny one/other plural helper) |
+| U12d taxonomy hint never shown | still present (`L10n.swift:87` unused; `RuleEditor.swift:56`) | **→ `claude/rule-editor-guardrails`** (empty-editor overlay placeholder) |
+| U12e zero validation in the rule editor | still present | **→ `claude/rule-editor-guardrails`** (missing/equal/nested path warnings, invalid-regex flag on pre-rule cards) |
+| U13 first-run is a shrug | still present | see ideas I1/I3; onboarding tour needs a Mac to do honestly |
+| L2 hardcoded-English stragglers | partially fixed (#9/#11/#15 localized updates, Close, undo errors); **still English**: `PathField` ("Choose…", "/path/to/folder", `PathField.swift:12-14`), `MainMenu` App/Edit items (`MainMenu.swift:17-31,47-55`), `HeadlessRunner` output (`HeadlessRunner.swift:16,49,59,61`), `GitHubReleaseClient` errors (`GitHubReleaseClient.swift:15-20`), `Sanitizer` fallback (N7), `UpdateChecker.lastResult` (R6) | **→ `claude/l10n-stragglers`** + `claude/engine-edge-cases` (N7) |
+| L3 Screenshots template double no-op | still present (`Templates.swift:50-57`: glob→`useLLM` *is* the fall-through; prompt still cites "visible text and the image description" the app never sends) | **→ branch `claude/screenshots-template`** (catch-all skip pre-rule so only screenshot-named files hit the model, `Bildschirmfoto` glob, honest prompt) |
+| F2 pending previews don't survive relaunch | still present (`AppState.swift:16`) | designed (pending.json invalidated by rule-edit + fingerprint), deliberately not blind-built; N2 fixes the in-session half |
+| F3 quarantine is a roach motel | still present (no UI reads quarantine folders) | needs real UI; see I6, I31 |
+| F4 no batch undo; CLI's 5-second "batch" | still present (`HeadlessRunner.swift:52-54`; `JournalEntry` has no batch id) | **→ `claude/undo-hardening`** (per-pass `batchID`, GUI "Undo last check", CLI uses the id) |
+| F5 one global model for all rules | still present (`Models.swift:180-233`) | per-rule override designed; not blind-built (UI surface) — see I21 |
+| F6 deterministic-only rules held hostage by the key field | still present (`AppState.swift:181,222`, `HeadlessRunner.swift:25-28`) | **→ `claude/budget-and-keyless`** (keyless runs execute pre-rules; LLM-needing files defer like budget-exhausted ones) |
+| F7 no image/OCR path | still present | Vision OCR is the right shape; needs a Mac to validate |
+| F8 spend resets every launch | still present (`AppState.swift:19`) | **→ branch `claude/spend-persistence`** (monthly persisted usage) |
+| F9 rules aren't portable | still present | **→ branch `claude/rule-packs`** (export/import, paths stripped, imports arrive disabled+preview) |
+| F10a-d exclusions / collision policy / rename-in-place / retry backoff | still present (`DeterministicEngine.swift:44`, `Mover.swift:99`, `Pipeline.swift:361`, `Ledger.swift:25`) | documented; F10a has a design in I20 |
+| C3a `APPLE_TEAM_ID` docs drift | still present (`.github/CICD.md`) | **→ branch `claude/changelog-docs`** |
+| C3b `lkm-build` hard dependency in scripts | still present (`scripts/build.sh`) | **→ `claude/changelog-docs`** (documented as optional path) |
+| C3c README "instant reaction" oversell | improves with P4's follow-up pass | **→ `claude/changelog-docs`** (wording) |
+| C3d AGENTS.md update-cadence claim | fixed by #9's 6 h re-check (claim now roughly true) | — |
+| **New:** CHANGELOG says nothing about the 16 merged fixes | (`CHANGELOG.md` Unreleased still lists only pre-wave-1 items) | **→ `claude/changelog-docs`** |
 
 ---
 
-## 8. Security & privacy notes
+## 4. Security & privacy notes (unchanged posture, one addition)
 
-- **Prompt injection is real but well-contained.** File contents go into the
-  user prompt, so a hostile document can steer *folder/filename* choice — but
-  `Sanitizer.destination` (traversal rejection before sanitizing + post-hoc
-  prefix check, `Sanitizer.swift:44-79`) confines the blast radius to
-  *misfiling inside the target*, and taxonomy + quarantine narrow it further.
-  This is the right architecture; keep it. Consider stripping/flagging
-  suspicious "ignore your instructions" excerpts before sending.
-- **The API key follows the base URL.** `apiBase` is user-editable and the
-  Bearer key is sent wherever it points (`LLMClient.swift:89-94`) — a
-  config-file edit (or a hijacked config) exfiltrates the key. At minimum,
-  warn loudly in the UI when the base URL changes away from a known provider.
-- **No sandbox** (deliberate, Developer-ID distribution) and no entitlements —
-  documented accurately in `.github/CICD.md`. Fine for now.
-- `ZipArchive` declines zip64 rather than misparsing, bounds the EOCD scan,
-  and caps decompression ([B17] aside) — good hostile-input posture.
+Wave-1's assessment stands: prompt injection is contained to *misfiling inside
+the target* by the layered `Sanitizer` (pre-check → sanitize → standardized
+prefix re-check), taxonomy and quarantine narrow it further, the update flow is
+HTTPS-to-github.com with default certificate validation, and `ZipArchive`
+declines what it can't parse safely. Wave-2 hand-checks of the offset
+arithmetic (`Int` from `UInt32` on a 64-bit platform, bounds-checked reads),
+the EPUB path resolver (still can't escape the archive namespace), and log
+hygiene (no Authorization header or key material reaches `activity.log`) found
+no new holes. Additions:
+
+- **`max_tokens` absent** is also a cost concern: a file that steers the model
+  into rambling multiplies output-token spend per file. Fixed by N8.
+- The deeper adversarial sweep planned for this wave (Unicode-normalization
+  corners in `sanitizeComponent`, symlinked-intermediate-directory races
+  between `createDirectory` and `moveItem`) was cut short by the session
+  limit; those two corners remain **unaudited**, flagged here for wave 3.
 
 ---
 
-## 9. Ideas — novel, cool, delightful, quirky
+## 5. Ideas — wave 2 additions
 
-Curated from three brainstorm panels (delight / power-user / trust), keeping
-only what fits this codebase and its safety-first ethos.
-
-**Trust & onboarding**
-- **[I1] Sandboxed first-run tour**: create `~/Sortomat Demo/`, drop 3 sample
-  files, run a real preview → approve → undo cycle on them. Teaches the whole
-  trust loop in 60 seconds with zero risk to real files.
-- **[I2] "Why this destination?" popover**: PlannedAction already carries
-  `origin`, `reason`, `confidence` — show exactly what the model saw (the
-  FileContext description) and what it answered, per row. Trust through
-  transparency, nearly free to build.
-- **[I3] Trust score per rule**: after N consecutive approved previews with
-  zero corrections, offer "this rule has earned auto-mode" (and the reverse:
-  auto-demote to preview after an undo streak). Graduation, not a cliff.
-- **[I4] Before/after folder diff** in the Review tab: a two-column tree of
-  the target, current vs post-apply, additions highlighted.
-- **[I5] Undo where the action happened**: a notification "Undo" action button
-  and a menu-bar "Undo last batch…" item — undo shouldn't require opening a
-  window and finding a row.
+I1–I17 from wave 1 remain the trust/power/delight backlog (none shipped yet —
+they need a running Mac for honest polish). Wave 2 adds, from the surviving
+power/wildcard panel plus the editor's own list. Ones marked **→ built** ship
+in this wave.
 
 **Power**
-- **[I6] Quarantine inbox** ([F3]) with one-click "re-classify with hint" —
-  the hint gets appended to the rule prompt for that file only; corrections
-  optionally accumulate as few-shot examples the rule learns from.
-- **[I7] Backlog wizard**: "This folder has 1 843 files. Estimated cost:
-  $0.87. Sort in chunks of 100, preview each chunk?" — turns the scariest
-  moment (pointing Sortomat at years of Downloads) into a guided, budgeted run.
-- **[I8] Persistent cost meter**: per-month spend + per-rule attribution +
-  "each preview row shows its price tag" ($0.0004 — surprisingly calming).
-- **[I9] Batch classification**: N files per LLM call (the response is a JSON
-  array) — a 5-10× token cost cut for backlogs, at slightly lower per-file
-  accuracy; perfect for the wizard in [I7].
-- **[I10] Per-rule model override** ([F5]) — local model for the tax-documents
-  rule, frontier model for the messy-screenshots rule.
-- **[I11] Rule simulation in the editor**: "Test on 5 random matching files"
-  → dry classifications shown inline, nothing moved, before the rule is ever
-  enabled. (Pipeline's decide/apply split makes this nearly free.)
-- **[I12] Automation surface**: `sortomat://scan?rule=…` URL scheme, Shortcuts
-  actions (App Intents), and a Finder "Sort with Sortomat" service. The
-  headless runner already proves the core is callable.
+- **[I18] Plan/apply as data**: `plan --json` emits every `PlannedAction`;
+  `apply --plan file.json` executes a hand-edited subset; `classify <file>`
+  one-shots a single decision. Turns Sortomat into a composable Unix citizen —
+  and the decide/apply split already *is* this, minus argument parsing.
+- **[I19] launchd recipe installer**: `sortomat install-agent --interval 15m`
+  writes and bootstraps the LaunchAgent plist the README currently asks users
+  to hand-roll. Pairs with the process lock (**→ built**, `claude/process-lock`)
+  that makes GUI + launchd coexistence safe in the first place.
+- **[I20] Hazel-parity pre-rule pack**: `sizeOver/UnderMB`, `pathGlob` (real
+  exclusion patterns for recursive rules — closes F10a), `finderTag`,
+  `addedSince` (kMDItemDateAdded ≠ mtime for downloads). Every new
+  deterministic match is a file that never costs an LLM call.
+- **[I21] Confidence cascade**: classify with the cheap/local model first;
+  below-threshold answers escalate to a designated stronger model *instead of*
+  quarantining. Cuts cost the way email-triage cascades do, and shrinks the
+  quarantine pile (F3's roach motel gets fewer roaches).
+- **[I22] Model downgrade advisor**: replay a rule's journaled decisions
+  through a candidate (local) model and print an agreement score — "23/25
+  identical, est. $0 vs $0.31/mo". Answers "can I move this rule to Ollama?"
+  with evidence.
 
-**Delight**
-- **[I13] The funnel gulps**: 300 ms dot-falls-through-funnel animation on the
-  menu-bar icon when a file is filed (`NSImageView` frame swap, no heavier
-  machinery). Paired with an optional single soft "thunk" per *batch* —
-  never per file.
-- **[I14] Weekly Tidy Report**: one notification, Monday 9:00 — "42 filed,
-  2 quarantined, 0 undone · your Downloads folder lost 3.2 GB · $0.11". Dry
-  wit encouraged ("Your desktop can see the sun again").
-- **[I15] Chaos meter**: a tiny gauge in the menu header rating the watch
-  folders' entropy ("Zen garden" → "Tornado warning") — computed from file
-  count / age spread, no LLM needed. Quirky, informative, shareable.
-- **[I16] Milestone toasts**: 1 000th file filed gets a one-liner. Rotating
-  deadpan empty states in the Review tab ("Inbox zero. Well, folder zero.").
-- **[I17] Spend-o-meter in espresso units**: "$0.42 this month — about half an
-  espresso." Cost anxiety is the #1 adoption blocker for LLM tools; humor
-  disarms it.
+**Wildcard**
+- **[I23] Content-hash decision memo** (**→ built**, `claude/decision-memo`):
+  the ledger keys on path|size|mtime, so the same bytes under a new name are
+  re-classified and re-paid. A small per-rule digest → decision memo consulted
+  before any LLM call makes identical bytes get identical decisions — free,
+  instant, deterministic. Memoization à la ccache, for filing.
+- **[I24] Pre-rule miner**: mine the journal for LLM decisions that were
+  deterministic in hindsight ("every `Rechnung*.pdf` went to
+  `Finanzen/{year}`") and offer one-click promotion to a free glob pre-rule.
+  The app literally compiles its own LLM into rules as it runs.
+- **[I25] Breadcrumb mode**: after a move, leave a Finder alias at the origin
+  that a sweeper dissolves after N days — muscle memory keeps working during
+  the transition, then the clutter self-cleans. No competitor does this.
+- **[I26] Provenance stamps + `whence`**: stamp every filed file with an xattr
+  accession record (original path, date, rule, reason, confidence);
+  `sortomat whence <file>` — and a History row action — answers "how did this
+  get here and why", even after the journal is long gone.
+- **[I27] Snooze**: "ask me again in a week" on a Review row — the ledger's
+  `retryAfter` machinery already *is* this, one status case away. Fills the gap
+  between Apply and Dismiss for "still working on this" files.
+- **[I28] Label-don't-move**: a third rule mode that writes the taxonomy
+  verdict as Finder tags and leaves the file in place — Gmail labels for the
+  filesystem, undo-safe by construction, composes with smart folders.
+
+**Trust & delight (editor's additions, replacing the panel the rate limiter ate)**
+- **[I29] Drag-onto-the-funnel "what would happen?"**: drop a file on the
+  menu-bar icon → a popover shows which rule would claim it, the destination,
+  and why — a zero-risk single-file preview. (NSStatusItem buttons accept
+  drags; the decide path is already pure.)
+- **[I30] Tidy tally**: lifetime stats in About, computed from the journal —
+  "4 812 files filed · 92 GB organized · 14 undos". Cheap, honest bragging.
+- **[I31] Quarantine digest**: one weekly notification — "5 files waiting in
+  quarantine, oldest 12 days" — so F3's folder stops being invisible even
+  before it gets real UI.
 
 ---
 
-## 10. Refuted / verified-fine (for transparency)
+## 6. Refuted / verified-fine (cumulative)
 
-Claims raised during review that inspection killed — recorded so nobody
-re-litigates them:
+Wave 1's list stands (env-var key override works; Sanitizer's traversal
+defense layered and correct; EpubReader can't escape the archive; both CICD
+files intentional; locked-keychain headless exit is clean; CI pipeline solid).
+Wave 2 adds:
 
-- `SORTOMAT_API_KEY` env override *is* implemented (`Keychain.swift:41-47`) —
-  README's headless example is correct.
-- `Sanitizer` traversal defense is genuinely layered and correct for its
-  threat model (pre-check before sanitizing + standardized-prefix post-check).
-- `EpubReader.resolvePath` can't escape the archive namespace; XML parsing
-  doesn't load external entities.
-- The two `CICD.md` files are intentional (quick-ref vs. detailed) and
-  cross-linked, not an accident.
-- `Keychain.get` on a locked keychain returns nil → headless run exits 2 with
-  a clear message (not silent 401s as one reviewer claimed).
-- CI itself is solid: pinned Xcode, `pipefail`, result-bundle artifact on
-  failure, release re-runs tests before publishing.
+- **UpdateChecker alerts off the main thread** — raised during diff review,
+  refuted: the class is `@MainActor` (`UpdateChecker.swift:7`), so the 6 h
+  background task's alerts hop to main correctly.
+- **`GeneralTab` launch-at-login `onChange` feedback loop** — refuted: the
+  re-read assignment converges (writes only differ when registration was
+  refused, and then stabilize).
+- **B23f test-env pollution** — refuted on re-read: `ConfigStore.directory`
+  computes from `ProcessInfo` per access, so `setenv` in `setUp` *is* honored.
+- **EN/DE format-string arity** — audited key-by-key across both tables; no
+  mismatches (the crash class a `%@`-count divergence would cause is absent).
+- **StatusItem pending badge not updating** — refuted: `$pendingActions` sink
+  drives `updateIcon()` (`StatusItemController.swift:40`).
 
 ---
 
-## Implementation plan
+## Wave-2 implementation plan
 
-Branches implemented in this pass (each self-contained, ordered so file
-overlap between them is minimal; L10n additions land in distinct dictionary
-sections):
+Eighteen branches, each self-contained, ordered so file overlap is minimal
+(where two branches touch the same file they touch disjoint regions; L10n
+additions land in each branch's own table section):
 
 | Branch | Items | Files touched |
 | --- | --- | --- |
-| `claude/fix-cross-volume-verify` | B1, B2 (+B7 documented) | Mover, ContentHash, MoverTests |
-| `claude/fix-llm-client` | B10 + `/v1` base-URL normalization (U-adjacent [F-gap]) | LLMClient, new LLMClientTests |
-| `claude/fix-classification-parsing` | B11, B12 | Classification, ClassificationTests |
-| `claude/fix-config-corruption` | B3 | ConfigStore, ConfigMigrationTests |
-| `claude/fix-journal-undo` | B4, B5, B6 | Journal, AppState, PreviewView (History), JournalTests |
-| `claude/fix-rule-priority` | B13 + interval clamp (B23a) | AppState, HeadlessRunner |
-| `claude/fix-budget-overshoot` | B14 + target-subtree skip (P7d) | Pipeline |
-| `claude/fix-text-extraction` | B15, B16, B17 | FileContext, HTMLText, ZipArchive, tests |
-| `claude/fix-keychain-set` | B8 | Keychain |
-| `claude/fix-update-checker` | B20, B21 (+ localized alerts, L2-partial) | UpdateChecker, L10n |
-| `claude/preview-polish` | U1, U2, U3, U4, U10, B19 | PreviewView, window controllers, L10n |
-| `claude/menu-polish` | U5, U7, U9, B18, L2-partial | StatusItemController, BlockMenuItem, MainMenu, Notifier, L10n |
-| `claude/confirm-rule-deletion` | U6 | RulesTab, L10n |
-| `claude/add-launch-at-login` | F1 | GeneralTab, L10n |
-| `claude/localize-defaults` | L1 | Models, Templates, L10n |
-| `claude/fix-release-prerelease` | C1, C2 | release.yml, CICD.md |
+| `claude/undo-hardening` | R1, R2, R7, F4 (batchID + Undo-last-check), N9-partial | Journal, HeadlessRunner, Pipeline (stamp), AppState (undo), PreviewView (History), L10n (journal), JournalTests |
+| `claude/apply-revalidation` | N1 (B23h) | PlannedAction, Pipeline (capture+verify), tests |
+| `claude/budget-and-keyless` | R4, R5, F6 | Pipeline (scan loop), Models, AppState, HeadlessRunner, RuleOrderTests, new tests |
+| `claude/engine-edge-cases` | N4 (B23b), N5 (B23e), N6 (B23d), N7 | Pipeline (isStable), Mover, ZipArchive, Sanitizer, L10n (errors), tests |
+| `claude/watching-robustness` | B22, P6, P4 | FSEventsWatcher, AppState (watchers/requestScan), Pipeline (ScanResult), tests |
+| `claude/preview-hygiene` | N2 | AppState (ingest/refresh/remove), Pipeline (forgetPreviews), tests |
+| `claude/notifications-honesty` | U8 | AppState (notify), L10n (notifications) |
+| `claude/keychain-feedback` | R3, U12a | AppState (saveAPIKey), GeneralTab, L10n (general) |
+| `claude/rule-editor-guardrails` | U11, U12d, U12e | RuleEditor, DeterministicEngine (validity helper), L10n (rule), tests |
+| `claude/l10n-stragglers` | L2-remainder, R6, U12b, U12c, N9-partial | L10n (+plural helper), PathField, MainMenu, UpdateChecker, GitHubReleaseClient, StatusItemController, PreviewView, SettingsWindowController |
+| `claude/spend-persistence` | F8, N3, P7f | ConfigStore, AppState, AppDelegate, L10n (menu), tests |
+| `claude/maintenance-rotation` | P5-partial | ConfigStore (log rotation), Ledger (prune + dirty flag), Pipeline (persist), LedgerTests |
+| `claude/screenshots-template` | L3 | Templates, L10n (templates), TemplatesTests |
+| `claude/rule-packs` | F9 | new RulePack, RulesTab, L10n (rules), new tests |
+| `claude/llm-hardening` | N8 | LLMClient, LLMClientTests |
+| `claude/process-lock` | B9 | new ProcessLock, HeadlessRunner, AppState, new tests |
+| `claude/decision-memo` | I23 | new DecisionMemo, Pipeline (decide/apply hooks), ConfigStore (path), new tests |
+| `claude/changelog-docs` | CHANGELOG, C3a-c | CHANGELOG.md, README.md, .github/CICD.md, scripts comments |
 
-Deliberately **not** implemented without a Mac to verify on: B9 (cross-process
-locking), B22 (FSEvents lifecycle), P1-P4 (pipeline scheduling redesign), F2
-(pending-plan persistence), and everything in §9 — those deserve design
-attention and a running app, not blind patches.
+Deliberately **not** implemented without a Mac to verify on: P1/F2
+(pending-plan persistence — interacts with everything above; next wave, on a
+Mac), P2 (sliding-window scheduler), F3 (quarantine UI), F5/I21 (per-rule
+models — a real settings-UI design task), F7 (Vision OCR), U13/I1 (first-run
+tour), and the §5 ideas not marked built.
 
 *— Fable*
