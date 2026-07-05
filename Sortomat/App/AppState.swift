@@ -32,11 +32,15 @@ final class AppState: ObservableObject {
     private var scanRequested = false
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
+    /// Each rule reduced to its decision-relevant fields, as last applied —
+    /// compared on save to invalidate previews of rules whose behavior changed.
+    private var decisionSignatures: [UUID: Rule] = [:]
 
     init() {
         let loaded = ConfigStore.load()
         config = loaded
         apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && loaded.providerRequiresKey
+        decisionSignatures = Self.signatures(of: loaded.rules)
         Notifier.requestAuthorization()
         rebuildWatchers()
         startTimer()
@@ -66,7 +70,42 @@ final class AppState: ObservableObject {
             ConfigStore.save(self.config)
             self.apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && self.config.providerRequiresKey
             self.rebuildWatchers()
+            await self.invalidateStalePreviews()
         }
+    }
+
+    /// A rule whose prompt, paths, pre-rules, taxonomy or thresholds changed
+    /// must not keep serving suggestions computed under the old settings —
+    /// drop its queued plans and the pipeline's preview memory so the next
+    /// refresh re-plans. (Renames, enable/disable, priority and preview-mode
+    /// toggles don't affect what a rule *decides*, so they don't invalidate.)
+    private func invalidateStalePreviews() async {
+        let current = Self.signatures(of: config.rules)
+        var changed: [UUID] = []
+        for (id, signature) in current where decisionSignatures[id] != signature {
+            changed.append(id)
+        }
+        changed.append(contentsOf: decisionSignatures.keys.filter { current[$0] == nil })
+        decisionSignatures = current
+        for id in changed {
+            pendingActions.removeAll { $0.ruleID == id }
+            await pipeline.forgetPreviews(ruleID: id)
+        }
+    }
+
+    private static func signatures(of rules: [Rule]) -> [UUID: Rule] {
+        Dictionary(uniqueKeysWithValues: rules.map { ($0.id, signature(of: $0)) })
+    }
+
+    /// The rule with everything that does *not* influence its decisions
+    /// normalized away.
+    private static func signature(of rule: Rule) -> Rule {
+        var s = rule
+        s.name = ""
+        s.enabled = true
+        s.priority = 0
+        s.dryRun = false
+        return s
     }
 
     func saveAPIKey(_ key: String) {
@@ -95,7 +134,10 @@ final class AppState: ObservableObject {
     func remove(ruleID: UUID) {
         config.rules.removeAll { $0.id == ruleID }
         pendingActions.removeAll { $0.ruleID == ruleID }
-        Task { await pipeline.forget(ruleID: ruleID) }
+        Task {
+            await pipeline.forget(ruleID: ruleID)
+            await pipeline.forgetPreviews(ruleID: ruleID)
+        }
         persistAndApply()
     }
 
@@ -189,8 +231,16 @@ final class AppState: ObservableObject {
                 ingest(result)
             }
             await pipeline.persist()
+            pruneStalePending()
             lastScan = Date()
         }
+    }
+
+    /// Plans whose file has since vanished (filed by hand, deleted, renamed)
+    /// could only fail on Apply — drop them so neither the list nor the
+    /// menu-bar badge advertises work that no longer exists.
+    private func pruneStalePending() {
+        pendingActions.removeAll { !FileManager.default.fileExists(atPath: $0.source.path) }
     }
 
     private func ingest(_ result: ScanResult) {
@@ -227,6 +277,7 @@ final class AppState: ObservableObject {
             )
             ingest(result)
         }
+        pruneStalePending()
         lastScan = Date()
     }
 
