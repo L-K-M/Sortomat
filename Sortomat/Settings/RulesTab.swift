@@ -3,6 +3,7 @@ import SwiftUI
 struct RulesTab: View {
     @EnvironmentObject private var state: AppState
     @State private var selection: UUID?
+    @State private var confirmingDelete = false
 
     var body: some View {
         HSplitView {
@@ -49,11 +50,29 @@ struct RulesTab: View {
                 }
                 .menuStyle(.borderlessButton)
                 .frame(width: 40)
+                .help(L10n.t("rules.add"))
 
                 Button {
-                    if let id = selection { state.remove(ruleID: id); selection = state.config.rules.first?.id }
+                    confirmingDelete = true
                 } label: { Image(systemName: "minus") }
                     .disabled(selection == nil)
+                    .help(L10n.t("rules.remove"))
+                    // Deleting destroys a hand-tuned prompt/taxonomy and the
+                    // rule's ledger memory, irreversibly — never on a mis-click.
+                    .confirmationDialog(
+                        L10n.t("rules.delete.title", selectedRuleName),
+                        isPresented: $confirmingDelete,
+                        titleVisibility: .visible
+                    ) {
+                        Button(L10n.t("rules.delete.confirm"), role: .destructive) {
+                            if let id = selection {
+                                state.remove(ruleID: id)
+                                selection = state.config.rules.first?.id
+                            }
+                        }
+                    } message: {
+                        Text(L10n.t("rules.delete.message"))
+                    }
 
                 Button {
                     if let id = selection { state.duplicate(ruleID: id) }
@@ -85,6 +104,10 @@ struct RulesTab: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private var selectedRuleName: String {
+        state.config.rules.first(where: { $0.id == selection })?.name ?? ""
     }
 
     private func dotColor(for rule: Rule) -> Color {
