@@ -15,8 +15,11 @@ final class SanitizerTests: XCTestCase {
     }
 
     func testEmptyBecomesUnknown() {
-        XCTAssertEqual(Sanitizer.sanitizeComponent("   ...  "), "Unbekannt")
-        XCTAssertEqual(Sanitizer.sanitizeComponent(".."), "Unbekannt")
+        // The fallback follows the UI language (English "Unknown" on the CI
+        // runner, German "Unbekannt" on a German system).
+        let unknown = L10n.t("component.unknown")
+        XCTAssertEqual(Sanitizer.sanitizeComponent("   ...  "), unknown)
+        XCTAssertEqual(Sanitizer.sanitizeComponent(".."), unknown)
     }
 
     func testTruncatesToMaxLength() {

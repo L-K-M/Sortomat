@@ -86,8 +86,7 @@ enum Mover {
     /// Decide the final URL: the requested destination if free, a duplicate marker
     /// if an identical file already sits there, or the next free ` (n)` variant.
     private static func resolvePlacement(source: URL, destination: URL) throws -> Placement {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: destination.path) {
+        if !occupied(destination) {
             return .place(destination)
         }
 
@@ -101,7 +100,7 @@ enum Mover {
                 ? destination
                 : dir.appendingPathComponent(ext.isEmpty ? "\(stem) (\(index))"
                                                           : "\(stem) (\(index)).\(ext)")
-            if !fm.fileExists(atPath: candidate.path) {
+            if !occupied(candidate) {
                 return .place(candidate)
             }
             if let sourceHash, ContentHash.digest(of: candidate) == sourceHash {
@@ -109,6 +108,14 @@ enum Mover {
             }
         }
         throw PathError.tooManyCollisions(destination.path)
+    }
+
+    /// Whether *anything* sits at this path. `fileExists` follows symlinks, so
+    /// a dangling link answered "free" — and the subsequent move threw, every
+    /// scan, forever. `attributesOfItem` has lstat semantics: the link itself
+    /// counts, so a dangling link gets a ` (n)` suffix like any other occupant.
+    private static func occupied(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
     private static func isCrossVolume(source: URL, destination: URL) -> Bool {

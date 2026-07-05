@@ -393,7 +393,10 @@ actor Pipeline {
               let modified = attrs[.modificationDate] as? Date,
               let size = attrs[.size] as? Int64
         else { return false }
-        guard Date().timeIntervalSince(modified) > 5 else { return false }
+        // abs(): a modification date in the *future* (bad camera clock, sloppy
+        // stamping by a downloader) must not park the file forever — the size
+        // probe below still catches files that are actively being written.
+        guard abs(Date().timeIntervalSince(modified)) > 5 else { return false }
         try? await Task.sleep(nanoseconds: 700_000_000)
         let sizeAfter = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? -1
         return sizeAfter == size
