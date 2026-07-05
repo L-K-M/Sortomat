@@ -3,8 +3,20 @@ import Foundation
 /// Command-line entry points used by tests, scripts and launchd jobs. Runs the
 /// same Pipeline the GUI uses, then exits.
 enum HeadlessRunner {
+    /// Held for the whole run (a static so ARC can't release it early); the
+    /// process exit releases it.
+    private static var lock: ProcessLock?
+
     static func run(_ arguments: [String]) async -> Never {
         let command = arguments.first ?? "scan-once"
+        // Every subcommand writes the ledger and/or journal. Running beside a
+        // live GUI (or a second headless run) clobbers records — refuse
+        // politely instead.
+        lock = ProcessLock.acquire()
+        if lock == nil {
+            FileHandle.standardError.write(Data((L10n.t("process.locked") + "\n").utf8))
+            exit(3)
+        }
         switch command {
         case "scan-once":
             await scanOnce(apply: true)
