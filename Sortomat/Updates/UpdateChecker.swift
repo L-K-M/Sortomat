@@ -21,6 +21,7 @@ final class UpdateChecker: ObservableObject {
     private let config: Configuration
     private let client: GitHubReleaseClient
     private let defaults: UserDefaults
+    private var periodicTask: Task<Void, Never>?
 
     private var lastCheckKey: String { "UpdateChecker.\(config.owner).\(config.repo).lastCheck" }
     private var skipVersionKey: String { "UpdateChecker.\(config.owner).\(config.repo).skip" }
@@ -31,24 +32,48 @@ final class UpdateChecker: ObservableObject {
         self.defaults = defaults
     }
 
+    deinit { periodicTask?.cancel() }
+
     func checkOnLaunch() {
         let last = defaults.object(forKey: lastCheckKey) as? Date ?? .distantPast
-        guard Date().timeIntervalSince(last) >= config.minimumCheckInterval else { return }
-        Task { await check(userInitiated: false) }
+        if Date().timeIntervalSince(last) >= config.minimumCheckInterval {
+            Task { await check(userInitiated: false) }
+        }
+        startPeriodicChecks()
+    }
+
+    /// A menu-bar agent can stay up for weeks; checking only at launch means it
+    /// never re-checks. Re-evaluate a few times a day — the actual network call
+    /// still happens at most once per `minimumCheckInterval`.
+    private func startPeriodicChecks() {
+        guard periodicTask == nil else { return }
+        periodicTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 6 * 3_600 * 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                let last = self.defaults.object(forKey: self.lastCheckKey) as? Date ?? .distantPast
+                if Date().timeIntervalSince(last) >= self.config.minimumCheckInterval {
+                    await self.check(userInitiated: false)
+                }
+            }
+        }
     }
 
     func check(userInitiated: Bool) async {
         guard !isChecking else { return }
         isChecking = true
         defer { isChecking = false }
-        defaults.set(Date(), forKey: lastCheckKey)
 
         do {
             let release = try await client.latestRelease(allowPrereleases: config.allowPrereleases)
+            // Stamp only after a *successful* fetch: stamping up front meant a
+            // failed launch-time check (offline Mac waking up) suppressed any
+            // retry for a full day.
+            defaults.set(Date(), forKey: lastCheckKey)
             guard let latest = release.version,
                   let current = SemanticVersion(config.currentVersion) else {
-                lastResult = "Couldn't parse version numbers."
-                if userInitiated { presentUpToDate() }
+                lastResult = L10n.t("updates.parseFailed")
+                if userInitiated { presentCheckFailed(L10n.t("updates.parseFailed")) }
                 return
             }
             if latest > current {
@@ -69,15 +94,23 @@ final class UpdateChecker: ObservableObject {
 
     // MARK: - Alerts
 
+    /// Run an alert with the `.accessory` ↔ `.regular` dance: without the
+    /// revert after `runModal`, "Check for Updates…" left a permanent Dock
+    /// icon on a menu-bar-only app.
+    private func runModalAsRegularApp(_ alert: NSAlert) -> NSApplication.ModalResponse {
+        ActivationPolicy.showRegular()
+        defer { ActivationPolicy.revertToAccessoryIfNoOrdinaryWindows(excluding: nil) }
+        return alert.runModal()
+    }
+
     private func present(release: GitHubRelease) {
         let alert = NSAlert()
-        alert.messageText = "\(config.appName) \(release.tagName) is available"
-        alert.informativeText = "You have \(config.currentVersion). Would you like to download the update?"
-        alert.addButton(withTitle: "Download")
-        alert.addButton(withTitle: "Remind Me Later")
-        alert.addButton(withTitle: "Skip This Version")
-        ActivationPolicy.showRegular()
-        switch alert.runModal() {
+        alert.messageText = L10n.t("updates.available.title", config.appName, release.tagName)
+        alert.informativeText = L10n.t("updates.available.body", config.currentVersion)
+        alert.addButton(withTitle: L10n.t("updates.available.download"))
+        alert.addButton(withTitle: L10n.t("updates.available.later"))
+        alert.addButton(withTitle: L10n.t("updates.available.skip"))
+        switch runModalAsRegularApp(alert) {
         case .alertFirstButtonReturn:
             NSWorkspace.shared.open(release.preferredAsset?.browserDownloadURL ?? release.htmlURL)
         case .alertThirdButtonReturn:
@@ -89,19 +122,21 @@ final class UpdateChecker: ObservableObject {
 
     private func presentUpToDate() {
         let alert = NSAlert()
-        alert.messageText = "You're up to date"
-        alert.informativeText = "\(config.appName) \(config.currentVersion) is the latest version."
-        alert.addButton(withTitle: "OK")
-        ActivationPolicy.showRegular()
-        alert.runModal()
+        alert.messageText = L10n.t("updates.upToDate.title")
+        alert.informativeText = L10n.t("updates.upToDate.body", config.appName, config.currentVersion)
+        alert.addButton(withTitle: L10n.t("updates.ok"))
+        _ = runModalAsRegularApp(alert)
+    }
+
+    private func presentCheckFailed(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = L10n.t("updates.failed.title")
+        alert.informativeText = message
+        alert.addButton(withTitle: L10n.t("updates.ok"))
+        _ = runModalAsRegularApp(alert)
     }
 
     private func presentError(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Couldn't check for updates"
-        alert.informativeText = error.localizedDescription
-        alert.addButton(withTitle: "OK")
-        ActivationPolicy.showRegular()
-        alert.runModal()
+        presentCheckFailed(error.localizedDescription)
     }
 }
