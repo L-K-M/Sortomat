@@ -90,6 +90,7 @@ actor Pipeline {
             for outcome in outcomes {
                 if outcome.usedLLM { budgetRemaining -= 1 }
                 if outcome.budgetDeferred { budgetHit = true }
+                if outcome.unstable { result.unstableCount += 1 }
                 if let entry = outcome.entry { result.entries.append(entry) }
                 if let plan = outcome.pending { result.pending.append(plan) }
                 result.usage = result.usage + outcome.usage
@@ -115,6 +116,8 @@ actor Pipeline {
         var usage = TokenUsage()
         var usedLLM = false
         var budgetDeferred = false
+        /// Rejected by the stability probe — a follow-up pass should retry soon.
+        var unstable = false
     }
 
     // MARK: - Per-file processing
@@ -134,7 +137,11 @@ actor Pipeline {
         inFlight.insert(ledgerKey)
         defer { inFlight.remove(ledgerKey) }
 
-        guard await isStable(file) else { return nil }
+        guard await isStable(file) else {
+            var outcome = FileOutcome()
+            outcome.unstable = true
+            return outcome
+        }
 
         var outcome = FileOutcome()
         do {
