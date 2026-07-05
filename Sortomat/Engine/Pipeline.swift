@@ -57,8 +57,14 @@ actor Pipeline {
         var budgetHit = false
 
         while index < candidates.count {
-            let batch = candidates[index..<min(index + cap, candidates.count)]
-            index += cap
+            // Never launch more potential LLM calls than the budget has left:
+            // `allowLLM` is decided per *batch*, so a batch wider than the
+            // remaining budget could overshoot it by up to cap-1 calls. When
+            // the budget runs low, batches shrink to match (slightly less
+            // parallelism for pre-rule-only files, but the cap actually holds).
+            let batchCap = max(1, min(cap, budgetRemaining))
+            let batch = candidates[index..<min(index + batchCap, candidates.count)]
+            index += batchCap
             var outcomes: [FileOutcome] = []
             await withTaskGroup(of: FileOutcome?.self) { group in
                 for file in batch {
@@ -354,8 +360,14 @@ actor Pipeline {
             guard let enumerator = fm.enumerator(
                 at: watch, includingPropertiesForKeys: keys, options: options
             ) else { return [] }
-            for case let url as URL in enumerator where acceptable(url) {
-                urls.append(url)
+            for case let url as URL in enumerator {
+                // Don't descend into the target subtree at all — every file in
+                // there would be enumerated only to be rejected one by one.
+                if url.standardizedFileURL.path == targetPath {
+                    enumerator.skipDescendants()
+                    continue
+                }
+                if acceptable(url) { urls.append(url) }
             }
         } else {
             guard let children = try? fm.contentsOfDirectory(
