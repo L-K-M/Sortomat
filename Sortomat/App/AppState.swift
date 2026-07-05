@@ -33,10 +33,17 @@ final class AppState: ObservableObject {
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
 
+    /// The month `usage` belongs to; when it rolls over mid-run the counter
+    /// restarts instead of billing January's tokens to February.
+    private var spendMonth = SpendStore.monthKey()
+
     init() {
         let loaded = ConfigStore.load()
         config = loaded
         apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && loaded.providerRequiresKey
+        let spend = SpendStore.load()
+        spendMonth = spend.month
+        usage = spend.usage
         Notifier.requestAuthorization()
         rebuildWatchers()
         startTimer()
@@ -189,12 +196,27 @@ final class AppState: ObservableObject {
                 ingest(result)
             }
             await pipeline.persist()
+            persistSpend()
             lastScan = Date()
         }
     }
 
+    private func persistSpend() {
+        SpendStore(month: spendMonth, input: usage.input, output: usage.output).save()
+    }
+
+    private func accumulate(_ resultUsage: TokenUsage) {
+        let month = SpendStore.monthKey()
+        if month != spendMonth {
+            spendMonth = month
+            usage = resultUsage
+        } else {
+            usage = usage + resultUsage
+        }
+    }
+
     private func ingest(_ result: ScanResult) {
-        usage = usage + result.usage
+        accumulate(result.usage)
         for plan in result.pending where !pendingActions.contains(where: { $0.source == plan.source && $0.ruleID == plan.ruleID }) {
             pendingActions.append(plan)
         }
@@ -246,6 +268,22 @@ final class AppState: ObservableObject {
 
     func dismiss(_ plan: PlannedAction) {
         pendingActions.removeAll { $0.id == plan.id }
+    }
+
+    // MARK: - Termination
+
+    /// Called from applicationWillTerminate: write the spend store and give
+    /// the pipeline a bounded moment to persist its in-memory ledger records —
+    /// paid verdicts from a pass that was still running must not be forgotten
+    /// (and re-paid) because the user quit at the wrong moment.
+    func flushOnTerminate() {
+        persistSpend()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached { [pipeline] in
+            await pipeline.persist()
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 2)
     }
 
     // MARK: - Undo
