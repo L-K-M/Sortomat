@@ -41,7 +41,14 @@ struct Classification: Decodable, Equatable {
         self.confidence = confidence
     }
 
-    var isMove: Bool { action != "skip" }
+    /// Only an affirmative action moves a file. Anything unrecognized —
+    /// "ignore", "none", "delete", hallucinated verbs — is treated as a skip:
+    /// for a tool that moves files, the safe default for "I don't understand
+    /// the answer" is to do nothing. (A missing action still decodes as
+    /// "move", since some models omit it while supplying a path.)
+    var isMove: Bool {
+        ["move", "copy", "file", "sort", "rename"].contains(action)
+    }
 
     /// The path relative to the target, assembled from whichever fields the model
     /// filled in. `nil` when there is nothing usable.
@@ -68,11 +75,21 @@ struct Classification: Decodable, Equatable {
     }
 
     private static func decodeConfidence(_ c: KeyedDecodingContainer<CodingKeys>) -> Double? {
-        if let d = try? c.decodeIfPresent(Double.self, forKey: .confidence) { return d }
+        if let d = try? c.decodeIfPresent(Double.self, forKey: .confidence) {
+            return normalizeConfidence(d)
+        }
         if let s = try? c.decodeIfPresent(String.self, forKey: .confidence) {
             return Double(s.replacingOccurrences(of: "%", with: ""))
-                .map { $0 > 1 ? $0 / 100 : $0 }
+                .map(normalizeConfidence)
         }
         return nil
+    }
+
+    /// Models sometimes answer in percent (`85` or `"85%"`) instead of 0…1.
+    /// Without normalizing the *numeric* form too, `85 < threshold` is never
+    /// true and the low-confidence quarantine is silently defeated.
+    private static func normalizeConfidence(_ value: Double) -> Double {
+        let scaled = value > 1 ? value / 100 : value
+        return min(max(scaled, 0), 1)
     }
 }
