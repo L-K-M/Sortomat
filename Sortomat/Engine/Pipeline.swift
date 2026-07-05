@@ -25,6 +25,15 @@ actor Pipeline {
     func persist() { ledger.save() }
     func forget(ruleID: UUID) { ledger.forget(ruleID: ruleID) }
 
+    /// After an undo restores a file into a watched folder, remember it as
+    /// skipped for the rule that moved it — otherwise the very next scan
+    /// re-classifies (re-pays for) the file and moves it right back,
+    /// structurally defeating undo.
+    func markUndone(ruleID: UUID, sourcePath: String) {
+        let fingerprint = Ledger.fingerprint(URL(fileURLWithPath: sourcePath))
+        ledger.record(ruleID: ruleID, fingerprint: fingerprint, status: .skipped)
+    }
+
     // MARK: - Scanning
 
     /// Scan one rule. `forcePreview` makes even a non-dry-run rule only plan

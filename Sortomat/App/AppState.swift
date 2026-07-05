@@ -243,4 +243,16 @@ final class AppState: ObservableObject {
     func dismiss(_ plan: PlannedAction) {
         pendingActions.removeAll { $0.id == plan.id }
     }
+
+    // MARK: - Undo
+
+    /// Undo a journaled placement *and* pin the restored file as skipped in
+    /// the ledger, so the rule doesn't immediately re-classify and re-move it
+    /// (the undo ping-pong).
+    func undo(_ entry: JournalEntry) async throws {
+        try Journal.undo(entry)
+        guard !entry.wasCopy else { return } // nothing returned to the watch folder
+        await pipeline.markUndone(ruleID: entry.ruleID, sourcePath: entry.sourcePath)
+        await pipeline.persist()
+    }
 }
