@@ -99,6 +99,17 @@ final class AppState: ObservableObject {
         persistAndApply()
     }
 
+    /// Add an imported rule (already normalized to disabled + preview by the
+    /// pack) under a unique name; returns its id so the UI can select it.
+    @discardableResult
+    func importRule(_ rule: Rule) -> UUID {
+        var imported = rule
+        imported.name = uniqueName(imported.name)
+        config.rules.append(imported)
+        persistAndApply()
+        return imported.id
+    }
+
     private func uniqueName(_ base: String) -> String {
         let names = Set(config.rules.map(\.name))
         guard names.contains(base) else { return base }
