@@ -197,6 +197,10 @@ public enum L10n {
         "activity.wouldSkip": "[%@] Would skip %@ — %@",
         "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
 
+        // Decision memo
+        "memo.remembered": "%@ · remembered from an identical file",
+        "memo.rememberedBare": "Remembered from an identical file",
+
         // Errors
         "error.unsafePath": "Unsafe destination path: %@",
         "error.tooManyCollisions": "Too many name collisions: %@",
@@ -418,6 +422,9 @@ public enum L10n {
         "activity.wouldMove": "[%@] Würde verschieben %@ → %@",
         "activity.wouldSkip": "[%@] Würde überspringen %@ – %@",
         "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
+
+        "memo.remembered": "%@ · von einer identischen Datei übernommen",
+        "memo.rememberedBare": "Von einer identischen Datei übernommen",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",
         "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",

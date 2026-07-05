@@ -10,6 +10,9 @@ actor Pipeline {
     ]
 
     private let ledger: Ledger
+    /// Content-addressed decisions: identical bytes under the same rule never
+    /// pay for a second classification.
+    private let memo: DecisionMemo
     /// Files currently being planned/applied — guards against the same file being
     /// picked up twice by overlapping scans within this process.
     private var inFlight: Set<String> = []
@@ -17,13 +20,20 @@ actor Pipeline {
     /// session, so we don't re-classify (and re-pay) them every interval.
     private var previewed: Set<String> = []
 
-    init(ledger: Ledger = Ledger()) {
+    init(ledger: Ledger = Ledger(), memo: DecisionMemo = DecisionMemo()) {
         self.ledger = ledger
+        self.memo = memo
     }
 
     func ledgerCount() -> Int { ledger.count }
-    func persist() { ledger.save() }
-    func forget(ruleID: UUID) { ledger.forget(ruleID: ruleID) }
+    func persist() {
+        ledger.save()
+        memo.save()
+    }
+    func forget(ruleID: UUID) {
+        ledger.forget(ruleID: ruleID)
+        memo.forget(ruleID: ruleID)
+    }
 
     /// After an undo restores a file into a watched folder, remember it as
     /// skipped for the rule that moved it — otherwise the very next scan
@@ -175,8 +185,8 @@ actor Pipeline {
         var usedLLM = false
     }
 
-    /// The pure decision: pre-rules → (optional) model → taxonomy/confidence
-    /// routing → a `PlannedAction`.
+    /// The pure decision: pre-rules → decision memo → (optional) model →
+    /// taxonomy/confidence routing → a `PlannedAction`.
     private func decide(
         file: URL, rule: Rule, target: URL, config: Config,
         apiKey: String, allowLLM: Bool
@@ -205,10 +215,28 @@ actor Pipeline {
             break
         }
 
-        // 2. Budget.
+        // 2. Content-addressed memo: identical bytes under this rule get the
+        //    identical decision — no network, no cost, no budget, no key.
+        var digest: String?
+        if !memo.isEmpty {
+            digest = ContentHash.digest(of: file, limit: .max)
+            if let digest, let hit = memo.lookup(ruleID: rule.id, digest: digest) {
+                let remembered = Classification(
+                    action: hit.action,
+                    relativePath: hit.relativePath,
+                    reason: hit.reason.map { L10n.t("memo.remembered", $0) }
+                        ?? L10n.t("memo.rememberedBare"),
+                    confidence: hit.confidence
+                )
+                return try route(remembered, file: file, rule: rule, target: target,
+                                 ext: ext, usage: TokenUsage(), usedLLM: false)
+            }
+        }
+
+        // 3. Budget.
         guard allowLLM else { return DecideResult(plan: nil) }
 
-        // 3. Classify.
+        // 4. Classify.
         guard let base = URL(string: config.apiBase) else { throw LLMError.badBaseURL }
         let client = LLMClient(apiKey: apiKey, model: config.model, baseURL: base)
         let description = FileContext.describe(url: file, privacyMode: rule.privacyMode)
@@ -216,7 +244,30 @@ actor Pipeline {
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )
         let c = result.classification
+        let decided = try route(c, file: file, rule: rule, target: target,
+                                ext: ext, usage: result.usage, usedLLM: true)
 
+        // Remember the verdict for these exact bytes — a re-download or a
+        // renamed copy never pays again. Only answers that routed cleanly are
+        // memoized: a malformed answer should get a fresh model call on retry.
+        if digest == nil { digest = ContentHash.digest(of: file, limit: .max) }
+        if let digest {
+            memo.record(ruleID: rule.id, digest: digest, action: c.action,
+                        relativePath: c.resolvedRelativePath(),
+                        reason: c.reason, confidence: c.confidence)
+        }
+        return decided
+    }
+
+    /// The routing shared by a fresh model answer and a memo hit: skip
+    /// handling, taxonomy enforcement, confidence quarantine, destination
+    /// building. Re-running these steps on memo hits means a changed
+    /// taxonomy, threshold or quarantine folder applies to remembered
+    /// verdicts too.
+    private func route(
+        _ c: Classification, file: URL, rule: Rule, target: URL, ext: String,
+        usage: TokenUsage, usedLLM: Bool
+    ) throws -> DecideResult {
         guard c.isMove else {
             return DecideResult(plan: PlannedAction(
                 ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
@@ -224,13 +275,13 @@ actor Pipeline {
                 reason: L10n.t("activity.skipped", rule.name, file.lastPathComponent,
                                c.reason ?? "rule does not apply"),
                 confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
-            ), usage: result.usage, usedLLM: true)
+            ), usage: usage, usedLLM: usedLLM)
         }
         guard let relative = c.resolvedRelativePath() else {
             throw LLMError.badResponse(L10n.t("error.missingPath"))
         }
 
-        // 4. Taxonomy enforcement → quarantine out-of-set folders.
+        // Taxonomy enforcement → quarantine out-of-set folders.
         var origin: PlannedAction.Origin = .model
         var quarantine = false
         var reasonSuffix = c.reason ?? ""
@@ -244,7 +295,7 @@ actor Pipeline {
             }
         }
 
-        // 5. Confidence threshold → quarantine low-confidence decisions.
+        // Confidence threshold → quarantine low-confidence decisions.
         if !quarantine, rule.confidenceThreshold > 0,
            let confidence = c.confidence, confidence < rule.confidenceThreshold {
             quarantine = true
@@ -266,7 +317,7 @@ actor Pipeline {
             ruleID: rule.id, ruleName: rule.name, source: file, kind: kind,
             destination: dest, origin: origin, reason: reasonSuffix,
             confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
-        ), usage: result.usage, usedLLM: true)
+        ), usage: usage, usedLLM: usedLLM)
     }
 
     // MARK: - Apply

@@ -18,6 +18,7 @@ enum ConfigStore {
     static var logFile: URL { directory.appendingPathComponent("activity.log") }
     static var journalFile: URL { directory.appendingPathComponent("journal.jsonl") }
     static var ledgerFile: URL { directory.appendingPathComponent("ledger.json") }
+    static var memoFile: URL { directory.appendingPathComponent("memo.json") }
 
     /// Load the config, seeding a disabled example rule on first launch. Decoding
     /// is tolerant (every field defaults if missing), so upgrading the schema
