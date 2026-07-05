@@ -165,6 +165,16 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+public extension [Rule] {
+    /// Enabled rules, highest priority first (stable for equal priorities), so
+    /// a higher-priority rule claims a contested file before a lower one — the
+    /// behavior `Rule.priority` documents and the editor's stepper promises.
+    /// Shared by the GUI scan loop and the headless runner.
+    func inExecutionOrder() -> [Rule] {
+        filter(\.enabled).sorted { $0.priority > $1.priority }
+    }
+}
+
 // MARK: - Config
 
 public struct Config: Codable, Equatable, Sendable {
