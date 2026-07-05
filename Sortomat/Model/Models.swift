@@ -110,7 +110,7 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
 
     public init(
         id: UUID = UUID(),
-        name: String = "Neue Regel",
+        name: String = L10n.t("rule.defaultName"),
         enabled: Bool = true,
         priority: Int = 0,
         watchPath: String = "",
@@ -122,7 +122,7 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         privacyMode: PrivacyMode = .full,
         preRules: [PreRule] = [],
         taxonomy: [String] = [],
-        quarantineSubfolder: String = "_Quarantäne",
+        quarantineSubfolder: String = L10n.t("rule.defaultQuarantine"),
         confidenceThreshold: Double = 0,
         dryRun: Bool = false
     ) {
@@ -147,7 +147,7 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Neue Regel"
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? L10n.t("rule.defaultName")
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         priority = try c.decodeIfPresent(Int.self, forKey: .priority) ?? 0
         watchPath = try c.decodeIfPresent(String.self, forKey: .watchPath) ?? ""
@@ -159,7 +159,7 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         privacyMode = try c.decodeIfPresent(PrivacyMode.self, forKey: .privacyMode) ?? .full
         preRules = try c.decodeIfPresent([PreRule].self, forKey: .preRules) ?? []
         taxonomy = try c.decodeIfPresent([String].self, forKey: .taxonomy) ?? []
-        quarantineSubfolder = try c.decodeIfPresent(String.self, forKey: .quarantineSubfolder) ?? "_Quarantäne"
+        quarantineSubfolder = try c.decodeIfPresent(String.self, forKey: .quarantineSubfolder) ?? L10n.t("rule.defaultQuarantine")
         confidenceThreshold = try c.decodeIfPresent(Double.self, forKey: .confidenceThreshold) ?? 0
         dryRun = try c.decodeIfPresent(Bool.self, forKey: .dryRun) ?? false
     }
