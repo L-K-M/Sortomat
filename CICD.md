@@ -94,6 +94,12 @@ signed path on automatically once they exist:
 | `AC_API_KEY_ID` | the API key id |
 | `AC_API_ISSUER_ID` | the API key issuer id |
 
+The signed path switches on when `DEVELOPER_ID_P12_BASE64` **and**
+`AC_API_KEY_BASE64` exist (that pair is the gate the workflow checks); the
+remaining secrets are consumed *by* that path and must be set alongside them —
+a missing `APPLE_TEAM_ID` or keychain password fails the signing steps rather
+than falling back to the unsigned build.
+
 Beyond those, the workflows use only the automatically provided `GITHUB_TOKEN`
 (for creating the release).
 
