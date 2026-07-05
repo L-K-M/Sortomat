@@ -196,6 +196,7 @@ public enum L10n {
         "activity.wouldMove": "[%@] Would move %@ → %@",
         "activity.wouldSkip": "[%@] Would skip %@ — %@",
         "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
+        "activity.stalePlan": "[%@] Skipped %@: the file changed after this suggestion was made — refresh the preview.",
 
         // Errors
         "error.unsafePath": "Unsafe destination path: %@",
@@ -418,6 +419,7 @@ public enum L10n {
         "activity.wouldMove": "[%@] Würde verschieben %@ → %@",
         "activity.wouldSkip": "[%@] Würde überspringen %@ – %@",
         "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
+        "activity.stalePlan": "[%@] Übersprungen: %@ wurde seit dem Vorschlag geändert – Vorschau aktualisieren.",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",
         "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",

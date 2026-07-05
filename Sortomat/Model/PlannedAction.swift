@@ -34,6 +34,11 @@ struct PlannedAction: Identifiable, Equatable {
     let confidence: Double?
     /// Whether executing this should copy rather than move.
     let copyInsteadOfMove: Bool
+    /// `Ledger.fingerprint` of the source at decide time. Apply re-checks it:
+    /// a plan must not execute against a file that changed (or was replaced)
+    /// after the user saw the suggestion. `nil` on plans made before this
+    /// field existed — those apply unchecked, as before.
+    var fingerprint: String? = nil
 
     var isActionable: Bool { kind == .move || kind == .copy || kind == .quarantine }
 
