@@ -37,8 +37,10 @@ actor Pipeline {
     // MARK: - Scanning
 
     /// Scan one rule. `forcePreview` makes even a non-dry-run rule only plan
-    /// (used by the preview window). Returns entries + pending plans + usage.
-    func scan(rule: Rule, config: Config, apiKey: String, forcePreview: Bool = false) async -> ScanResult {
+    /// (used by the preview window). `batchID` groups every journaled move of
+    /// one pass so it can be undone together. Returns entries + plans + usage.
+    func scan(rule: Rule, config: Config, apiKey: String, forcePreview: Bool = false,
+              batchID: UUID = UUID()) async -> ScanResult {
         guard rule.enabled else { return ScanResult() }
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
@@ -80,7 +82,8 @@ actor Pipeline {
                     let allowLLM = budgetRemaining > 0
                     group.addTask { [self] in
                         await process(file: file, rule: rule, target: target, config: config,
-                                      apiKey: apiKey, previewing: previewing, allowLLM: allowLLM)
+                                      apiKey: apiKey, previewing: previewing, allowLLM: allowLLM,
+                                      batchID: batchID)
                     }
                 }
                 for await outcome in group {
@@ -121,7 +124,7 @@ actor Pipeline {
 
     private func process(
         file: URL, rule: Rule, target: URL, config: Config,
-        apiKey: String, previewing: Bool, allowLLM: Bool
+        apiKey: String, previewing: Bool, allowLLM: Bool, batchID: UUID
     ) async -> FileOutcome? {
         let fingerprint = Ledger.fingerprint(file)
         let ledgerKey = ledger.key(ruleID: rule.id, fingerprint: fingerprint)
@@ -157,7 +160,8 @@ actor Pipeline {
                 return outcome
             }
 
-            outcome.entry = apply(plan: plan, rule: rule, fingerprint: fingerprint, target: target)
+            outcome.entry = apply(plan: plan, rule: rule, fingerprint: fingerprint,
+                                  target: target, batchID: batchID)
             return outcome
         } catch {
             ledger.record(ruleID: rule.id, fingerprint: fingerprint, status: .failed)
@@ -272,7 +276,8 @@ actor Pipeline {
     // MARK: - Apply
 
     /// Execute a plan the caller already computed (auto-sort or approved preview).
-    func apply(plan: PlannedAction, rule: Rule, fingerprint: String, target: URL) -> ActivityEntry {
+    func apply(plan: PlannedAction, rule: Rule, fingerprint: String, target: URL,
+               batchID: UUID = UUID()) -> ActivityEntry {
         let name = plan.source.lastPathComponent
         switch plan.kind {
         case .skip:
@@ -297,7 +302,8 @@ actor Pipeline {
                     Journal.record(JournalEntry(
                         ruleID: plan.ruleID, ruleName: plan.ruleName,
                         sourcePath: plan.source.path, destinationPath: url.path,
-                        wasCopy: plan.copyInsteadOfMove, reason: plan.reason
+                        wasCopy: plan.copyInsteadOfMove, reason: plan.reason,
+                        batchID: batchID
                     ))
                     return ActivityEntry(ok: true, message: filedMessage(plan, finalURL: url, target: target, name: name))
                 case .duplicate(let url):
@@ -313,11 +319,13 @@ actor Pipeline {
 
     /// Apply a batch of pre-computed plans (used when the user approves a preview).
     func applyApproved(_ plans: [PlannedAction], rules: [UUID: Rule]) -> [ActivityEntry] {
-        plans.compactMap { plan in
+        let batchID = UUID() // one approval = one undoable batch
+        return plans.compactMap { plan in
             guard let rule = rules[plan.ruleID] else { return nil }
             let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
             let fingerprint = Ledger.fingerprint(plan.source)
-            return apply(plan: plan, rule: rule, fingerprint: fingerprint, target: target)
+            return apply(plan: plan, rule: rule, fingerprint: fingerprint, target: target,
+                         batchID: batchID)
         }
     }
 

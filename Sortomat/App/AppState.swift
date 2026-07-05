@@ -181,11 +181,14 @@ final class AppState: ObservableObject {
             if config.providerRequiresKey && apiKey.isEmpty { return }
 
             let snapshot = config
+            let batchID = UUID() // one pass = one undoable batch
             for rule in snapshot.rules.inExecutionOrder() {
                 // Re-read per rule so selecting a rule to edit mid-pass takes
                 // effect immediately (rather than one stale execution).
                 if rule.id == editingRuleID { continue }
-                let result = await pipeline.scan(rule: rule, config: snapshot, apiKey: apiKey)
+                let result = await pipeline.scan(
+                    rule: rule, config: snapshot, apiKey: apiKey, batchID: batchID
+                )
                 ingest(result)
             }
             await pipeline.persist()
@@ -252,11 +255,29 @@ final class AppState: ObservableObject {
 
     /// Undo a journaled placement *and* pin the restored file as skipped in
     /// the ledger, so the rule doesn't immediately re-classify and re-move it
-    /// (the undo ping-pong).
+    /// (the undo ping-pong). The undo itself runs off the main actor: for a
+    /// copy it hashes the full content of both sides, which must not stall
+    /// the UI on a large file.
     func undo(_ entry: JournalEntry) async throws {
-        try Journal.undo(entry)
+        try await Task.detached { try Journal.undo(entry) }.value
         guard !entry.wasCopy else { return } // nothing returned to the watch folder
         await pipeline.markUndone(ruleID: entry.ruleID, sourcePath: entry.sourcePath)
         await pipeline.persist()
+    }
+
+    /// Undo the newest batch — one scan pass or one approved preview. Returns
+    /// how many entries were reversed and how many refused.
+    func undoLastBatch() async -> (undone: Int, failed: Int) {
+        let entries = await Task.detached { Journal.recent(limit: 500) }.value
+        var undone = 0, failed = 0
+        for entry in Journal.lastBatch(in: entries) {
+            do {
+                try await undo(entry)
+                undone += 1
+            } catch {
+                failed += 1
+            }
+        }
+        return (undone, failed)
     }
 }
