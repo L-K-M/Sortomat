@@ -9,32 +9,33 @@ enum MainMenu {
     static func build() -> NSMenu {
         let mainMenu = NSMenu()
 
-        // App menu.
+        // App menu. (Localized like everything else — these were the last
+        // hardcoded-English menu items in a bilingual app.)
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
-        appMenu.addItem(withTitle: "About Sortomat",
+        appMenu.addItem(withTitle: L10n.t("menu.about"),
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                         keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Sortomat",
+        appMenu.addItem(withTitle: L10n.t("menu.hide"),
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        let hideOthers = appMenu.addItem(withTitle: "Hide Others",
+        let hideOthers = appMenu.addItem(withTitle: L10n.t("menu.hideOthers"),
                                          action: #selector(NSApplication.hideOtherApplications(_:)),
                                          keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(withTitle: "Show All",
+        appMenu.addItem(withTitle: L10n.t("menu.showAll"),
                         action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Sortomat",
+        appMenu.addItem(withTitle: L10n.t("menu.quitApp"),
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         // File menu — just Close, so ⌘W works on the Settings/Preview windows
         // (without it, windows are mouse-close only).
         let fileItem = NSMenuItem()
         mainMenu.addItem(fileItem)
-        let fileMenu = NSMenu(title: "File")
+        let fileMenu = NSMenu(title: L10n.t("menu.file"))
         fileItem.submenu = fileMenu
         fileMenu.addItem(withTitle: L10n.t("menu.close"),
                          action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
@@ -42,17 +43,17 @@ enum MainMenu {
         // Edit menu — the whole point of this file.
         let editItem = NSMenuItem()
         mainMenu.addItem(editItem)
-        let editMenu = NSMenu(title: "Edit")
+        let editMenu = NSMenu(title: L10n.t("menu.edit"))
         editItem.submenu = editMenu
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: L10n.t("edit.undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: L10n.t("edit.redo"), action: Selector(("redo:")), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: Selector(("cut:")), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Delete", action: Selector(("delete:")), keyEquivalent: "")
-        editMenu.addItem(withTitle: "Select All", action: Selector(("selectAll:")), keyEquivalent: "a")
+        editMenu.addItem(withTitle: L10n.t("edit.cut"), action: Selector(("cut:")), keyEquivalent: "x")
+        editMenu.addItem(withTitle: L10n.t("edit.copy"), action: Selector(("copy:")), keyEquivalent: "c")
+        editMenu.addItem(withTitle: L10n.t("edit.paste"), action: Selector(("paste:")), keyEquivalent: "v")
+        editMenu.addItem(withTitle: L10n.t("edit.delete"), action: Selector(("delete:")), keyEquivalent: "")
+        editMenu.addItem(withTitle: L10n.t("edit.selectAll"), action: Selector(("selectAll:")), keyEquivalent: "a")
 
         return mainMenu
     }

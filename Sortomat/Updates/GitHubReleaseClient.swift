@@ -14,8 +14,8 @@ struct GitHubReleaseClient {
 
         var errorDescription: String? {
             switch self {
-            case .http(let code): return "GitHub API returned HTTP \(code)."
-            case .noRelease: return "No suitable release found."
+            case .http(let code): return L10n.t("updates.error.http", code)
+            case .noRelease: return L10n.t("updates.error.noRelease")
             }
         }
     }

@@ -13,7 +13,7 @@ enum HeadlessRunner {
         case "undo":
             undoLast()
         default:
-            FileHandle.standardError.write(Data("Unknown command: \(command)\n".utf8))
+            FileHandle.standardError.write(Data((L10n.t("headless.unknownCommand", command) + "\n").utf8))
             exit(64)
         }
     }

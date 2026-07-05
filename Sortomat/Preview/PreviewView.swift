@@ -67,7 +67,7 @@ private struct ReviewTab: View {
             Button(L10n.t("preview.dismiss")) {
                 let plans = state.pendingActions.filter { selected.contains($0.id) }
                 plans.forEach { state.dismiss($0) }
-                status = L10n.t("preview.dismissed", plans.count)
+                status = L10n.plural("preview.dismissed", plans.count)
                 selected.removeAll()
             }
             .disabled(selected.isEmpty || busy)
@@ -91,7 +91,7 @@ private struct ReviewTab: View {
             await state.apply(plans)
             selected.removeAll()
             busy = false
-            status = L10n.t("preview.applied", plans.count)
+            status = L10n.plural("preview.applied", plans.count)
         }
     }
 

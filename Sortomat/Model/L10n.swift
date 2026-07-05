@@ -26,11 +26,20 @@ public enum L10n {
         String(format: t(key), arguments: args)
     }
 
+    /// Count-aware lookup: `key.one` when the count is exactly 1, `key.other`
+    /// otherwise, with the count as the format argument — retires the
+    /// "%d change(s)" hack. (Two forms cover English and German; a language
+    /// with more plural categories would need a real plural-rules engine.)
+    public static func plural(_ key: String, _ count: Int) -> String {
+        String(format: t(key + (count == 1 ? ".one" : ".other")), count)
+    }
+
     // MARK: - English (base)
 
     static let english: [String: String] = [
         // App / menubar
-        "app.status.active": "Active — %d rule(s)",
+        "app.status.active.one": "Active — 1 rule",
+        "app.status.active.other": "Active — %d rules",
         "app.status.paused": "Paused",
         "app.status.noKey": "⚠️ No API key set",
         "app.lastScan": "Last check: %@",
@@ -44,12 +53,27 @@ public enum L10n {
         "menu.settings": "Rules & Settings…",
         "menu.quit": "Quit",
         "menu.spend": "Estimated spend: %@",
-        "menu.pendingReview": "%d change(s) awaiting review…",
+        "menu.pendingReview.one": "1 change awaiting review…",
+        "menu.pendingReview.other": "%d changes awaiting review…",
         "menu.checkUpdates": "Check for Updates…",
         "menu.close": "Close",
+        "menu.file": "File",
+        "menu.edit": "Edit",
+        "menu.about": "About Sortomat",
+        "menu.hide": "Hide Sortomat",
+        "menu.hideOthers": "Hide Others",
+        "menu.showAll": "Show All",
+        "menu.quitApp": "Quit Sortomat",
+        "edit.undo": "Undo",
+        "edit.redo": "Redo",
+        "edit.cut": "Cut",
+        "edit.copy": "Copy",
+        "edit.paste": "Paste",
+        "edit.delete": "Delete",
+        "edit.selectAll": "Select All",
 
         // Settings tabs
-        "settings.window.title": "Sortomat — Rules",
+        "settings.window.title": "Sortomat — Rules & Settings",
         "tab.rules": "Rules",
         "tab.general": "Settings",
         "tab.about": "About",
@@ -57,7 +81,6 @@ public enum L10n {
         // Rules list
         "rules.empty.title": "Select a rule, or add one with +",
         "rules.add": "Add rule",
-        "rules.addFromTemplate": "Add from template…",
         "rules.remove": "Remove rule",
         "rules.duplicate": "Duplicate",
         "rules.delete.title": "Delete the rule «%@»?",
@@ -147,18 +170,20 @@ public enum L10n {
         "general.launchAtLogin": "Launch Sortomat at login",
         "general.privacyNote": "Note: a file's name, metadata and (unless a rule is metadata-only) a text excerpt are sent to the model to classify it.",
 
+        // Paths
+        "path.choose": "Choose…",
+        "path.placeholder": "/path/to/folder",
+
         // Preview / dry-run
         "preview.title": "Preview changes",
         "preview.empty": "Nothing to file right now.",
-        "preview.column.file": "File",
-        "preview.column.action": "Planned action",
-        "preview.column.destination": "Destination",
         "preview.apply": "Apply selected",
         "preview.applyAll": "Apply all",
         "preview.refresh": "Refresh",
-        "preview.cancel": "Close",
-        "preview.applied": "Applied %d change(s).",
-        "preview.dismissed": "Dismissed %d suggestion(s).",
+        "preview.applied.one": "Applied 1 change.",
+        "preview.applied.other": "Applied %d changes.",
+        "preview.dismissed.one": "Dismissed 1 suggestion.",
+        "preview.dismissed.other": "Dismissed %d suggestions.",
         "preview.dismiss": "Dismiss selected",
         "preview.empty.noKey": "No API key set — add one under Rules & Settings → Settings to preview changes.",
         "preview.plan.move": "Move",
@@ -179,6 +204,7 @@ public enum L10n {
         "journal.undoAll": "Undo last check",
         "journal.undone": "Undone: %@",
         "journal.undoFailed": "Couldn't undo %@: %@",
+        "headless.unknownCommand": "Unknown command: %@",
         "journal.undo.sourceOccupied": "A file is already at the original location: %@",
         "journal.undo.destinationMissing": "The moved file is no longer at: %@",
         "journal.undo.destinationModified": "The copy at %@ no longer matches the original, so it wasn't deleted.",
@@ -190,7 +216,6 @@ public enum L10n {
         "activity.duplicate": "[%@] Duplicate: %@ already exists as %@",
         "activity.quarantined": "[%@] Quarantined: %@ → %@ (%@)",
         "activity.preRuleSkip": "[%@] Pre-rule skip: %@ (%@)",
-        "activity.preRuleRoute": "[%@] %@ → %@ (pre-rule «%@»)",
         "activity.error": "[%@] ERROR on %@: %@",
         "activity.missingWatch": "[%@] Watched folder missing: %@",
         "activity.wouldMove": "[%@] Would move %@ → %@",
@@ -240,7 +265,6 @@ public enum L10n {
         // About
         "about.tagline": "Hazel, but the rule is a sentence.",
         "about.version": "Version %@",
-        "about.privacy": "Privacy",
         "about.help": "Help",
 
         // Updates
@@ -254,12 +278,17 @@ public enum L10n {
         "updates.failed.title": "Couldn't check for updates",
         "updates.parseFailed": "The version numbers couldn't be compared.",
         "updates.ok": "OK",
+        "updates.lastResult.available": "Update available: %@",
+        "updates.lastResult.upToDate": "You're up to date (%@).",
+        "updates.error.http": "GitHub API returned HTTP %d.",
+        "updates.error.noRelease": "No suitable release found.",
     ]
 
     // MARK: - German
 
     static let german: [String: String] = [
-        "app.status.active": "Aktiv – %d Regel(n)",
+        "app.status.active.one": "Aktiv – 1 Regel",
+        "app.status.active.other": "Aktiv – %d Regeln",
         "app.status.paused": "Pausiert",
         "app.status.noKey": "⚠️ Kein API-Key hinterlegt",
         "app.lastScan": "Letzte Prüfung: %@",
@@ -273,11 +302,26 @@ public enum L10n {
         "menu.settings": "Regeln & Einstellungen…",
         "menu.quit": "Beenden",
         "menu.spend": "Geschätzte Kosten: %@",
-        "menu.pendingReview": "%d Änderung(en) zur Prüfung…",
+        "menu.pendingReview.one": "1 Änderung zur Prüfung…",
+        "menu.pendingReview.other": "%d Änderungen zur Prüfung…",
         "menu.checkUpdates": "Nach Updates suchen…",
         "menu.close": "Schliessen",
+        "menu.file": "Ablage",
+        "menu.edit": "Bearbeiten",
+        "menu.about": "Über Sortomat",
+        "menu.hide": "Sortomat ausblenden",
+        "menu.hideOthers": "Andere ausblenden",
+        "menu.showAll": "Alle einblenden",
+        "menu.quitApp": "Sortomat beenden",
+        "edit.undo": "Widerrufen",
+        "edit.redo": "Wiederholen",
+        "edit.cut": "Ausschneiden",
+        "edit.copy": "Kopieren",
+        "edit.paste": "Einsetzen",
+        "edit.delete": "Löschen",
+        "edit.selectAll": "Alles auswählen",
 
-        "settings.window.title": "Sortomat – Regeln",
+        "settings.window.title": "Sortomat – Regeln & Einstellungen",
         "tab.rules": "Regeln",
         "tab.general": "Einstellungen",
         "tab.about": "Über",
@@ -287,7 +331,6 @@ public enum L10n {
         "rules.delete.message": "Prompt, Taxonomie und Vorregeln werden mitgelöscht, und Sortomat vergisst, welche Dateien sie bereits behandelt hat. Das kann nicht rückgängig gemacht werden.",
         "rules.delete.confirm": "Regel löschen",
         "rules.add": "Regel hinzufügen",
-        "rules.addFromTemplate": "Aus Vorlage hinzufügen…",
         "rules.remove": "Regel entfernen",
         "rules.duplicate": "Duplizieren",
 
@@ -372,17 +415,18 @@ public enum L10n {
         "general.launchAtLogin": "Sortomat beim Anmelden starten",
         "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet.",
 
+        "path.choose": "Auswählen…",
+        "path.placeholder": "/Pfad/zum/Ordner",
+
         "preview.title": "Änderungen vorschauen",
         "preview.empty": "Momentan nichts einzusortieren.",
-        "preview.column.file": "Datei",
-        "preview.column.action": "Geplante Aktion",
-        "preview.column.destination": "Ziel",
         "preview.apply": "Ausgewählte anwenden",
         "preview.applyAll": "Alle anwenden",
         "preview.refresh": "Aktualisieren",
-        "preview.cancel": "Schliessen",
-        "preview.applied": "%d Änderung(en) angewendet.",
-        "preview.dismissed": "%d Vorschlag/Vorschläge verworfen.",
+        "preview.applied.one": "1 Änderung angewendet.",
+        "preview.applied.other": "%d Änderungen angewendet.",
+        "preview.dismissed.one": "1 Vorschlag verworfen.",
+        "preview.dismissed.other": "%d Vorschläge verworfen.",
         "preview.dismiss": "Ausgewählte verwerfen",
         "preview.empty.noKey": "Kein API-Key gesetzt — unter Regeln & Einstellungen → Einstellungen hinzufügen, um Änderungen vorzuschauen.",
         "preview.plan.move": "Verschieben",
@@ -402,6 +446,7 @@ public enum L10n {
         "journal.undoAll": "Letzte Prüfung rückgängig",
         "journal.undone": "Rückgängig gemacht: %@",
         "journal.undoFailed": "«%@» konnte nicht rückgängig gemacht werden: %@",
+        "headless.unknownCommand": "Unbekannter Befehl: %@",
         "journal.undo.sourceOccupied": "Am ursprünglichen Ort liegt bereits eine Datei: %@",
         "journal.undo.destinationMissing": "Die verschobene Datei ist nicht mehr unter: %@",
         "journal.undo.destinationModified": "Die Kopie unter %@ stimmt nicht mehr mit dem Original überein und wurde deshalb nicht gelöscht.",
@@ -412,7 +457,6 @@ public enum L10n {
         "activity.duplicate": "[%@] Duplikat: %@ existiert bereits als %@",
         "activity.quarantined": "[%@] Quarantäne: %@ → %@ (%@)",
         "activity.preRuleSkip": "[%@] Vorregel-Skip: %@ (%@)",
-        "activity.preRuleRoute": "[%@] %@ → %@ (Vorregel «%@»)",
         "activity.error": "[%@] FEHLER bei %@: %@",
         "activity.missingWatch": "[%@] Überwachter Ordner fehlt: %@",
         "activity.wouldMove": "[%@] Würde verschieben %@ → %@",
@@ -459,7 +503,6 @@ public enum L10n {
 
         "about.tagline": "Hazel, aber die Regel ist ein Satz.",
         "about.version": "Version %@",
-        "about.privacy": "Datenschutz",
         "about.help": "Hilfe",
 
         "updates.available.title": "%@ %@ ist verfügbar",
@@ -472,5 +515,9 @@ public enum L10n {
         "updates.failed.title": "Update-Prüfung fehlgeschlagen",
         "updates.parseFailed": "Die Versionsnummern konnten nicht verglichen werden.",
         "updates.ok": "OK",
+        "updates.lastResult.available": "Update verfügbar: %@",
+        "updates.lastResult.upToDate": "Alles aktuell (%@).",
+        "updates.error.http": "GitHub-API antwortete mit HTTP %d.",
+        "updates.error.noRelease": "Keine passende Version gefunden.",
     ]
 }
