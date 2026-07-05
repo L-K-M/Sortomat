@@ -32,6 +32,9 @@ final class AppState: ObservableObject {
     private var scanRequested = false
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
+    /// Rules whose missing watch folder was already announced — one alert per
+    /// outage, not one per pass. Reset when the folder reappears.
+    private var missingWatchNotified: Set<UUID> = []
 
     init() {
         let loaded = ConfigStore.load()
@@ -202,15 +205,34 @@ final class AppState: ObservableObject {
             activity.insert(contentsOf: result.entries.reversed(), at: 0)
             activity = Array(activity.prefix(80))
             result.entries.forEach { ConfigStore.appendLog($0.message) }
-            notify(result.entries)
+            notify(result)
         }
     }
 
-    private func notify(_ entries: [ActivityEntry]) {
+    /// What the notifications toggle promises: a summary of what was filed and
+    /// what failed, per pass — not just the first failure. A missing watch
+    /// folder alerts once per outage (the log still records every pass) and
+    /// re-arms when the folder comes back.
+    private func notify(_ result: ScanResult) {
         guard config.notificationsEnabled else { return }
-        let failures = entries.filter { !$0.ok }
-        if let failure = failures.first {
-            Notifier.post(title: "Sortomat", body: failure.message)
+        if result.watchMissing, let id = result.ruleID {
+            let alreadyAnnounced = missingWatchNotified.contains(id)
+            missingWatchNotified.insert(id)
+            if alreadyAnnounced { return }
+        } else if let id = result.ruleID {
+            missingWatchNotified.remove(id)
+        }
+
+        let filed = result.entries.filter { $0.kind == .filed }.count
+        if filed > 0 {
+            Notifier.post(title: "Sortomat", body: L10n.t("notify.filed", filed))
+        }
+        let failures = result.entries.filter { $0.kind == .failed }
+        if let first = failures.first {
+            let body = failures.count == 1
+                ? first.message
+                : L10n.t("notify.failuresMore", first.message, failures.count - 1)
+            Notifier.post(title: "Sortomat", body: body)
         }
     }
 

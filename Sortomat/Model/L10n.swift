@@ -143,7 +143,7 @@ public enum L10n {
         "general.interval.help": "Folders are also checked immediately when something changes. The interval is only the safety net.",
         "general.concurrency": "Max concurrent classifications: %d",
         "general.budget": "Max model calls per check (0 = unlimited): %d",
-        "general.notifications": "Show a notification for each filed / failed file",
+        "general.notifications": "Notify about filed files and failures",
         "general.launchAtLogin": "Launch Sortomat at login",
         "general.privacyNote": "Note: a file's name, metadata and (unless a rule is metadata-only) a text excerpt are sent to the model to classify it.",
 
@@ -196,6 +196,10 @@ public enum L10n {
         "activity.wouldMove": "[%@] Would move %@ → %@",
         "activity.wouldSkip": "[%@] Would skip %@ — %@",
         "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
+
+        // Notifications
+        "notify.filed": "Filed %d file(s).",
+        "notify.failuresMore": "%@ (and %d more failure(s))",
 
         // Errors
         "error.unsafePath": "Unsafe destination path: %@",
@@ -368,7 +372,7 @@ public enum L10n {
         "general.interval.help": "Ordner werden zusätzlich sofort geprüft, wenn sich etwas ändert. Das Intervall ist nur das Sicherheitsnetz.",
         "general.concurrency": "Max. gleichzeitige Klassifikationen: %d",
         "general.budget": "Max. Modell-Aufrufe pro Prüfung (0 = unbegrenzt): %d",
-        "general.notifications": "Mitteilung für jede einsortierte / fehlgeschlagene Datei",
+        "general.notifications": "Über einsortierte Dateien und Fehler benachrichtigen",
         "general.launchAtLogin": "Sortomat beim Anmelden starten",
         "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet.",
 
@@ -418,6 +422,9 @@ public enum L10n {
         "activity.wouldMove": "[%@] Würde verschieben %@ → %@",
         "activity.wouldSkip": "[%@] Würde überspringen %@ – %@",
         "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
+
+        "notify.filed": "%d Datei(en) einsortiert.",
+        "notify.failuresMore": "%@ (und %d weitere Fehler)",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",
         "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",
