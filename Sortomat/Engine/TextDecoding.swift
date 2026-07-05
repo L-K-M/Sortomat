@@ -43,4 +43,36 @@ enum TextDecoding {
     private static func fallback(_ data: Data) -> String {
         String(data: data, encoding: .isoLatin1) ?? String(decoding: data, as: UTF8.self)
     }
+
+    /// Drops an incomplete trailing UTF-8 sequence, as produced by a fixed-size
+    /// byte read that split a multi-byte character. Without this, the split
+    /// character makes strict UTF-8 decoding fail for the *entire* buffer and
+    /// `decode` falls back to CP1252 — turning a perfectly good UTF-8 excerpt
+    /// into mojibake. Only the final ≤4 bytes are inspected; non-UTF-8 data
+    /// passes through unchanged apart from, at most, those trailing bytes.
+    static func trimmingPartialUTF8Tail(_ data: Data) -> Data {
+        let window = [UInt8](data.suffix(4))
+        guard !window.isEmpty else { return data }
+
+        // Find the last non-continuation byte in the window.
+        var leadIndex = -1
+        var i = window.count - 1
+        while i >= 0 {
+            if window[i] & 0b1100_0000 != 0b1000_0000 { leadIndex = i; break }
+            i -= 1
+        }
+        guard leadIndex >= 0 else { return data } // all continuations: not UTF-8
+
+        let lead = window[leadIndex]
+        let expectedLength: Int
+        if lead & 0b1000_0000 == 0 { expectedLength = 1 }
+        else if lead & 0b1110_0000 == 0b1100_0000 { expectedLength = 2 }
+        else if lead & 0b1111_0000 == 0b1110_0000 { expectedLength = 3 }
+        else if lead & 0b1111_1000 == 0b1111_0000 { expectedLength = 4 }
+        else { return data } // invalid lead byte: leave it to decode's fallbacks
+
+        let available = window.count - leadIndex
+        guard available < expectedLength else { return data } // sequence complete
+        return data.dropLast(available)
+    }
 }
