@@ -51,14 +51,31 @@ enum Mover {
             // Only fall back to copy-then-delete for a genuine cross-volume move;
             // and only delete the original once the copy is verified intact.
             guard isCrossVolume(source: source, destination: target) else { throw error }
-            try fm.copyItem(at: source, to: target)
-            guard ContentHash.digest(of: source) == ContentHash.digest(of: target) else {
-                try? fm.removeItem(at: target)
-                throw MoveError.verifyFailed
-            }
-            try fm.removeItem(at: source)
+            try copyVerifyDelete(source: source, to: target)
         }
         return .placed(target)
+    }
+
+    /// Cross-volume fallback: copy, verify the copy over its *entire* content,
+    /// and only then delete the original. Fails closed — when either side can't
+    /// be hashed (`digest` returns nil), the copy is discarded and the original
+    /// kept, because `nil == nil` must never count as a successful verification.
+    static func copyVerifyDelete(source: URL, to target: URL) throws {
+        let fm = FileManager.default
+        do {
+            try fm.copyItem(at: source, to: target)
+        } catch {
+            try? fm.removeItem(at: target) // don't leave a partial copy behind
+            throw error
+        }
+        guard let sourceDigest = ContentHash.digest(of: source, limit: .max),
+              let targetDigest = ContentHash.digest(of: target, limit: .max),
+              sourceDigest == targetDigest
+        else {
+            try? fm.removeItem(at: target)
+            throw MoveError.verifyFailed
+        }
+        try fm.removeItem(at: source)
     }
 
     private enum Placement {
