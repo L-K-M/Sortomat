@@ -86,7 +86,7 @@ struct LLMClient {
             ],
         ]
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/chat/completions"))
+        var request = URLRequest(url: Self.endpoint(for: baseURL))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !apiKey.isEmpty {
@@ -97,26 +97,43 @@ struct LLMClient {
 
         var lastError: Error = LLMError.badResponse("no response")
         for attempt in 0..<4 {
+            let retryable: Bool
             do {
                 let (data, response) = try await session.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if status == 200 {
-                    return try Self.parse(data)
+                    return try Self.parse(data) // parse failures are terminal, not retried
                 }
                 let body = String(data: data, encoding: .utf8) ?? ""
                 lastError = LLMError.http(status, body)
-                guard [429, 500, 502, 503, 504].contains(status) else { throw lastError }
+                // Retry only genuinely transient statuses; a 400/401/403 will
+                // fail identically every time and must surface immediately.
+                retryable = [429, 500, 502, 503, 504].contains(status)
             } catch let error as LLMError {
-                lastError = error
-                if case .http = error {} else { throw error }
+                throw error // bad response body — retrying won't change it
             } catch {
                 lastError = error // network hiccup: retry
+                retryable = true
             }
+            guard retryable else { throw lastError }
             if attempt < 3 {
                 try await Task.sleep(nanoseconds: UInt64(2_000_000_000 * (attempt + 1)))
             }
         }
         throw lastError
+    }
+
+    /// The `chat/completions` endpoint for a configured base URL. Tolerates the
+    /// two conventions in the wild: a bare host (`https://api.mistral.ai`) and a
+    /// base that already ends in `/v1` (`http://localhost:11434/v1`, the form
+    /// Ollama/LM Studio docs use) — without this, the latter became `/v1/v1/…`.
+    static func endpoint(for base: URL) -> URL {
+        var path = base.path
+        while path.hasSuffix("/") { path.removeLast() }
+        if path.hasSuffix("/v1") {
+            return base.appendingPathComponent("chat/completions")
+        }
+        return base.appendingPathComponent("v1/chat/completions")
     }
 
     static func parse(_ data: Data) throws -> ClassificationResult {
