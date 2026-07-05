@@ -11,6 +11,15 @@ struct RuleEditor: View {
 
     var body: some View {
         Form {
+            // The editing lock is a good idea with zero UI: an enabled rule
+            // silently stops running while it's open here. Say so.
+            if rule.enabled, !rule.dryRun, state.editingRuleID == rule.id {
+                Section {
+                    Label(L10n.t("rule.editingPaused"), systemImage: "pause.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
             Section {
                 TextField(L10n.t("rule.name"), text: $rule.name)
                 Toggle(L10n.t("rule.enabled"), isOn: $rule.enabled)
@@ -23,6 +32,14 @@ struct RuleEditor: View {
             Section {
                 PathField(label: L10n.t("rule.watchFolder"), path: $rule.watchPath)
                 PathField(label: L10n.t("rule.targetFolder"), path: $rule.targetPath)
+                // These misconfigurations previously failed in silence —
+                // watch == target (or watch inside target) yields zero
+                // candidates forever with no hint anywhere.
+                ForEach(pathWarnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
                 Toggle(L10n.t("rule.recursive"), isOn: $rule.recursive)
                 TextField(L10n.t("rule.extensions"), text: $extensionsText,
                           prompt: Text(L10n.t("rule.extensions.prompt")))
@@ -57,6 +74,18 @@ struct RuleEditor: View {
                     .font(.callout)
                     .frame(minHeight: 80)
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+                    // TextEditor has no placeholder support; the hint string
+                    // existed in the table but was never shown anywhere.
+                    .overlay(alignment: .topLeading) {
+                        if taxonomyText.isEmpty {
+                            Text(L10n.t("rule.taxonomy.prompt"))
+                                .font(.callout)
+                                .foregroundStyle(Color.secondary.opacity(0.7))
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                    }
                     .onChange(of: taxonomyText) { newValue in
                         rule.taxonomy = newValue
                             .split(whereSeparator: \.isNewline)
@@ -114,6 +143,30 @@ struct RuleEditor: View {
         guard rule.preRules.indices.contains(j) else { return }
         rule.preRules.swapAt(i, j)
     }
+
+    private var pathWarnings: [String] {
+        var warnings: [String] = []
+        let fm = FileManager.default
+        let watch = (rule.watchPath as NSString).expandingTildeInPath
+        let target = (rule.targetPath as NSString).expandingTildeInPath
+        func isDirectory(_ path: String) -> Bool {
+            var isDir: ObjCBool = false
+            return fm.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+        }
+        if !rule.watchPath.isEmpty, !isDirectory(watch) {
+            warnings.append(L10n.t("rule.validate.watchMissing"))
+        }
+        if !rule.targetPath.isEmpty, !isDirectory(target) {
+            warnings.append(L10n.t("rule.validate.targetMissing"))
+        }
+        if !rule.watchPath.isEmpty, watch == target {
+            warnings.append(L10n.t("rule.validate.samePath"))
+        } else if !rule.watchPath.isEmpty, !rule.targetPath.isEmpty,
+                  watch.hasPrefix(target + "/") {
+            warnings.append(L10n.t("rule.validate.watchInsideTarget"))
+        }
+        return warnings
+    }
 }
 
 /// One deterministic pre-rule, presented as a roomy card: a numbered header with
@@ -149,6 +202,14 @@ struct PreRuleCard: View {
                     VStack(alignment: .leading, spacing: 3) {
                         TextField("", text: $preRule.pattern, prompt: Text(patternPrompt))
                         Text(patternHelp).font(.caption2).foregroundStyle(.secondary)
+                        // An invalid regex silently never matches — flag it
+                        // right where it's being typed.
+                        if preRule.match == .regex, !preRule.pattern.isEmpty,
+                           !DeterministicEngine.isValidRegex(preRule.pattern) {
+                            Text(L10n.t("rule.validate.badRegex"))
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
                 GridRow {
