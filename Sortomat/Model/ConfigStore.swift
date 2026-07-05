@@ -21,15 +21,35 @@ enum ConfigStore {
 
     /// Load the config, seeding a disabled example rule on first launch. Decoding
     /// is tolerant (every field defaults if missing), so upgrading the schema
-    /// never silently wipes a user's rules.
-    static func load() -> Config {
-        guard let data = try? Data(contentsOf: configFile) else {
+    /// never silently wipes a user's rules — and an *undecodable* file (torn
+    /// write, disk-full, hand-edit gone wrong) is preserved as a timestamped
+    /// backup instead of being replaced by an empty config on the next save.
+    static func load(from file: URL = configFile) -> Config {
+        guard let data = try? Data(contentsOf: file) else {
             var config = Config()
             config.rules = [RuleTemplate.ebooks.makeRule()]
             save(config)
             return config
         }
-        return (try? JSONDecoder().decode(Config.self, from: data)) ?? Config()
+        do {
+            return try JSONDecoder().decode(Config.self, from: data)
+        } catch {
+            backUpCorruptConfig(data, of: file)
+            return Config()
+        }
+    }
+
+    /// Keep the evidence: `config.json.corrupt-<timestamp>` next to the config,
+    /// plus a loud line in the activity log. The user's rules may well be
+    /// recoverable from the backup by hand.
+    private static func backUpCorruptConfig(_ data: Data, of file: URL) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let backup = file.deletingLastPathComponent()
+            .appendingPathComponent("\(file.lastPathComponent).corrupt-\(stamp)")
+        try? data.write(to: backup)
+        appendLog("ERROR: \(file.lastPathComponent) could not be decoded; "
+            + "kept a copy at \(backup.lastPathComponent) and started with an empty config.")
     }
 
     static func save(_ config: Config) {

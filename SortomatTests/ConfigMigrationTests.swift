@@ -59,4 +59,24 @@ final class ConfigMigrationTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Config.self, from: data)
         XCTAssertEqual(decoded, config)
     }
+
+    func testCorruptConfigIsBackedUpNotSilentlyDiscarded() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory
+            .appendingPathComponent("sortomat-config-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent("config.json")
+        try Data(#"{"rules": [{"name": "Precious"#.utf8).write(to: file) // torn write
+
+        let config = ConfigStore.load(from: file)
+        XCTAssertEqual(config, Config(), "an unreadable config loads as defaults")
+
+        let backups = try fm.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("config.json.corrupt-") }
+        XCTAssertEqual(backups.count, 1, "the broken file must be preserved as a backup")
+        let backupData = try Data(contentsOf: dir.appendingPathComponent(backups[0]))
+        XCTAssertTrue(String(decoding: backupData, as: UTF8.self).contains("Precious"))
+    }
 }
