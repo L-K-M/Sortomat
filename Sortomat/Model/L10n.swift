@@ -203,6 +203,18 @@ public enum L10n {
         "about.version": "Version %@",
         "about.privacy": "Privacy",
         "about.help": "Help",
+
+        // Updates
+        "updates.available.title": "%@ %@ is available",
+        "updates.available.body": "You have %@. Would you like to download the update?",
+        "updates.available.download": "Download",
+        "updates.available.later": "Remind Me Later",
+        "updates.available.skip": "Skip This Version",
+        "updates.upToDate.title": "You're up to date",
+        "updates.upToDate.body": "%@ %@ is the latest version.",
+        "updates.failed.title": "Couldn't check for updates",
+        "updates.parseFailed": "The version numbers couldn't be compared.",
+        "updates.ok": "OK",
     ]
 
     // MARK: - German
@@ -371,5 +383,16 @@ public enum L10n {
         "about.version": "Version %@",
         "about.privacy": "Datenschutz",
         "about.help": "Hilfe",
+
+        "updates.available.title": "%@ %@ ist verfügbar",
+        "updates.available.body": "Installiert ist %@. Update jetzt laden?",
+        "updates.available.download": "Laden",
+        "updates.available.later": "Später erinnern",
+        "updates.available.skip": "Diese Version überspringen",
+        "updates.upToDate.title": "Alles aktuell",
+        "updates.upToDate.body": "%@ %@ ist die neueste Version.",
+        "updates.failed.title": "Update-Prüfung fehlgeschlagen",
+        "updates.parseFailed": "Die Versionsnummern konnten nicht verglichen werden.",
+        "updates.ok": "OK",
     ]
 }
