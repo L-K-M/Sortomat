@@ -23,19 +23,34 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func set(_ value: String, account: String) {
+    /// Store (or clear, for an empty value) the item. Updates in place rather
+    /// than delete-then-add: the old delete-first approach destroyed the stored
+    /// key even when the subsequent add failed, and ignored both statuses while
+    /// the UI reported "Saved". Returns whether the keychain accepted the write.
+    @discardableResult
+    static func set(_ value: String, account: String) -> Bool {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(base as CFDictionary)
-        guard !value.isEmpty else { return }
-        var attributes = base
-        attributes[kSecValueData as String] = Data(value.utf8)
+        guard !value.isEmpty else {
+            let status = SecItemDelete(base as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
+        }
+
         // Device-only: the key must not roam to other Macs via iCloud Keychain.
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(attributes as CFDictionary, nil)
+        let payload: [String: Any] = [
+            kSecValueData as String: Data(value.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let updateStatus = SecItemUpdate(base as CFDictionary, payload as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        guard updateStatus == errSecItemNotFound else { return false }
+
+        var attributes = base
+        payload.forEach { attributes[$0.key] = $0.value }
+        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 
     static func apiKey() -> String? {
