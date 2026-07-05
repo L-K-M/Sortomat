@@ -22,7 +22,10 @@ actor Pipeline {
     }
 
     func ledgerCount() -> Int { ledger.count }
-    func persist() { ledger.save() }
+    func persist() {
+        ledger.prune()
+        ledger.save()
+    }
     func forget(ruleID: UUID) { ledger.forget(ruleID: ruleID) }
 
     /// After an undo restores a file into a watched folder, remember it as
