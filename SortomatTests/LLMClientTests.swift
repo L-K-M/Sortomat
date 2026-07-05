@@ -30,6 +30,31 @@ final class LLMClientTests: XCTestCase {
         XCTAssertEqual(url.path, "/proxy/v1/chat/completions")
     }
 
+    // MARK: - Request payload
+
+    func testPayloadCapsCompletionTokens() {
+        let payload = LLMClient.payload(model: "m", rulePrompt: "sort",
+                                        taxonomy: [], fileDescription: "File: x")
+        XCTAssertEqual(payload["max_tokens"] as? Int, LLMClient.maxCompletionTokens,
+                       "an uncapped answer bills unbounded output tokens per file")
+        XCTAssertEqual(payload["temperature"] as? Int, 0)
+    }
+
+    func testPayloadInjectsTaxonomyIntoTheUserMessage() throws {
+        let payload = LLMClient.payload(model: "m", rulePrompt: "sort",
+                                        taxonomy: ["Fantasy", "Krimi"],
+                                        fileDescription: "File: x")
+        let messages = try XCTUnwrap(payload["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.map { $0["role"] as? String }, ["system", "user"])
+        let user = try XCTUnwrap(messages.last?["content"] as? String)
+        XCTAssertTrue(user.contains("Fantasy, Krimi"))
+
+        let without = LLMClient.payload(model: "m", rulePrompt: "sort",
+                                        taxonomy: [], fileDescription: "File: x")
+        let bareUser = try XCTUnwrap((without["messages"] as? [[String: Any]])?.last?["content"] as? String)
+        XCTAssertFalse(bareUser.contains("MUST be exactly one of"))
+    }
+
     // MARK: - Response parsing
 
     private func response(content: String, usage: String = "") -> Data {

@@ -64,27 +64,42 @@ struct LLMClient {
       exactly one of those; never invent a folder outside the set.
     """
 
-    func classify(
-        rulePrompt: String,
-        taxonomy: [String],
-        fileDescription: String
-    ) async throws -> ClassificationResult {
+    /// Upper bound on the answer. The expected response is a five-field JSON
+    /// object; without a cap, a rambling model — or a file whose content
+    /// steers it into rambling — bills unbounded output tokens per file.
+    static let maxCompletionTokens = 700
+
+    /// The chat/completions request body, extracted so tests can pin its shape.
+    static func payload(
+        model: String, rulePrompt: String, taxonomy: [String], fileDescription: String
+    ) -> [String: Any] {
         var instruction = "User's sorting rule:\n\(rulePrompt)"
         if !taxonomy.isEmpty {
             instruction += "\n\nThe top-level folder MUST be exactly one of: "
                 + taxonomy.joined(separator: ", ")
         }
         let userPrompt = "\(instruction)\n\n\(fileDescription)"
-
-        let payload: [String: Any] = [
+        return [
             "model": model,
             "temperature": 0,
+            "max_tokens": maxCompletionTokens,
             "response_format": ["type": "json_object"],
             "messages": [
                 ["role": "system", "content": Self.systemPrompt],
                 ["role": "user", "content": userPrompt],
             ],
         ]
+    }
+
+    func classify(
+        rulePrompt: String,
+        taxonomy: [String],
+        fileDescription: String
+    ) async throws -> ClassificationResult {
+        let payload = Self.payload(
+            model: model, rulePrompt: rulePrompt,
+            taxonomy: taxonomy, fileDescription: fileDescription
+        )
 
         var request = URLRequest(url: Self.endpoint(for: baseURL))
         request.httpMethod = "POST"
