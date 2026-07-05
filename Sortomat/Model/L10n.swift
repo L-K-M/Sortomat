@@ -196,6 +196,7 @@ public enum L10n {
         "activity.wouldMove": "[%@] Would move %@ → %@",
         "activity.wouldSkip": "[%@] Would skip %@ — %@",
         "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
+        "activity.keyDeferred": "[%@] %d file(s) need the model, but no API key is set — pre-rules still ran.",
 
         // Errors
         "error.unsafePath": "Unsafe destination path: %@",
@@ -418,6 +419,7 @@ public enum L10n {
         "activity.wouldMove": "[%@] Würde verschieben %@ → %@",
         "activity.wouldSkip": "[%@] Würde überspringen %@ – %@",
         "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
+        "activity.keyDeferred": "[%@] %d Datei(en) benötigen das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",
         "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",

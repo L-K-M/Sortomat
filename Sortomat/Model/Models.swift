@@ -166,12 +166,22 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
 }
 
 public extension [Rule] {
-    /// Enabled rules, highest priority first (stable for equal priorities), so
-    /// a higher-priority rule claims a contested file before a lower one — the
-    /// behavior `Rule.priority` documents and the editor's stepper promises.
-    /// Shared by the GUI scan loop and the headless runner.
+    /// Enabled rules, highest priority first, so a higher-priority rule claims
+    /// a contested file before a lower one — the behavior `Rule.priority`
+    /// documents and the editor's stepper promises. Equal priorities keep the
+    /// list order via an explicit index tiebreak: Swift's `sorted` does not
+    /// guarantee stability, so relying on it would let rule order drift with
+    /// the toolchain. Shared by the GUI scan loop and the headless runner.
     func inExecutionOrder() -> [Rule] {
-        filter(\.enabled).sorted { $0.priority > $1.priority }
+        enumerated()
+            .filter { $0.element.enabled }
+            .sorted { lhs, rhs in
+                if lhs.element.priority != rhs.element.priority {
+                    return lhs.element.priority > rhs.element.priority
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 }
 

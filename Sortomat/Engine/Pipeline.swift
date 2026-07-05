@@ -53,6 +53,10 @@ actor Pipeline {
         }
 
         let previewing = forcePreview || rule.dryRun
+        // Without a key (when the provider needs one), deterministic pre-rules
+        // still run — free, predictable sorting isn't held hostage by the key
+        // field. Only files that would need the model are deferred.
+        let llmAvailable = !(config.providerRequiresKey && apiKey.isEmpty)
         let candidates = candidateFiles(in: watch, target: target, rule: rule)
 
         var budgetRemaining = config.perScanBudget > 0 ? config.perScanBudget : Int.max
@@ -64,20 +68,23 @@ actor Pipeline {
         let cap = max(1, min(config.maxConcurrentClassifications, 8))
         var index = 0
         var budgetHit = false
+        var keyDeferred = 0
 
         while index < candidates.count {
-            // Never launch more potential LLM calls than the budget has left:
-            // `allowLLM` is decided per *batch*, so a batch wider than the
-            // remaining budget could overshoot it by up to cap-1 calls. When
-            // the budget runs low, batches shrink to match (slightly less
-            // parallelism for pre-rule-only files, but the cap actually holds).
-            let batchCap = max(1, min(cap, budgetRemaining))
-            let batch = candidates[index..<min(index + batchCap, candidates.count)]
-            index += batchCap
+            let batch = candidates[index..<min(index + cap, candidates.count)]
+            index += cap
+            // Budget correctness without serialization: batches keep their full
+            // width, but at most `budgetRemaining` members may call the model —
+            // the rest run pre-rules only and defer if they'd need the LLM.
+            // (Shrinking the whole batch to the remaining budget — the previous
+            // approach — processed large backlogs one file at a time once the
+            // budget ran low, stability probe and all.)
+            var llmSlots = llmAvailable ? budgetRemaining : 0
             var outcomes: [FileOutcome] = []
             await withTaskGroup(of: FileOutcome?.self) { group in
                 for file in batch {
-                    let allowLLM = budgetRemaining > 0
+                    let allowLLM = llmSlots > 0
+                    if allowLLM { llmSlots -= 1 }
                     group.addTask { [self] in
                         await process(file: file, rule: rule, target: target, config: config,
                                       apiKey: apiKey, previewing: previewing, allowLLM: allowLLM)
@@ -89,12 +96,14 @@ actor Pipeline {
             }
             for outcome in outcomes {
                 if outcome.usedLLM { budgetRemaining -= 1 }
-                if outcome.budgetDeferred { budgetHit = true }
+                if outcome.budgetDeferred {
+                    if llmAvailable { budgetHit = true } else { keyDeferred += 1 }
+                }
                 if let entry = outcome.entry { result.entries.append(entry) }
                 if let plan = outcome.pending { result.pending.append(plan) }
                 result.usage = result.usage + outcome.usage
             }
-            if budgetRemaining <= 0 && index < candidates.count {
+            if llmAvailable, budgetRemaining <= 0, index < candidates.count {
                 budgetHit = true
                 break
             }
@@ -104,6 +113,12 @@ actor Pipeline {
             result.entries.append(ActivityEntry(
                 ok: true,
                 message: L10n.t("activity.budgetReached", rule.name, config.perScanBudget)
+            ))
+        }
+        if keyDeferred > 0 {
+            result.entries.append(ActivityEntry(
+                ok: true,
+                message: L10n.t("activity.keyDeferred", rule.name, keyDeferred)
             ))
         }
         return result
