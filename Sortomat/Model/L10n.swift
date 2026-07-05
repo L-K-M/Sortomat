@@ -179,6 +179,9 @@ public enum L10n {
         "journal.undoAll": "Undo last check",
         "journal.undone": "Undone: %@",
         "journal.undoFailed": "Couldn't undo %@: %@",
+        "journal.undo.sourceOccupied": "A file is already at the original location: %@",
+        "journal.undo.destinationMissing": "The moved file is no longer at: %@",
+        "journal.undo.destinationModified": "The copy at %@ no longer matches the original, so it wasn't deleted.",
 
         // Activity messages (logged)
         "activity.skipped": "[%@] Skipped: %@ — %@",
@@ -399,6 +402,9 @@ public enum L10n {
         "journal.undoAll": "Letzte Prüfung rückgängig",
         "journal.undone": "Rückgängig gemacht: %@",
         "journal.undoFailed": "«%@» konnte nicht rückgängig gemacht werden: %@",
+        "journal.undo.sourceOccupied": "Am ursprünglichen Ort liegt bereits eine Datei: %@",
+        "journal.undo.destinationMissing": "Die verschobene Datei ist nicht mehr unter: %@",
+        "journal.undo.destinationModified": "Die Kopie unter %@ stimmt nicht mehr mit dem Original überein und wurde deshalb nicht gelöscht.",
 
         "activity.skipped": "[%@] Übersprungen: %@ – %@",
         "activity.moved": "[%@] %@ → %@",

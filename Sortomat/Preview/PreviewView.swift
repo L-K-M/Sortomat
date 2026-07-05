@@ -227,11 +227,15 @@ private struct HistoryTab: View {
     }
 
     private func undo(_ entry: JournalEntry) {
-        do {
-            try Journal.undo(entry)
-            entries.removeAll { $0.id == entry.id }
-        } catch {
-            self.error = L10n.t("journal.undoFailed", entry.destination.lastPathComponent, error.localizedDescription)
+        Task { @MainActor in
+            do {
+                // Via AppState so the ledger learns about the restored file —
+                // otherwise the next scan would just move it back.
+                try await state.undo(entry)
+                entries.removeAll { $0.id == entry.id }
+            } catch {
+                self.error = L10n.t("journal.undoFailed", entry.destination.lastPathComponent, error.localizedDescription)
+            }
         }
     }
 }
