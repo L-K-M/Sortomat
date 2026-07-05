@@ -83,25 +83,10 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
         "True Crime", "Wirtschaft & Finanzen", "Wissenschaft & Technik", "Unbekannt",
     ]
 
-    static let ebookPrompt = """
-    Sortiere E-Books (EPUB) in die Struktur {Genre}/{Nachname, Vorname}/{Titel}.epub.
-
-    Wähle das Genre aus der vorgegebenen Liste. Der Autor als "Nachname, Vorname"
-    (bei nur einem Namen oder Pseudonym nur der Name). Titel ohne Reihennummern-
-    Präfixe wie "01 - ", ohne Verlagsangaben. Dateien, die keine E-Books sind,
-    überspringen.
-    """
-
-    static let screenshotPrompt = """
-    Ordne Screenshots dem passenden Projekt- oder Themenordner zu, z.B.
-    {Projekt}/{JJJJ-MM}/{Dateiname}. Nutze den sichtbaren Text und die Bild-
-    beschreibung, um das Thema zu erkennen. Wenn kein Projekt erkennbar ist,
-    lege die Datei unter "Allgemein/{JJJJ-MM}" ab.
-    """
-
-    static let invoicePrompt = """
-    Lege Rechnungen und Belege unter {Jahr}/{Absender}/{JJJJ-MM-TT Betreff}.pdf ab.
-    Nutze Absender, Rechnungsdatum und Betreff aus dem Dokument. Dokumente, die
-    keine Rechnungen/Belege sind, überspringen.
-    """
+    // The prompts follow the UI language: an English-speaking user previously
+    // got German prompts steering their model (and German folder names out the
+    // other end). The German originals live in the L10n table.
+    static var ebookPrompt: String { L10n.t("template.ebooks.prompt") }
+    static var screenshotPrompt: String { L10n.t("template.screenshots.prompt") }
+    static var invoicePrompt: String { L10n.t("template.invoices.prompt") }
 }

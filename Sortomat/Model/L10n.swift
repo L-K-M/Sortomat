@@ -63,6 +63,8 @@ public enum L10n {
         "rules.delete.confirm": "Delete rule",
 
         // Rule editor
+        "rule.defaultName": "New Rule",
+        "rule.defaultQuarantine": "_Quarantine",
         "rule.name": "Name:",
         "rule.enabled": "Rule enabled",
         "rule.dryRun": "Preview only (don't move files)",
@@ -195,10 +197,29 @@ public enum L10n {
         // Templates
         "template.ebooks.title": "E-books",
         "template.ebooks.summary": "Sort EPUBs into Genre / Author / Title.",
+        "template.ebooks.prompt": """
+        Sort e-books (EPUB) into the structure {Genre}/{Last name, First name}/{Title}.epub.
+
+        Pick the genre from the provided list. The author as "Last name, First name"
+        (a single name or pseudonym stays as-is). Title without series-number
+        prefixes like "01 - " and without publisher notes. Skip files that are
+        not e-books.
+        """,
         "template.screenshots.title": "Screenshots",
         "template.screenshots.summary": "Route screenshots to the matching project folder.",
+        "template.screenshots.prompt": """
+        File screenshots into the matching project or topic folder, e.g.
+        {Project}/{YYYY-MM}/{filename}. Use the visible text and the image
+        description to recognize the topic. If no project is recognizable,
+        file it under "General/{YYYY-MM}".
+        """,
         "template.invoices.title": "Invoices & receipts",
         "template.invoices.summary": "File PDFs under Year / Sender / Date Subject.",
+        "template.invoices.prompt": """
+        File invoices and receipts under {Year}/{Sender}/{YYYY-MM-DD Subject}.pdf.
+        Use the sender, invoice date and subject from the document. Skip
+        documents that are not invoices or receipts.
+        """,
         "template.blank.title": "Blank rule",
         "template.blank.summary": "Start from scratch.",
 
@@ -254,6 +275,8 @@ public enum L10n {
         "rules.remove": "Regel entfernen",
         "rules.duplicate": "Duplizieren",
 
+        "rule.defaultName": "Neue Regel",
+        "rule.defaultQuarantine": "_Quarantäne",
         "rule.name": "Name:",
         "rule.enabled": "Regel aktiv",
         "rule.dryRun": "Nur Vorschau (keine Dateien bewegen)",
@@ -380,10 +403,29 @@ public enum L10n {
 
         "template.ebooks.title": "E-Books",
         "template.ebooks.summary": "EPUBs nach Genre / Autor / Titel sortieren.",
+        "template.ebooks.prompt": """
+        Sortiere E-Books (EPUB) in die Struktur {Genre}/{Nachname, Vorname}/{Titel}.epub.
+
+        Wähle das Genre aus der vorgegebenen Liste. Der Autor als "Nachname, Vorname"
+        (bei nur einem Namen oder Pseudonym nur der Name). Titel ohne Reihennummern-
+        Präfixe wie "01 - ", ohne Verlagsangaben. Dateien, die keine E-Books sind,
+        überspringen.
+        """,
         "template.screenshots.title": "Screenshots",
         "template.screenshots.summary": "Screenshots dem passenden Projektordner zuordnen.",
+        "template.screenshots.prompt": """
+        Ordne Screenshots dem passenden Projekt- oder Themenordner zu, z.B.
+        {Projekt}/{JJJJ-MM}/{Dateiname}. Nutze den sichtbaren Text und die Bild-
+        beschreibung, um das Thema zu erkennen. Wenn kein Projekt erkennbar ist,
+        lege die Datei unter "Allgemein/{JJJJ-MM}" ab.
+        """,
         "template.invoices.title": "Rechnungen & Belege",
         "template.invoices.summary": "PDFs nach Jahr / Absender / Datum Betreff ablegen.",
+        "template.invoices.prompt": """
+        Lege Rechnungen und Belege unter {Jahr}/{Absender}/{JJJJ-MM-TT Betreff}.pdf ab.
+        Nutze Absender, Rechnungsdatum und Betreff aus dem Dokument. Dokumente, die
+        keine Rechnungen/Belege sind, überspringen.
+        """,
         "template.blank.title": "Leere Regel",
         "template.blank.summary": "Von Grund auf beginnen.",
 
