@@ -41,6 +41,36 @@ final class ClassificationTests: XCTestCase {
         XCTAssertEqual(c.confidence ?? 0, 0.85, accuracy: 0.0001)
     }
 
+    func testConfidenceAsPercentNumberIsNormalized() throws {
+        // A numeric 85 must mean 85 %, not "8500 % — clears every threshold".
+        let c = try decode(#"{"action":"move","folder":"A","filename":"x.pdf","confidence":85}"#)
+        XCTAssertEqual(c.confidence ?? 0, 0.85, accuracy: 0.0001)
+    }
+
+    func testConfidenceIsClampedToUnitRange() throws {
+        let c = try decode(#"{"action":"move","folder":"A","filename":"x.pdf","confidence":850}"#)
+        XCTAssertEqual(c.confidence ?? 0, 1.0, accuracy: 0.0001)
+    }
+
+    func testFractionalConfidencePassesThroughUnchanged() throws {
+        let c = try decode(#"{"action":"move","folder":"A","filename":"x.pdf","confidence":0.42}"#)
+        XCTAssertEqual(c.confidence ?? 0, 0.42, accuracy: 0.0001)
+    }
+
+    func testUnknownActionIsTreatedAsSkipNotMove() throws {
+        for action in ["ignore", "none", "delete", "unsure"] {
+            let c = try decode(#"{"action":"\#(action)","folder":"A","filename":"x.pdf"}"#)
+            XCTAssertFalse(c.isMove, "action \"\(action)\" must not move a file")
+        }
+    }
+
+    func testAffirmativeActionsStillMove() throws {
+        for action in ["move", "copy", "file", "sort", "rename", "MOVE"] {
+            let c = try decode(#"{"action":"\#(action)","folder":"A","filename":"x.pdf"}"#)
+            XCTAssertTrue(c.isMove, "action \"\(action)\" should move a file")
+        }
+    }
+
     func testNoUsablePathReturnsNil() throws {
         let c = try decode(#"{"action":"move"}"#)
         XCTAssertNil(c.resolvedRelativePath())
