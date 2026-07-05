@@ -45,6 +45,8 @@ public enum L10n {
         "menu.quit": "Quit",
         "menu.spend": "Estimated spend: %@",
         "menu.pendingReview": "%d change(s) awaiting review…",
+        "menu.checkUpdates": "Check for Updates…",
+        "menu.close": "Close",
 
         // Settings tabs
         "settings.window.title": "Sortomat — Rules",
@@ -223,6 +225,8 @@ public enum L10n {
         "menu.quit": "Beenden",
         "menu.spend": "Geschätzte Kosten: %@",
         "menu.pendingReview": "%d Änderung(en) zur Prüfung…",
+        "menu.checkUpdates": "Nach Updates suchen…",
+        "menu.close": "Schliessen",
 
         "settings.window.title": "Sortomat – Regeln",
         "tab.rules": "Regeln",

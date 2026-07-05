@@ -27,6 +27,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
+        // Our items carry explicit `isEnabled` state; with auto-enabling on,
+        // AppKit re-enables anything whose target responds to its action, so a
+        // deliberately disabled "Check now" (while paused) looked clickable.
+        menu.autoenablesItems = false
         statusItem.menu = menu
         updateIcon()
 
@@ -41,6 +45,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let button = statusItem.button else { return }
         button.image = Self.funnelImage()
         button.appearsDisabled = state.paused
+        // Surface pending reviews right in the menu bar: a small count next to
+        // the funnel. Without it, queued suggestions were invisible until the
+        // menu was opened (the $pendingActions subscription existed but the
+        // icon never used it).
+        let pending = state.pendingActions.count
+        button.imagePosition = pending > 0 ? .imageLeft : .imageOnly
+        button.title = pending > 0 ? " \(pending)" : ""
     }
 
     /// The same "sorting funnel" as the app icon, drawn as a template image so it
@@ -109,7 +120,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             [weak self] in self?.onOpenSettings()
         }
         menu.addItem(settings)
-        menu.addItem(BlockMenuItem(title: "Check for Updates…") { [weak self] in
+        menu.addItem(BlockMenuItem(title: L10n.t("menu.checkUpdates")) { [weak self] in
             self?.onCheckForUpdates()
         })
         menu.addItem(.separator())

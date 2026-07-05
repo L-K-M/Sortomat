@@ -30,6 +30,15 @@ enum MainMenu {
         appMenu.addItem(withTitle: "Quit Sortomat",
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
+        // File menu — just Close, so ⌘W works on the Settings/Preview windows
+        // (without it, windows are mouse-close only).
+        let fileItem = NSMenuItem()
+        mainMenu.addItem(fileItem)
+        let fileMenu = NSMenu(title: "File")
+        fileItem.submenu = fileMenu
+        fileMenu.addItem(withTitle: L10n.t("menu.close"),
+                         action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
         // Edit menu — the whole point of this file.
         let editItem = NSMenuItem()
         mainMenu.addItem(editItem)
