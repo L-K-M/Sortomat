@@ -53,9 +53,13 @@ struct ZipArchive {
     }
 
     /// Decompress an entry's data, capped at `maxEntryBytes`. Returns nil for
-    /// unsupported methods, oversized entries, or corrupt data.
+    /// unsupported methods, oversized entries, or corrupt data. Both sizes are
+    /// checked: for a stored entry the bytes returned are `compressedSize`, so
+    /// a hostile central directory declaring a small uncompressed size with a
+    /// huge compressed size must not bypass the cap.
     func data(for entry: Entry) -> Data? {
-        guard entry.uncompressedSize <= Self.maxEntryBytes else { return nil }
+        guard entry.uncompressedSize <= Self.maxEntryBytes,
+              entry.compressedSize <= Self.maxEntryBytes else { return nil }
         guard let dataStart = localDataOffset(for: entry) else { return nil }
         let end = dataStart + entry.compressedSize
         guard end <= bytes.count, dataStart <= end else { return nil }

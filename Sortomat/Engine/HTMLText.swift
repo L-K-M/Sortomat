@@ -13,8 +13,10 @@ enum HTMLText {
     ]
 
     static func strip(_ html: String) -> String {
+        // (?s) — dot must match newlines, or any multi-line <style>/<script>
+        // body (i.e. nearly all of them) survives into the "visible text".
         var text = html.replacingOccurrences(
-            of: "<(script|style)[^>]*>.*?</\\1>", with: " ",
+            of: "(?s)<(script|style)[^>]*>.*?</\\1>", with: " ",
             options: [.regularExpression, .caseInsensitive]
         )
         text = text.replacingOccurrences(

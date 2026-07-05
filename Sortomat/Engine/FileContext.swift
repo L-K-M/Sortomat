@@ -90,7 +90,10 @@ enum FileContext {
               let data = try? handle.read(upToCount: 64 * 1024)
         else { return "" }
         try? handle.close()
-        return normalize(TextDecoding.decode(data))
+        // The fixed-size read may have split a multi-byte UTF-8 character at
+        // the boundary; trim the partial tail so the whole excerpt doesn't
+        // fall back to CP1252 mojibake.
+        return normalize(TextDecoding.decode(TextDecoding.trimmingPartialUTF8Tail(data)))
     }
 
     private static func readPDF(url: URL) -> String {

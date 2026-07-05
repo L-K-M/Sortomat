@@ -24,4 +24,52 @@ final class TextDecodingTests: XCTestCase {
         let data = Data([0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00]) // "Hi"
         XCTAssertEqual(TextDecoding.decode(data), "Hi")
     }
+
+    // MARK: - Partial-tail trimming (fixed-size reads splitting characters)
+
+    func testTrimsSplitTwoByteCharacter() {
+        var data = Data("abcé".utf8) // é = 0xC3 0xA9
+        data.removeLast()            // cut mid-character
+        let trimmed = TextDecoding.trimmingPartialUTF8Tail(data)
+        XCTAssertEqual(TextDecoding.decode(trimmed), "abc")
+    }
+
+    func testTrimsSplitThreeByteCharacter() {
+        var data = Data("ab€".utf8)  // € = 0xE2 0x82 0xAC
+        data.removeLast()
+        XCTAssertEqual(TextDecoding.decode(TextDecoding.trimmingPartialUTF8Tail(data)), "ab")
+    }
+
+    func testTrimsSplitFourByteCharacter() {
+        var data = Data("ab😀".utf8) // 4-byte scalar
+        data.removeLast(2)
+        XCTAssertEqual(TextDecoding.decode(TextDecoding.trimmingPartialUTF8Tail(data)), "ab")
+    }
+
+    func testCompleteTailIsUntouched() {
+        let data = Data("héllo".utf8)
+        XCTAssertEqual(TextDecoding.trimmingPartialUTF8Tail(data), data)
+    }
+
+    func testAsciiAndEmptyAreUntouched() {
+        let ascii = Data("plain".utf8)
+        XCTAssertEqual(TextDecoding.trimmingPartialUTF8Tail(ascii), ascii)
+        XCTAssertEqual(TextDecoding.trimmingPartialUTF8Tail(Data()), Data())
+    }
+
+    func testNonUTF8DataPassesThrough() {
+        // CP1252 text whose final byte looks nothing like a UTF-8 lead.
+        let data = Data([0x48, 0x65, 0x93, 0x6C, 0x6C]) // He“ll
+        XCTAssertEqual(TextDecoding.trimmingPartialUTF8Tail(data), data)
+    }
+
+    func testSplitCharacterNoLongerPoisonsWholeExcerpt() {
+        // The actual bug: one split character made strict UTF-8 fail for the
+        // whole buffer and everything decoded as CP1252 mojibake.
+        var data = Data("Über die Wälder zög".utf8)
+        data.removeLast(2) // drop the trailing "g" plus one byte of "ö" → split
+        let decoded = TextDecoding.decode(TextDecoding.trimmingPartialUTF8Tail(data))
+        XCTAssertTrue(decoded.hasPrefix("Über die Wälder"), "got \(decoded)")
+        XCTAssertFalse(decoded.contains("Ã"), "mojibake leaked through: \(decoded)")
+    }
 }
