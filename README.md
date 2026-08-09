@@ -15,7 +15,7 @@ the fuzzy judgment (genre, author, topic, "what is this document about") that
 deterministic rules can't express.
 
 **Latest release:** v<!-- version -->1.0.0<!-- /version --> ·
-[Download](https://github.com/l-k-m/sortomat/releases/latest)
+[Download](https://github.com/L-K-M/Sortomat/releases/latest)
 
 > [!IMPORTANT]
 > Most of this code was written by an LLM from the design in `AGENTS.md` and
@@ -50,7 +50,7 @@ deterministic rules can't express.
 ## Install
 
 Download the latest `.dmg` from the
-[Releases](https://github.com/l-k-m/sortomat/releases/latest) page and drag
+[Releases](https://github.com/L-K-M/Sortomat/releases/latest) page and drag
 `Sortomat.app` to `/Applications`.
 
 Releases are unsigned unless built with signing secrets, so on first launch
