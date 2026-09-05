@@ -79,4 +79,35 @@ final class SanitizerTests: XCTestCase {
         )
         XCTAssertEqual(url.path, "/tmp/sortomat-target/A/B/c.txt")
     }
+
+
+    // MARK: - Invisible characters, dot segments, extension forcing
+
+    func testStripsInvisibleAndBidiCharacters() {
+        XCTAssertEqual(Sanitizer.sanitizeComponent("Fantasy\u{200B}"), "Fantasy")
+        XCTAssertEqual(Sanitizer.sanitizeComponent("\u{202E}evil"), "evil")
+        XCTAssertEqual(Sanitizer.sanitizeComponent("a\u{7F}b"), "a b")
+        XCTAssertEqual(Sanitizer.sanitizeComponent("\u{FEFF}Krimi"), "Krimi")
+    }
+
+    func testDotSegmentsAreDropped() throws {
+        let url = try Sanitizer.destination(
+            target: target, relativePath: "./Docs/./report.pdf", originalExtension: "pdf"
+        )
+        XCTAssertEqual(url.path, "/tmp/sortomat-target/Docs/report.pdf")
+    }
+
+    func testDottedStemsKeepTheirSegments() {
+        XCTAssertEqual(Sanitizer.forcingExtension("png", on: "Screenshot 2024-06-01 at 10.15.32"),
+                       "Screenshot 2024-06-01 at 10.15.32.png")
+        XCTAssertEqual(Sanitizer.forcingExtension("tar", on: "backup.2024.01.tar"), "backup.2024.01.tar")
+        XCTAssertEqual(Sanitizer.forcingExtension("epub", on: "Tolkien, J.R.R"), "Tolkien, J.R.R.epub")
+        XCTAssertEqual(Sanitizer.forcingExtension("pdf", on: "v1.2"), "v1.2.pdf")
+    }
+
+    func testRecognizedWrongExtensionIsReplaced() {
+        XCTAssertEqual(Sanitizer.forcingExtension("pdf", on: "report.txt"), "report.pdf")
+        XCTAssertEqual(Sanitizer.forcingExtension("epub", on: "Hobbit.mobi"), "Hobbit.epub")
+        XCTAssertEqual(Sanitizer.forcingExtension("pdf", on: "Report.PDF"), "Report.PDF")
+    }
 }

@@ -241,6 +241,15 @@ actor Pipeline {
             return outcome
         } catch {
             ledger.record(ruleID: rule.id, fingerprint: fingerprint, status: .failed)
+            // A request that reached the model and failed (HTTP error, bad
+            // body, network) still counts against the per-check budget —
+            // otherwise a backlog against a rate-limited endpoint fires one
+            // paid request per file with no cap at all.
+            // Everything except cancellation: a sanitizer rejection or a decode
+            // failure happens *after* the request was paid for, and counting
+            // only LLMError and URLError let those files cost money for free.
+            // Over-counting is the safe direction for a spend cap.
+            if !(error is CancellationError) { outcome.usedLLM = true }
             outcome.entry = ActivityEntry(
                 ok: false,
                 message: L10n.t("activity.error", rule.name, file.lastPathComponent, error.localizedDescription)
@@ -285,7 +294,7 @@ actor Pipeline {
                 ruleID: rule.id, ruleName: rule.name, source: file,
                 kind: rule.copyInsteadOfMove ? .copy : .move,
                 destination: dest, origin: .preRule,
-                reason: "pre-rule «\(name)»", confidence: nil,
+                reason: L10n.t("reason.preRule", name), confidence: nil,
                 copyInsteadOfMove: rule.copyInsteadOfMove
             ))
         case .useLLM:
@@ -346,56 +355,87 @@ actor Pipeline {
         _ c: Classification, file: URL, rule: Rule, target: URL, ext: String,
         usage: TokenUsage, usedLLM: Bool
     ) throws -> DecideResult {
-        guard c.isMove else {
+        let routing = try Self.routing(for: c, rule: rule, fileName: file.lastPathComponent)
+        guard let relativePath = routing.relativePath else {
             return DecideResult(plan: PlannedAction(
                 ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
                 destination: nil, origin: .model,
-                reason: L10n.t("activity.skipped", rule.name, file.lastPathComponent,
-                               c.reason ?? "rule does not apply"),
+                reason: L10n.t("activity.skipped", rule.name, file.lastPathComponent, routing.reason),
                 confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
             ), usage: usage, usedLLM: usedLLM)
+        }
+        let dest = try Sanitizer.destination(target: target, relativePath: relativePath, originalExtension: ext)
+        return DecideResult(plan: PlannedAction(
+            ruleID: rule.id, ruleName: rule.name, source: file, kind: routing.kind,
+            destination: dest, origin: routing.origin, reason: routing.reason,
+            confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
+        ), usage: usage, usedLLM: usedLLM)
+    }
+
+    /// The safety valves applied to a model answer, as pure data so they can
+    /// be unit-tested without a pipeline: skip handling, taxonomy enforcement
+    /// and the confidence quarantine.
+    struct Routing: Equatable {
+        /// nil means skip.
+        var relativePath: String?
+        var kind: PlannedAction.Kind
+        var origin: PlannedAction.Origin
+        var reason: String
+    }
+
+    static func routing(for c: Classification, rule: Rule, fileName: String) throws -> Routing {
+        guard c.isMove else {
+            return Routing(relativePath: nil, kind: .skip, origin: .model,
+                           reason: c.reason ?? L10n.t("reason.ruleDoesNotApply"))
         }
         guard let relative = c.resolvedRelativePath() else {
             throw LLMError.badResponse(L10n.t("error.missingPath"))
         }
 
-        // Taxonomy enforcement → quarantine out-of-set folders.
         var origin: PlannedAction.Origin = .model
         var quarantine = false
-        var reasonSuffix = c.reason ?? ""
+        var reason = c.reason ?? ""
+
+        // Taxonomy is checked against the path that will actually be applied
+        // — not the `folder` field on its own, which a contradictory (or
+        // prompt-injected) answer could set to an allowed name while
+        // `relative_path` points elsewhere.
         if !rule.taxonomy.isEmpty {
-            let top = c.topFolder() ?? ""
+            let top = Classification.topFolder(ofRelativePath: relative) ?? ""
             let allowed = rule.taxonomy.contains { $0.caseInsensitiveCompare(top) == .orderedSame }
             if !allowed {
                 quarantine = true
                 origin = .taxonomy
-                reasonSuffix = "folder «\(top)» not in taxonomy"
+                reason = L10n.t("reason.notInTaxonomy", top)
             }
         }
 
-        // Confidence threshold → quarantine low-confidence decisions.
-        if !quarantine, rule.confidenceThreshold > 0,
-           let confidence = c.confidence, confidence < rule.confidenceThreshold {
-            quarantine = true
-            origin = .confidence
-            reasonSuffix = String(format: "confidence %.0f%% below threshold", confidence * 100)
+        // Confidence threshold → quarantine low-confidence decisions. A
+        // missing or unparseable confidence is *low*, not trusted: the
+        // off-schema answers deserve the most suspicion, not the least.
+        if !quarantine, rule.confidenceThreshold > 0 {
+            if let confidence = c.confidence {
+                if confidence < rule.confidenceThreshold {
+                    quarantine = true
+                    origin = .confidence
+                    reason = L10n.t("reason.lowConfidence", Int((confidence * 100).rounded()))
+                }
+            } else {
+                quarantine = true
+                origin = .confidence
+                reason = L10n.t("reason.noConfidence")
+            }
         }
 
-        let relativePath: String
-        let kind: PlannedAction.Kind
         if quarantine {
-            relativePath = "\(rule.quarantineSubfolder)/\(file.lastPathComponent)"
-            kind = .quarantine
-        } else {
-            relativePath = relative
-            kind = rule.copyInsteadOfMove ? .copy : .move
+            // An emptied quarantine folder means "the target itself", not the
+            // absolute "/name" the old string interpolation produced.
+            let folder = rule.quarantineSubfolder.trimmingCharacters(in: .whitespaces)
+            let path = folder.isEmpty ? fileName : "\(folder)/\(fileName)"
+            return Routing(relativePath: path, kind: .quarantine, origin: origin, reason: reason)
         }
-        let dest = try Sanitizer.destination(target: target, relativePath: relativePath, originalExtension: ext)
-        return DecideResult(plan: PlannedAction(
-            ruleID: rule.id, ruleName: rule.name, source: file, kind: kind,
-            destination: dest, origin: origin, reason: reasonSuffix,
-            confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
-        ), usage: usage, usedLLM: usedLLM)
+        return Routing(relativePath: relative, kind: rule.copyInsteadOfMove ? .copy : .move,
+                       origin: origin, reason: reason)
     }
 
     // MARK: - Apply
@@ -438,7 +478,8 @@ actor Pipeline {
                         ruleID: plan.ruleID, ruleName: plan.ruleName,
                         sourcePath: plan.source.path, destinationPath: url.path,
                         wasCopy: plan.copyInsteadOfMove, reason: plan.reason,
-                        batchID: batchID, targetPath: target.path
+                        batchID: batchID, destinationStamp: Journal.stamp(of: url),
+                        targetPath: target.path
                     ))
                     return ActivityEntry(ok: true,
                                          message: filedMessage(plan, finalURL: url, target: target, name: name),
@@ -491,14 +532,38 @@ actor Pipeline {
 
     // MARK: - Candidate discovery & stability
 
+    /// Document packages that Launch Services may not know on a Mac without
+    /// the app that owns them — a Pages document must sort like a file even
+    /// where Pages isn't installed.
+    static let packageExtensions: Set<String> = [
+        "pages", "numbers", "key", "rtfd", "textbundle", "sketch", "band", "bundle", "app",
+        // Launch Services only knows a bundle type if something declares it,
+        // so a Mac without the owning app sees a plain folder — and a
+        // recursive rule would file a photo library's innards one by one.
+        "photoslibrary", "aplibrary", "tvlibrary", "logicx", "fcpbundle",
+        "framework", "kext", "prefpane", "qlgenerator", "dtbase2", "lpdf",
+        "scptd", "workflow", "download", "photobooth",
+    ]
+
+    /// A regular file, or a package: a Pages/Numbers/Keynote document, an
+    /// RTFD, a text bundle. Packages are folders on disk, so they used to be
+    /// invisible to every rule ("document" kind included) — Hazel treats
+    /// them as files, and so does Finder.
+    static func isFileLike(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isPackageKey, .isDirectoryKey])
+        else { return false }
+        if values.isRegularFile == true { return true }
+        guard values.isDirectory == true else { return false }
+        return values.isPackage == true || packageExtensions.contains(url.pathExtension.lowercased())
+    }
+
     private func candidateFiles(in watch: URL, target: URL, rule: Rule) -> [URL] {
         let fm = FileManager.default
         let targetPath = target.standardizedFileURL.path
-        let keys: [URLResourceKey] = [.isRegularFileKey]
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isPackageKey, .isDirectoryKey]
 
         func acceptable(_ url: URL) -> Bool {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
-            else { return false }
+            guard Self.isFileLike(url) else { return false }
             let ext = url.pathExtension.lowercased()
             if Self.partialExtensions.contains(ext) { return false }
             if url.lastPathComponent.hasPrefix(".") { return false }
@@ -521,7 +586,13 @@ actor Pipeline {
                     enumerator.skipDescendants()
                     continue
                 }
-                if acceptable(url) { urls.append(url) }
+                if acceptable(url) {
+                    urls.append(url)
+                    // A package is one item; its innards are never candidates.
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                        enumerator.skipDescendants()
+                    }
+                }
             }
         } else {
             guard let children = try? fm.contentsOfDirectory(
@@ -532,45 +603,63 @@ actor Pipeline {
         return urls.sorted { $0.path < $1.path }
     }
 
-    /// How long the probe waits between its two looks at a file's size.
+    /// How long the probe waits between its two looks at an item's size.
     static let stabilityPause: UInt64 = 700_000_000
 
-    /// A file has to be older than this before its size is even compared —
-    /// something written a moment ago is still in flight whatever the size
-    /// says.
+    /// A file has to be older than this before its size is compared at all —
+    /// something written a moment ago is still in flight whatever the size says.
     static let stabilityAge: TimeInterval = 5
 
-    /// Which of these files have settled: not still being written.
+    /// Which of these items have settled: not still being written.
     ///
     /// One pause for the whole pass, not one per file. The probe used to run
     /// inside the per-file path, so with the default concurrency of 2 a
     /// thousand-file backlog spent five hundred sleeps of 0.7 s — about six
     /// minutes — doing nothing at all, on every pass, until the backlog
     /// cleared. Stat everything, wait once, stat everything again: 0.7 s
-    /// however many files it holds.
+    /// however many items it holds.
     static func settledPaths(among urls: [URL], pause: UInt64 = stabilityPause) async -> Set<String> {
         let now = Date()
-        var before: [String: Int64] = [:]
+        var before: [String: String] = [:]
         for url in urls {
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let size = attrs[.size] as? Int64,
-                  let modified = attrs[.modificationDate] as? Date,
+            guard let modified = (try? FileManager.default
+                    .attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
                   // abs(): a modification date in the *future* (a bad camera
-                  // clock, a sloppy downloader) must not park the file
-                  // forever — the size comparison still catches a file that is
+                  // clock, a sloppy downloader) must not park the item
+                  // forever — the size comparison still catches one that is
                   // actively growing.
-                  abs(now.timeIntervalSince(modified)) > stabilityAge
+                  abs(now.timeIntervalSince(modified)) > stabilityAge,
+                  let signature = sizeSignature(of: url)
             else { continue }
-            before[url.path] = size
+            before[url.path] = signature
         }
         guard !before.isEmpty else { return [] }
         try? await Task.sleep(nanoseconds: pause)
         var settled: Set<String> = []
-        for (path, size) in before {
-            let after = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? -1
-            if after == size { settled.insert(path) }
+        for (path, signature) in before where sizeSignature(of: URL(fileURLWithPath: path)) == signature {
+            settled.insert(path)
         }
         return settled
+    }
+
+    /// The byte count of a file, or "item count|total bytes" for a package —
+    /// a package still being written grows in either.
+    static func sizeSignature(of url: URL) -> String? {
+        let fm = FileManager.default
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey]) else { return nil }
+        if values.isDirectory != true {
+            return values.fileSize.map { "\($0)" }
+        }
+        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: []) else {
+            return nil
+        }
+        var count = 0
+        var bytes = 0
+        for case let child as URL in enumerator {
+            count += 1
+            bytes += (try? child.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        }
+        return "\(count)|\(bytes)"
     }
 }
 

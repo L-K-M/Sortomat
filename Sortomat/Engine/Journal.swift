@@ -19,6 +19,12 @@ struct JournalEntry: Codable, Identifiable, Equatable {
     /// (an undo tombstone appended by `undo`), not a new placement. Optional,
     /// so journals written before this field decode unchanged.
     var undoOf: UUID?
+    /// `size|seconds|milliseconds` of the placed file, captured right after the
+    /// move. Undo refuses to move back a file that no longer matches: without
+    /// this, a stale History entry would yank whatever *currently* sits at the
+    /// destination (a replacement, a later edit) to the old source path.
+    /// Optional, so journals written before this field decode unchanged.
+    var destinationStamp: String?
     /// The rule's target root at the time of the move. Undo prunes the folders
     /// the move created on its way down, and this is where the pruning stops —
     /// without it there is nothing to stop the walk at the user's own
@@ -37,13 +43,55 @@ enum Journal {
         guard let line = try? JSONEncoder().encode(entry) else { return }
         var data = line
         data.append(0x0A) // newline
-        if let handle = try? FileHandle(forWritingTo: ConfigStore.journalFile) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: ConfigStore.journalFile)
+        do {
+            if let handle = try? FileHandle(forWritingTo: ConfigStore.journalFile) {
+                defer { try? handle.close() }
+                _ = try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } else {
+                try data.write(to: ConfigStore.journalFile)
+            }
+        } catch {
+            // The move already happened; a lost journal line means it can't
+            // be undone from History. Say so instead of failing silently.
+            ConfigStore.appendLog(L10n.t("journal.writeFailed", entry.destinationPath, error.localizedDescription))
+            Log.pipeline.error("journal write failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// `size|seconds|milliseconds` of a file, the cheap identity `undo` checks
+    /// before moving a file back. Nil when the file can't be read.
+    ///
+    /// Milliseconds, not whole seconds: an editor that saves in place within
+    /// the same second without changing the length — a byte flipped in a fixed
+    /// header, a checkbox toggled in a settings file — produced a stamp
+    /// identical to the one taken at move time, and undo dragged the *edited*
+    /// file back to the old path as if nothing had happened.
+    static func stamp(of url: URL) -> String? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64 else { return nil }
+        let raw = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        // A corrupt inode can report a timestamp that traps the Int conversion.
+        let mtime = raw.isFinite ? min(max(raw, -1e12), 1e12) : 0
+        let seconds = mtime.rounded(.down)
+        return "\(size)|\(Int(seconds))|\(Int(((mtime - seconds) * 1000).rounded(.down)))"
+    }
+
+    /// Whether a stamp taken now still describes the file recorded at move
+    /// time.
+    ///
+    /// Journals written before stamps carried milliseconds hold two fields
+    /// (`1024|1700000000`). Comparing those verbatim against a three-field
+    /// stamp never matches, which would take undo away from every entry
+    /// already on disk — so a two-field recording is compared on the two
+    /// fields it has. The seconds field is floored in both formats, so the
+    /// old and new values agree exactly.
+    static func stampMatches(recorded: String, current: String) -> Bool {
+        if recorded == current { return true }
+        let recordedFields = recorded.split(separator: "|", omittingEmptySubsequences: false)
+        let currentFields = current.split(separator: "|", omittingEmptySubsequences: false)
+        guard recordedFields.count == 2, currentFields.count >= 2 else { return false }
+        return recordedFields[0] == currentFields[0] && recordedFields[1] == currentFields[1]
     }
 
     /// Most recent entries first. Undone entries (those with a matching
@@ -78,12 +126,14 @@ enum Journal {
         case sourceOccupied(String)
         case destinationMissing(String)
         case destinationModified(String)
+        case destinationReplaced(String)
 
         var errorDescription: String? {
             switch self {
             case .sourceOccupied(let p): return L10n.t("journal.undo.sourceOccupied", p)
             case .destinationMissing(let p): return L10n.t("journal.undo.destinationMissing", p)
             case .destinationModified(let p): return L10n.t("journal.undo.destinationModified", p)
+            case .destinationReplaced(let p): return L10n.t("journal.undo.destinationReplaced", p)
             }
         }
     }
@@ -119,6 +169,13 @@ enum Journal {
         }
         guard !fm.fileExists(atPath: entry.sourcePath) else {
             throw UndoError.sourceOccupied(entry.sourcePath)
+        }
+        // Only the file Sortomat placed may be moved back. A replacement or a
+        // later edit changes size or mtime; leave such a file where it is.
+        if let expected = entry.destinationStamp,
+           let current = stamp(of: entry.destination),
+           !stampMatches(recorded: expected, current: current) {
+            throw UndoError.destinationReplaced(entry.destinationPath)
         }
         try fm.createDirectory(
             at: entry.source.deletingLastPathComponent(), withIntermediateDirectories: true

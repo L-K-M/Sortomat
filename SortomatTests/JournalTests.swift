@@ -33,8 +33,11 @@ final class JournalTests: XCTestCase {
         let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
                                  destinationPath: dest.path, wasCopy: false, reason: "r")
         try Journal.undo(entry)
-        XCTAssertTrue(fm.fileExists(atPath: source.path))
         XCTAssertFalse(fm.fileExists(atPath: dest.path))
+        // The file has to arrive back intact, not merely arrive: an undo that
+        // recreated an empty placeholder at the source would pass a bare
+        // existence check.
+        XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "content")
     }
 
     func testUndoCopyRemovesCopy() throws {
@@ -156,5 +159,94 @@ final class JournalTests: XCTestCase {
         ]
         let batch = Journal.lastBatch(in: entries)
         XCTAssertEqual(batch.map(\.sourcePath), ["/a1", "/a2"])
+    }
+
+
+    func testUndoMoveRefusesWhenTheDestinationWasReplaced() throws {
+        let source = dir.appendingPathComponent("original/x.txt")
+        let dest = dir.appendingPathComponent("sorted/x.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "moved".write(to: dest, atomically: true, encoding: .utf8)
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: false, reason: "r",
+                                 destinationStamp: Journal.stamp(of: dest))
+
+        // Something else replaced the file at the destination since.
+        try "a much longer replacement written later".write(to: dest, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try Journal.undo(entry))
+        XCTAssertTrue(fm.fileExists(atPath: dest.path), "the impostor must be left where it is")
+        XCTAssertFalse(fm.fileExists(atPath: source.path))
+    }
+
+    func testUndoMoveWithMatchingStampRestores() throws {
+        let source = dir.appendingPathComponent("original/x.txt")
+        let dest = dir.appendingPathComponent("sorted/x.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "moved".write(to: dest, atomically: true, encoding: .utf8)
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: false, reason: "r",
+                                 destinationStamp: Journal.stamp(of: dest))
+        try Journal.undo(entry)
+        XCTAssertFalse(fm.fileExists(atPath: dest.path), "the file moved, it wasn't copied back")
+        XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "moved")
+    }
+
+    func testUndoRefusesAnEditThatKeptTheSizeWithinOneSecond() throws {
+        // Whole-second stamps let a save that keeps the length and lands in the
+        // same second read as "untouched", and undo then dragged the *edited*
+        // file back to the old path. Both timestamps are set explicitly so the
+        // test doesn't depend on how fast the machine runs it.
+        let source = dir.appendingPathComponent("original/x.txt")
+        let dest = dir.appendingPathComponent("sorted/x.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "moved".write(to: dest, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.100)],
+                             ofItemAtPath: dest.path)
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: false, reason: "r",
+                                 destinationStamp: Journal.stamp(of: dest))
+
+        try "MOVED".write(to: dest, atomically: true, encoding: .utf8) // same length
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.800)],
+                             ofItemAtPath: dest.path)
+
+        XCTAssertThrowsError(try Journal.undo(entry))
+        XCTAssertEqual(try String(contentsOf: dest, encoding: .utf8), "MOVED")
+        XCTAssertFalse(fm.fileExists(atPath: source.path))
+    }
+
+    func testUndoStillAcceptsALegacyWholeSecondStamp() throws {
+        // Every journal already on disk holds the two-field `size|seconds`
+        // stamp. If those stopped matching the three-field form, undo would
+        // quietly become unavailable for the user's entire history.
+        let source = dir.appendingPathComponent("original/x.txt")
+        let dest = dir.appendingPathComponent("sorted/x.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "moved".write(to: dest, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.750)],
+                             ofItemAtPath: dest.path)
+        let size = try Data(contentsOf: dest).count
+
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: false, reason: "r",
+                                 destinationStamp: "\(size)|1700000000")
+        try Journal.undo(entry)
+        XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "moved")
+    }
+
+    func testALegacyStampStillCatchesAReplacement() throws {
+        // Legacy tolerance is about the *format*, not about trusting the
+        // entry: a file whose size or second changed must still be refused.
+        let file = dir.appendingPathComponent("x.txt")
+        try "moved".write(to: file, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_700_000_000.750)],
+                             ofItemAtPath: file.path)
+        let current = try XCTUnwrap(Journal.stamp(of: file))
+        XCTAssertTrue(Journal.stampMatches(recorded: "5|1700000000", current: current))
+        XCTAssertFalse(Journal.stampMatches(recorded: "6|1700000000", current: current),
+                       "a different size is a different file")
+        XCTAssertFalse(Journal.stampMatches(recorded: "5|1700000001", current: current),
+                       "a different second is a different file")
     }
 }
