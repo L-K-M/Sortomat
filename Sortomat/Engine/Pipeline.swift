@@ -575,9 +575,9 @@ actor Pipeline {
     /// a package still being written grows in either.
     static func sizeSignature(of url: URL) -> String? {
         let fm = FileManager.default
-        guard let attrs = try? fm.attributesOfItem(atPath: url.path) else { return nil }
-        if attrs[.type] as? FileAttributeType != .typeDirectory {
-            return (attrs[.size] as? Int64).map { "\($0)" }
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey]) else { return nil }
+        if values.isDirectory != true {
+            return values.fileSize.map { "\($0)" }
         }
         guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: []) else {
             return nil
