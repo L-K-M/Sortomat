@@ -27,7 +27,7 @@ enum Sanitizer {
             of: "\\s+", with: " ", options: .regularExpression
         )
         cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
-        cleaned = String(cleaned.prefix(maxLength))
+        cleaned = truncated(cleaned, characters: maxLength)
             .trimmingCharacters(in: CharacterSet(charactersIn: " ."))
         // Never let a component become empty, "." or ".." after sanitizing.
         // The fallback name follows the UI language (it used to be German for
@@ -36,6 +36,27 @@ enum Sanitizer {
             return L10n.t("component.unknown")
         }
         return cleaned
+    }
+
+    /// APFS and HFS+ cap a single path component at 255 *bytes*, not
+    /// characters. A 150-character CJK or emoji title is 450–600 bytes, so the
+    /// grapheme cap alone let a perfectly sanitized name still fail the move
+    /// with `ENAMETOOLONG` — every pass, forever, for the same file.
+    static let maxComponentBytes = 255
+
+    /// Trimmed to both limits, cutting on grapheme boundaries so a truncation
+    /// can never split a character (or an emoji's joiner sequence) in half.
+    static func truncated(_ text: String, characters: Int,
+                          bytes: Int = maxComponentBytes) -> String {
+        var result = String(text.prefix(characters))
+        while result.utf8.count > bytes, !result.isEmpty {
+            // One grapheme at a time: a byte-wise cut would land inside a
+            // multi-byte character, and the remainder is what gets written to
+            // disk. Names this long are rare enough that the loop is cheaper
+            // than the arithmetic to avoid it.
+            result = String(result.dropLast())
+        }
+        return result
     }
 
     /// Build a safe absolute destination under `target` from a relative path,

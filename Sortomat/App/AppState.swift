@@ -32,6 +32,10 @@ final class AppState: ObservableObject {
     private var scanRequested = false
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
+    /// The interval the running timer is actually sleeping on, so a change can
+    /// be noticed. Without it, dropping 600 s to 15 s took up to ten minutes to
+    /// take effect — the length of the sleep already in progress.
+    private var timerInterval: Double = 0
     private var followUpScheduled = false
     /// Exclusive claim on the config directory for this process's lifetime.
     /// nil means another Sortomat process (usually a headless run) holds it;
@@ -88,6 +92,7 @@ final class AppState: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             ConfigStore.save(self.config)
             self.apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && self.config.providerRequiresKey
+            self.restartTimerIfIntervalChanged()
             self.rebuildWatchers()
             await self.invalidateStalePreviews()
         }
@@ -244,16 +249,33 @@ final class AppState: ObservableObject {
     // MARK: - Scanning
 
     private func startTimer() {
+        timerInterval = config.scanIntervalSeconds
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 let interval = await MainActor.run { self?.config.scanIntervalSeconds ?? 60 }
-                // Clamp before converting: a hand-edited absurd interval must
-                // not trap in the UInt64(Double) conversion at launch.
-                let seconds = interval.isFinite ? min(max(interval, 10), 86_400) : 60
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: Self.timerNanoseconds(for: interval))
                 await MainActor.run { self?.requestScan() }
             }
         }
+    }
+
+    /// Clamped before converting: a hand-edited absurd interval must not trap
+    /// in the `UInt64(Double)` conversion at launch, and a NaN would trap
+    /// outright. `nonisolated` because `AppState` is `@MainActor`, which
+    /// isolates its statics too, and this one touches nothing on the actor.
+    nonisolated static func timerNanoseconds(for interval: Double) -> UInt64 {
+        let seconds = interval.isFinite ? min(max(interval, 10), 86_400) : 60
+        return UInt64(seconds * 1_000_000_000)
+    }
+
+    /// Cancel the sleep in progress and start the new one. A slider is a
+    /// promise about how soon something happens; honouring it only after the
+    /// *old* interval elapses makes the control feel broken at exactly the
+    /// moment someone is testing it.
+    private func restartTimerIfIntervalChanged() {
+        guard config.scanIntervalSeconds != timerInterval else { return }
+        timerTask?.cancel()
+        startTimer()
     }
 
     /// Coalesces watcher events and timer ticks into single scan passes.
