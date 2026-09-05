@@ -11,6 +11,10 @@ struct JournalEntry: Codable, Identifiable, Equatable {
     var destinationPath: String
     var wasCopy: Bool
     var reason: String
+    /// One id per scan pass (or per approved-preview batch), so "undo the last
+    /// check" can undo exactly the moves that belong together — instead of the
+    /// old 5-second-window guess. Optional, so old journals decode unchanged.
+    var batchID: UUID?
     /// When set, this line records the *reversal* of the entry with that id
     /// (an undo tombstone appended by `undo`), not a new placement. Optional,
     /// so journals written before this field decode unchanged.
@@ -51,6 +55,19 @@ enum Journal {
         return Array(entries.reversed().prefix(limit))
     }
 
+    /// The newest "batch" among `entries` (expected newest-first, as returned
+    /// by `recent`): every entry sharing the newest entry's `batchID`, or — for
+    /// legacy entries written before batch ids — everything within 5 seconds
+    /// of the newest, the old heuristic.
+    static func lastBatch(in entries: [JournalEntry]) -> [JournalEntry] {
+        guard let newest = entries.first else { return [] }
+        if let batch = newest.batchID {
+            return entries.filter { $0.batchID == batch }
+        }
+        let cutoff = newest.date.addingTimeInterval(-5)
+        return Array(entries.prefix { $0.date >= cutoff })
+    }
+
     enum UndoError: LocalizedError {
         case sourceOccupied(String)
         case destinationMissing(String)
@@ -80,9 +97,12 @@ enum Journal {
             // than delete a file the user changed. When the original is gone
             // we can't tell — deleting the only remaining version is worse
             // than leaving it, so refuse then too.
+            // Full-content digests: the default 4 MiB prefix would miss an
+            // edit past the prefix of a large copy — the same bounded-digest
+            // trap the cross-volume verifier fell into (B2/R1).
             guard fm.fileExists(atPath: entry.sourcePath),
-                  let sourceDigest = ContentHash.digest(of: entry.source),
-                  let copyDigest = ContentHash.digest(of: entry.destination),
+                  let sourceDigest = ContentHash.digest(of: entry.source, limit: .max),
+                  let copyDigest = ContentHash.digest(of: entry.destination, limit: .max),
                   sourceDigest == copyDigest
             else {
                 throw UndoError.destinationModified(entry.destinationPath)

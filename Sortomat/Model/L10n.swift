@@ -194,6 +194,11 @@ public enum L10n {
         "journal.undo.sourceOccupied": "A file is already at the original location: %@",
         "journal.undo.destinationMissing": "The moved file is no longer at: %@",
         "journal.undo.destinationModified": "The copy at %@ no longer matches the original, so it wasn't deleted.",
+        "journal.undoBatchDone": "Undid %d move(s).",
+        "journal.undoBatchFailed": "%d couldn't be undone.",
+        "headless.nothingToUndo": "Nothing to undo.",
+        "headless.undone": "Undone: %@ → %@",
+        "headless.undoFailed": "Failed: %@: %@",
 
         // Activity messages (logged)
         "activity.skipped": "[%@] Skipped: %@ — %@",
@@ -430,6 +435,11 @@ public enum L10n {
         "journal.undo.sourceOccupied": "Am ursprünglichen Ort liegt bereits eine Datei: %@",
         "journal.undo.destinationMissing": "Die verschobene Datei ist nicht mehr unter: %@",
         "journal.undo.destinationModified": "Die Kopie unter %@ stimmt nicht mehr mit dem Original überein und wurde deshalb nicht gelöscht.",
+        "journal.undoBatchDone": "%d Bewegung(en) rückgängig gemacht.",
+        "journal.undoBatchFailed": "%d konnte(n) nicht rückgängig gemacht werden.",
+        "headless.nothingToUndo": "Nichts rückgängig zu machen.",
+        "headless.undone": "Rückgängig: %@ → %@",
+        "headless.undoFailed": "Fehlgeschlagen: %@: %@",
 
         "activity.skipped": "[%@] Übersprungen: %@ – %@",
         "activity.moved": "[%@] %@ → %@",

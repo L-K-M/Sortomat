@@ -45,23 +45,30 @@ enum HeadlessRunner {
 
     private static func undoLast() -> Never {
         let entries = Journal.recent(limit: 500)
-        guard let last = entries.first else {
-            print("Nothing to undo.")
+        let batch = Journal.lastBatch(in: entries)
+        guard !batch.isEmpty else {
+            print(L10n.t("headless.nothingToUndo"))
             exit(0)
         }
-        // Undo the whole most-recent batch (same scan ≈ within a few seconds).
-        let cutoff = last.date.addingTimeInterval(-5)
-        let batch = entries.prefix { $0.date >= cutoff }
+        // Pin every restored file as skipped in the ledger — otherwise the
+        // next scan-once re-classifies (re-pays for) it and moves it right
+        // back. The GUI undo path does the same via AppState.undo.
+        let ledger = Ledger()
         var failed = false
         for entry in batch {
             do {
                 try Journal.undo(entry)
-                print("Undone: \(entry.destinationPath) → \(entry.sourcePath)")
+                if !entry.wasCopy {
+                    let fingerprint = Ledger.fingerprint(URL(fileURLWithPath: entry.sourcePath))
+                    ledger.record(ruleID: entry.ruleID, fingerprint: fingerprint, status: .skipped)
+                }
+                print(L10n.t("headless.undone", entry.destinationPath, entry.sourcePath))
             } catch {
-                print("Failed: \(entry.destinationPath): \(error.localizedDescription)")
+                print(L10n.t("headless.undoFailed", entry.destinationPath, error.localizedDescription))
                 failed = true
             }
         }
+        ledger.save()
         exit(failed ? 1 : 0)
     }
 }
