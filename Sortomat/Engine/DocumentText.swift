@@ -10,6 +10,9 @@ enum DocumentText {
     /// Documents larger than this aren't parsed — the reader would load them
     /// whole, and a classification sample is a few thousand characters.
     static let maxDocumentBytes: Int64 = 64 * 1024 * 1024
+    /// Markup beyond this per zip entry is ignored: only a few thousand
+    /// characters ever reach the model.
+    static let maxMarkupCharacters = 512 * 1024
 
     /// Extensions `text(url:)` knows how to read.
     static let richTextExtensions: Set<String> = ["rtf", "rtfd", "doc", "docx", "odt"]
@@ -81,7 +84,7 @@ enum DocumentText {
             guard let data = zip.data(for: entry) else { continue }
             // Tags become spaces, so adjacent cells/runs don't glue together;
             // XML entities decode the same way HTML ones do.
-            let markup = String(TextDecoding.decode(data).prefix(HTMLText.maxInputCharacters))
+            let markup = String(TextDecoding.decode(data).prefix(maxMarkupCharacters))
             let text = HTMLText.strip(markup)
             guard !text.isEmpty else { continue }
             pieces.append(text)
