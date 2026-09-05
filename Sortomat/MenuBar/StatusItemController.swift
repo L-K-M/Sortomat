@@ -96,7 +96,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         if !state.pendingActions.isEmpty {
-            menu.addItem(BlockMenuItem(title: L10n.t("menu.pendingReview", state.pendingActions.count)) {
+            menu.addItem(BlockMenuItem(title: L10n.plural("menu.pendingReview", state.pendingActions.count)) {
                 [weak self] in self?.onOpenPreview()
             })
         }
@@ -136,7 +136,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         } else if state.paused {
             text = L10n.t("app.status.paused")
         } else {
-            text = L10n.t("app.status.active", state.enabledRuleCount)
+            text = L10n.plural("app.status.active", state.enabledRuleCount)
         }
         return disabled(text)
     }

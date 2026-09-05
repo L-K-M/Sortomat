@@ -9,8 +9,8 @@ struct PathField: View {
 
     var body: some View {
         HStack {
-            TextField(label, text: $path, prompt: Text("/path/to/folder"))
-            Button("Choose…") {
+            TextField(label, text: $path, prompt: Text(L10n.t("path.placeholder")))
+            Button(L10n.t("path.choose")) {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
