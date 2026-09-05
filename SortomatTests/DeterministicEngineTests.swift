@@ -81,4 +81,11 @@ final class DeterministicEngineTests: XCTestCase {
         let newer = PreRule(match: .newerThanDays, pattern: "30", action: .skip)
         XCTAssertFalse(DeterministicEngine.matches(newer, file: url, now: Date()))
     }
+
+    func testRegexValidity() {
+        XCTAssertTrue(DeterministicEngine.isValidRegex("^Invoice-\\d+"))
+        XCTAssertTrue(DeterministicEngine.isValidRegex("plain text"))
+        XCTAssertFalse(DeterministicEngine.isValidRegex("["), "an unclosed class must be flagged")
+        XCTAssertFalse(DeterministicEngine.isValidRegex("(a"), "an unclosed group must be flagged")
+    }
 }
