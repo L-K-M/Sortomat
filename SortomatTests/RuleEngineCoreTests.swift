@@ -568,6 +568,18 @@ final class LegacyMigrationTests: XCTestCase {
         XCTAssertTrue(rule.steps[0].when.items.isEmpty, "an empty any group never matches")
     }
 
+    func testARuleBuiltInCodeGetsStepsToo() {
+        // Templates, rule packs and tests all build rules through the
+        // memberwise initializer; if only the JSON path migrated, every
+        // templated rule would quietly stop matching.
+        let rule = Rule(name: "R", preRules: [
+            PreRule(name: "Screens", match: .glob, pattern: "*creenshot*",
+                    action: .route, routePath: "Bilder")
+        ])
+        XCTAssertEqual(rule.steps.count, 1)
+        XCTAssertEqual(rule.steps[0].then.first?.type, .move)
+    }
+
     func testRouteTemplatesAreRewritten() {
         XCTAssertEqual(LegacyMigration.route("Bilder/{year}/{month}"),
                        "Bilder/{modified|date:'yyyy'}/{modified|date:'MM'}/{stem}")

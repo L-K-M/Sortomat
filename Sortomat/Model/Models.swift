@@ -173,6 +173,14 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         self.steps = steps
         self.fallback = fallback
         self.destinationRoots = destinationRoots
+        // A rule built in code from pre-rules — a template, a test, a rule
+        // pack — has to arrive in the same shape as one loaded from a config,
+        // or the engine would find no steps and hand every file to the model.
+        if steps.isEmpty, !preRules.isEmpty {
+            self.steps = LegacyMigration.upgrade(
+                preRules: preRules, copyInsteadOfMove: copyInsteadOfMove
+            ).steps
+        }
     }
 
     /// Spelled out because this type provides *both* `init(from:)` and
