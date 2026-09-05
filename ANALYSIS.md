@@ -103,24 +103,39 @@ initializer — the second one is not optional: every template, every rule pack
 and every test builds rules memberwise, and without it they all decode with
 empty `steps` and quietly stop matching.
 
-### 1.1 Actions that are decided but not yet executed
+### 1.1 Actions — three of eight are carried out
 
-`RuleAction` accepts them, `PlacementBuilder` records them as `SideEffect`s, and
-nothing applies them yet: `addTags`, `removeTags`, `setComment`, `setLabel`,
-`notify`, `reveal`, `open`, `runShortcut`, and the `rename` and `trash`
-*operations* (both currently fall back to a move).
+`ActionExecutor` exists and runs from `Pipeline.apply` **after** `Journal.record`,
+so a side effect that fails can never cost the user their undo. It applies
+`addTags`, `removeTags` and `notify`; the plan carries the effects now, where
+`plan(from:)` used to drop them, so what the Inbox previewed is what runs.
+`rename` was already correct (it is planned as a move that never leaves the
+file's own folder).
 
-Wire them in an `ActionExecutor` called from `Pipeline.apply` **after** the
-placement succeeds, so a failed move never leaves a half-applied side effect.
-Two notes from the API risk register:
+Still not carried out, and now *named in the editor* rather than silently
+skipped — `ActionExecutor.supported` is the one list and `RuleValidator` reads
+it:
 
-- `trash` should be journaled as a move whose destination is the file's
-  `~/.Trash` URL, so the existing `Journal.undo` reverses it with no new code.
-  If `FileManager.trashItem(at:resultingItemURL:)` proves awkward to bridge,
-  move into `<target>/_Trash/` instead — fully undoable, no new API.
-- Tag, comment and label changes need their own `SideEffectJournal` keyed by the
-  existing `batchID`; they are not file moves and do not belong in
-  `journal.jsonl`, whose shape is frozen.
+- **`reveal` and `open`** — not for want of an API. An automatic rule over a
+  four-hundred-file backlog would open four hundred windows, and "how many is
+  too many" is a product decision. A cap, or "only when the main window is
+  open", or only for the first file in a batch. **S** once decided.
+- **`setComment`, `setLabel`, `runShortcut`** — each needs an API worth writing
+  with a compiler at hand: Finder comments have no public setter (`MDItemSetAttribute`
+  is not it), `URLResourceValues.labelNumber` is read-only on some SDKs, and
+  `runShortcut` means spawning the `shortcuts` binary. **M**
+- **`trash`** — accepted, then planned as a move, so the file lands in the
+  destination folder instead of the Trash. Safe and undoable, and not what the
+  rule says; the validator says so. Journal it as a move whose destination is
+  the file's `~/.Trash` URL and `Journal.undo` reverses it with no new code; if
+  `FileManager.trashItem(at:resultingItemURL:)` proves awkward to bridge, move
+  into `<target>/_Trash/` instead. **S**
+
+One design note that survives all of this: tag, comment and label changes need
+their own `SideEffectJournal` keyed by the existing `batchID` before undo can
+reverse them. They are not file moves and do not belong in `journal.jsonl`,
+whose shape is frozen. Today an undone move leaves the tags it added behind —
+which matches what Hazel does, and is worth deciding rather than inheriting.
 
 ### 1.2 `RuleValidator` — done, with one piece left
 
@@ -291,10 +306,6 @@ branch) so nothing needs re-learning.
   `~/Documents` descends into `node_modules` and build folders. The engine now
   has `relpath` and a real glob compiler, so this is a *default*: seed new
   recursive rules with a `relpath does not match pattern` step.
-- **[H-U] `L10n` checks key parity but not format arity.** `String(format:)`
-  with a mismatched specifier count traps at runtime, and a German string that
-  drops one `%@` would ship green. The test that walks both tables should count
-  specifiers per key as well as compare key sets.
 - **[H-V] Renaming a rule to an existing name is allowed** — uniqueness is only
   enforced on add and duplicate — and the logs then cannot tell them apart.
 - **[H-N] `ProcessLock` makes a launchd `scan-once` refuse whenever the GUI
@@ -324,6 +335,12 @@ branch) so nothing needs re-learning.
   system `.green`) and no codified palette.
 
 ---
+
+*Closed since this document was written:* **H-U** — `L10nTests` now compares the
+conversion characters each key consumes in both tables, in order unless either
+side uses positional markers (`claude/rule-engine-v2`). A sweep of all 1 818
+`L10n.t`/`L10n.plural` call sites across every open branch found no live
+mismatch, so it is a guard rail for the next string rather than a fix.
 
 ## 5. Collected from the review rounds
 
