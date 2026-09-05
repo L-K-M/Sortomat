@@ -91,7 +91,7 @@ final class AppState: ObservableObject {
     /// Four decimals because a single classification costs fractions of a cent,
     /// and a meter that reads "0.00" for the first two hundred files teaches
     /// the user that it doesn't work.
-    static func money(_ amount: Double, code: String) -> String {
+    nonisolated static func money(_ amount: Double, code: String) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = code
@@ -105,8 +105,10 @@ final class AppState: ObservableObject {
 
     /// Whether an estimated spend is still under a ceiling. 0 = no ceiling.
     /// Pure, so the one comparison that stands between a misbehaving rule and
-    /// a real bill can be tested without a running app.
-    static func withinBudget(spend: Double, ceiling: Double) -> Bool {
+    /// a real bill can be tested without a running app. (`nonisolated` here and
+    /// below: `AppState` is `@MainActor`, which isolates its statics too, and
+    /// these touch nothing on the actor.)
+    nonisolated static func withinBudget(spend: Double, ceiling: Double) -> Bool {
         ceiling <= 0 || spend < ceiling
     }
 
@@ -118,7 +120,7 @@ final class AppState: ObservableObject {
     /// nil when it may. Deliberately separate from `paused`: this one
     /// re-answers itself as the machine changes, so unplugging holds and
     /// plugging back in resumes without anyone touching a switch.
-    static func hold(for config: Config, lowPower: Bool, onBattery: Bool) -> String? {
+    nonisolated static func hold(for config: Config, lowPower: Bool, onBattery: Bool) -> String? {
         if config.pauseInLowPowerMode, lowPower { return L10n.t("hold.lowPower") }
         if config.onlyOnPower, onBattery { return L10n.t("hold.onBattery") }
         return nil
