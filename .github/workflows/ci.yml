@@ -49,3 +49,8 @@ jobs:
           name: TestResults
           path: TestResults.xcresult
           if-no-files-found: ignore
+          # An .xcresult bundle is tens of megabytes and is only ever read in
+          # the hours after a red run. Without a retention limit these piled up
+          # under the account-wide storage quota until *new* uploads started
+          # failing — turning "upload the evidence" into a second red step.
+          retention-days: 3
