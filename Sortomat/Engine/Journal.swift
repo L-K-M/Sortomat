@@ -185,8 +185,9 @@ enum Journal {
         recordTombstone(for: entry)
     }
 
-    /// Remove the folders the move created on its way down, now that nothing
-    /// is in them. Undoing a batch of experiments used to leave a skeleton of
+    /// Remove the now-empty folders along the move's path — including any that
+    /// existed before the move did, because nothing records which ones it
+    /// created. Undoing a batch of experiments used to leave a skeleton of
     /// empty `Genre/Author/` directories behind, which then showed up in the
     /// next taxonomy and in every Finder window the user opened.
     ///
@@ -197,9 +198,17 @@ enum Journal {
     static func pruneEmptyFolders(under entry: JournalEntry) {
         guard let targetPath = entry.targetPath else { return }
         let fm = FileManager.default
+        // Both sides expanded, or neither: a journal that stores `~/Sorted`
+        // for the target and `~/Sorted/Genre/x.epub` for the destination would
+        // otherwise compare a tilde path against an expanded one, `hasPrefix`
+        // would be false, and the pruning would silently never run — in exactly
+        // the case the expansion was added to handle.
         let root = URL(fileURLWithPath: (targetPath as NSString).expandingTildeInPath)
             .standardizedFileURL
-        var folder = entry.destination.deletingLastPathComponent().standardizedFileURL
+        var folder = URL(
+            fileURLWithPath: (entry.destination.deletingLastPathComponent().path as NSString)
+                .expandingTildeInPath
+        ).standardizedFileURL
         while folder.path.hasPrefix(root.path + "/") {
             guard let contents = try? fm.contentsOfDirectory(atPath: folder.path),
                   contents.allSatisfy({ $0 == ".DS_Store" })

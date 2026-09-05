@@ -92,6 +92,28 @@ final class PassEfficiencyTests: XCTestCase {
 
     // MARK: - Undo leaves no skeleton behind
 
+    func testPruningNormalizesTildePathsOnBothSides() throws {
+        // Expanding the target root but not the destination compared a tilde
+        // path against an expanded one: `hasPrefix` was false and the pruning
+        // silently never ran, in exactly the case the expansion was added for.
+        // Calls the pruning directly — `undo` itself would refuse a tilde
+        // destination earlier, at its `fileExists` check.
+        let relative = "sortomat-prune-\(UUID().uuidString)"
+        let target = URL(fileURLWithPath: "\(NSHomeDirectory())/\(relative)")
+        let nested = target.appendingPathComponent("Fantasy")
+        try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: target) }
+
+        // The state undo leaves behind: the file is gone, the folders are not.
+        Journal.pruneEmptyFolders(under: JournalEntry(
+            ruleID: UUID(), ruleName: "R", sourcePath: "/in/book.epub",
+            destinationPath: "~/\(relative)/Fantasy/book.epub", wasCopy: false, reason: "r",
+            targetPath: "~/\(relative)"
+        ))
+        XCTAssertFalse(fm.fileExists(atPath: nested.path), "a tilde journal prunes like any other")
+        XCTAssertTrue(fm.fileExists(atPath: target.path), "but never the target root itself")
+    }
+
     func testUndoPrunesTheFoldersTheMoveCreated() throws {
         let target = dir.appendingPathComponent("target")
         let nested = target.appendingPathComponent("Fantasy/Tolkien")
@@ -184,6 +206,28 @@ final class PassEfficiencyTests: XCTestCase {
         // the cut landed between graphemes and not inside a joiner sequence.
         XCTAssertEqual(cleaned.utf8.count, cleaned.count * 25,
                        "a truncation split a character: \(cleaned.utf8.count) bytes, \(cleaned.count) characters")
+    }
+
+    func testTheForcedExtensionFitsInsideTheByteLimitToo() throws {
+        // The sanitizer capped the *name*; the real extension was forced on
+        // afterwards, so a 252-byte CJK title plus ".epub" was a 257-byte
+        // component and ENAMETOOLONG came straight back.
+        let long = String(repeating: "書", count: 200)
+        let url = try Sanitizer.destination(target: URL(fileURLWithPath: "/t"),
+                                            relativePath: "\(long).epub",
+                                            originalExtension: "epub")
+        let component = url.lastPathComponent
+        XCTAssertLessThanOrEqual(component.utf8.count, Sanitizer.maxComponentBytes)
+        XCTAssertTrue(component.hasSuffix(".epub"), "the extension is how the file is recognized")
+    }
+
+    func testAnExtensionTooLongForAnyStemStillProducesAName() {
+        // Degenerate, but a component that came back as just ".ext" — or
+        // empty — would fail the move rather than shorten the name.
+        let absurd = "a." + String(repeating: "x", count: 400)
+        let fitted = Sanitizer.fittingComponent(absurd)
+        XCTAssertFalse(fitted.isEmpty)
+        XCTAssertLessThanOrEqual(fitted.utf8.count, Sanitizer.maxComponentBytes)
     }
 
     func testAsciiNamesAreStillCutAtTheCharacterLimit() {

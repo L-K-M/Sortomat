@@ -253,7 +253,14 @@ final class AppState: ObservableObject {
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 let interval = await MainActor.run { self?.config.scanIntervalSeconds ?? 60 }
-                try? await Task.sleep(nanoseconds: Self.timerNanoseconds(for: interval))
+                do {
+                    try await Task.sleep(nanoseconds: Self.timerNanoseconds(for: interval))
+                } catch {
+                    // Cancelled: a restart is replacing this timer. `try?`
+                    // would have fallen through to `requestScan`, so every
+                    // debounced nudge of the interval slider fired a full pass.
+                    return
+                }
                 await MainActor.run { self?.requestScan() }
             }
         }
@@ -273,8 +280,14 @@ final class AppState: ObservableObject {
     /// *old* interval elapses makes the control feel broken at exactly the
     /// moment someone is testing it.
     private func restartTimerIfIntervalChanged() {
-        guard config.scanIntervalSeconds != timerInterval else { return }
-        timerTask?.cancel()
+        // Only ever *replaces* a running timer. Without the first condition a
+        // config save reaching this before `startTimer` ever ran — or after
+        // something deliberately stopped it — would start one from nothing,
+        // because `timerInterval` begins at a sentinel that mismatches every
+        // real value.
+        guard let timerTask, !timerTask.isCancelled,
+              config.scanIntervalSeconds != timerInterval else { return }
+        timerTask.cancel()
         startTimer()
     }
 

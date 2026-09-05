@@ -635,6 +635,12 @@ actor Pipeline {
         }
         guard !before.isEmpty else { return [] }
         try? await Task.sleep(nanoseconds: pause)
+        // `try?` swallows the cancellation, so a stopped pass would fall
+        // straight through: the second stat runs a microsecond after the
+        // first, every size matches, and the whole batch is declared settled —
+        // one cancellation turning into a batch of files filed mid-write.
+        // Nothing settled: they are all retried on the next pass.
+        if Task.isCancelled { return [] }
         var settled: Set<String> = []
         for (path, signature) in before where sizeSignature(of: URL(fileURLWithPath: path)) == signature {
             settled.insert(path)

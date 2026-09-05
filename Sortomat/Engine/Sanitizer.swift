@@ -66,6 +66,26 @@ enum Sanitizer {
     /// with `ENAMETOOLONG` — every pass, forever, for the same file.
     static let maxComponentBytes = 255
 
+    /// A whole file name trimmed to fit one path component, dropping graphemes
+    /// from the *stem* so the extension always survives — it is how macOS, and
+    /// every rule in this app, recognizes what the file is.
+    ///
+    /// `sanitizeComponent` caps the name it is given, but the real extension is
+    /// forced on *afterwards*: a 252-byte CJK title plus `.epub` is a 257-byte
+    /// component, and the `ENAMETOOLONG` this cap exists to prevent came back
+    /// for exactly the common case.
+    static func fittingComponent(_ filename: String, bytes: Int = maxComponentBytes) -> String {
+        guard filename.utf8.count > bytes else { return filename }
+        let ext = (filename as NSString).pathExtension
+        let suffix = ext.isEmpty ? "" : "." + ext
+        let stem = String(filename.dropLast(suffix.count))
+        let trimmed = truncated(stem, characters: stem.count, bytes: bytes - suffix.utf8.count)
+        // An extension long enough to leave no room for a stem at all: keep a
+        // fitting prefix of the whole name rather than returning ".epub".
+        guard !trimmed.isEmpty else { return truncated(filename, characters: filename.count) }
+        return trimmed + suffix
+    }
+
     /// Trimmed to both limits, cutting on grapheme boundaries so a truncation
     /// can never split a character (or an emoji's joiner sequence) in half.
     static func truncated(_ text: String, characters: Int,
@@ -107,6 +127,9 @@ enum Sanitizer {
         if !originalExtension.isEmpty {
             filename = forcingExtension(originalExtension, on: filename)
         }
+        // After the extension, not before: forcing one on can push a name that
+        // fitted back over the byte limit.
+        filename = fittingComponent(filename)
 
         var url = target
         for component in components {
