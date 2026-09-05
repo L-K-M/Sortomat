@@ -1,10 +1,11 @@
-# Sortomat — Fable review, wave 4
+# Sortomat — the wave-4 review
 
 *A full review of Sortomat as of `23061b8` (main, 2026-09-05), plus the work
-that came out of it. Written by Claude (Fable). Earlier waves live in
-`fable-is-awesome.md`; this document does not restate them, it builds on them,
-and the still-open items from them are consolidated into `ANALYSIS.md` at the
-end of this session.*
+that came out of it. Earlier waves live in `fable-is-awesome.md`; this document
+does not restate them, it builds on them. **Everything here that is still open
+has been consolidated into `ANALYSIS.md` on `main`, which is the document to
+work from.** This one is kept as the record of how each finding was arrived at
+and of the two design records behind the engine and the interface.*
 
 ## 0. The short version
 
