@@ -79,8 +79,12 @@ struct GeneralTab: View {
         .formStyle(.grouped)
         .padding()
         .onChange(of: state.config) { _ in state.persistAndApply() }
-        // A stale save verdict must not linger under a key being retyped.
-        .onChange(of: apiKey) { _ in keySaveSucceeded = nil }
+        // A stale save verdict must not linger under a key being retyped —
+        // but clearing the field after a *successful* save is not typing, and
+        // used to wipe the success caption in the same update cycle.
+        .onChange(of: apiKey) { newValue in
+            if !newValue.isEmpty { keySaveSucceeded = nil }
+        }
         // The user may have toggled login items in System Settings meanwhile.
         .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
     }

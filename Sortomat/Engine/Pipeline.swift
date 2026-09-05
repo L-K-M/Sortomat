@@ -42,11 +42,26 @@ actor Pipeline {
     func forgetPreviews(ruleID: UUID? = nil) {
         guard let ruleID else {
             previewed.removeAll()
+            memo.removeAll()
             return
         }
-        let prefix = ruleID.uuidString + "|"
-        previewed = previewed.filter { !$0.hasPrefix(prefix) }
+        // `decide` consults the memo *before* the model, so dropping only the
+        // preview set would let the very next scan serve the verdict recorded
+        // under the old prompt/taxonomy — for free, and therefore forever.
+        previewed = previewed.filter { !$0.hasPrefix(ledger.keyPrefix(ruleID: ruleID)) }
+        memo.forget(ruleID: ruleID)
     }
+
+    #if DEBUG
+    /// Record a verdict in the decision memo. Only used by tests: the memo is
+    /// private to `decide`, and a test that has to reach through a real model
+    /// call to fill it would be testing the network, not the persistence.
+    func rememberForTesting(ruleID: UUID, model: String, ext: String, digest: String,
+                            action: String, relativePath: String?) {
+        memo.record(ruleID: ruleID, model: model, ext: ext, digest: digest, action: action,
+                    relativePath: relativePath, reason: nil, confidence: nil)
+    }
+    #endif
 
     /// After an undo restores a file into a watched folder, remember it as
     /// skipped for the rule that moved it — otherwise the very next scan
@@ -73,7 +88,9 @@ actor Pipeline {
         guard FileManager.default.fileExists(atPath: watch.path, isDirectory: &isDir),
               isDir.boolValue else {
             return ScanResult(entries: [
-                ActivityEntry(ok: false, message: L10n.t("activity.missingWatch", rule.name, watch.path))
+                ActivityEntry(ok: false,
+                              message: L10n.t("activity.missingWatch", rule.name, watch.path),
+                              kind: .watchMissing)
             ], ruleID: rule.id, watchMissing: true)
         }
 
@@ -105,6 +122,10 @@ actor Pipeline {
             // (Shrinking the whole batch to the remaining budget — the previous
             // approach — processed large backlogs one file at a time once the
             // budget ran low, stability probe and all.)
+            // Slots are granted by position: a file resolved by a pre-rule, by
+            // the memo, or rejected by the stability probe still consumes one
+            // even though it never calls the model. That only ever *under*-uses
+            // the budget, and the file is retried on the next pass.
             var llmSlots = llmAvailable ? budgetRemaining : 0
             var outcomes: [FileOutcome] = []
             await withTaskGroup(of: FileOutcome?.self) { group in
@@ -222,6 +243,13 @@ actor Pipeline {
         }
     }
 
+    /// Content hashing is the one piece of per-file work that never suspends,
+    /// so running it inline would block the whole actor — and with it every
+    /// other file in the pass — for as long as the read takes.
+    private static func digestOffActor(_ file: URL) async -> String? {
+        await Task.detached(priority: .utility) { DecisionMemo.digest(of: file) }.value
+    }
+
     private struct DecideResult {
         var plan: PlannedAction?   // nil only when the budget is exhausted
         var usage = TokenUsage()
@@ -262,8 +290,9 @@ actor Pipeline {
         //    identical decision — no network, no cost, no budget, no key.
         var digest: String?
         if !memo.isEmpty {
-            digest = DecisionMemo.digest(of: file)
-            if let digest, let hit = memo.lookup(ruleID: rule.id, digest: digest) {
+            digest = await Self.digestOffActor(file)
+            if let digest,
+               let hit = memo.lookup(ruleID: rule.id, model: config.model, ext: ext, digest: digest) {
                 let remembered = Classification(
                     action: hit.action,
                     relativePath: hit.relativePath,
@@ -298,9 +327,9 @@ actor Pipeline {
         // Remember the verdict for these exact bytes — a re-download or a
         // renamed copy never pays again. Only answers that routed cleanly are
         // memoized: a malformed answer should get a fresh model call on retry.
-        if digest == nil { digest = DecisionMemo.digest(of: file) }
+        if digest == nil { digest = await Self.digestOffActor(file) }
         if let digest {
-            memo.record(ruleID: rule.id, digest: digest, action: c.action,
+            memo.record(ruleID: rule.id, model: config.model, ext: ext, digest: digest, action: c.action,
                         relativePath: c.resolvedRelativePath(),
                         reason: c.reason, confidence: c.confidence)
         }

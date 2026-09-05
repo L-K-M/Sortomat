@@ -18,7 +18,11 @@ public enum L10n {
     /// key itself (so a missing key is visible but never crashes).
     public static func t(_ key: String) -> String {
         if language == "de", let s = german[key] { return s }
-        return english[key] ?? german[key] ?? key
+        if let s = english[key] ?? german[key] { return s }
+        // A key that reaches a user as its own raw name is a bug; fail in
+        // Debug (so any test that renders it says so) and degrade in release.
+        assertionFailure("L10n: no entry for «\(key)»")
+        return key
     }
 
     /// Localized format string with positional `%@`/`%d`-style arguments.
@@ -37,8 +41,20 @@ public enum L10n {
     /// Count-aware lookup with extra format arguments. The count is argument
     /// 1 and the extras follow, so strings that need both use positional
     /// specifiers (`%1$d`, `%2$@`).
+    ///
+    /// A form that references `%2$` **must** also reference `%1$`: the
+    /// formatter only types the slots a specifier names, and an untyped slot
+    /// doesn't consume its argument — so `%2$@` alone would read the count as
+    /// an object pointer and crash. `L10nTests` enforces this across the
+    /// tables.
     public static func plural(_ key: String, _ count: Int, _ args: CVarArg...) -> String {
-        String(format: t(key + (count == 1 ? ".one" : ".other")), arguments: [count as CVarArg] + args)
+        let format = t(key + (count == 1 ? ".one" : ".other"))
+        // The table test enforces this across the shipped strings; the assert
+        // catches anything that reaches the formatter another way, because the
+        // failure mode is a crash rather than a wrong word.
+        assert(!format.contains("%2$") || format.contains("%1$"),
+               "L10n: «\(format)» references %2$ without %1$ — the count slot stays untyped")
+        return String(format: format, arguments: [count as CVarArg] + args)
     }
 
     // MARK: - English (base)
@@ -136,6 +152,7 @@ public enum L10n {
         "rule.validate.targetMissing": "The target folder doesn't exist yet — it will be created on first use.",
         "rule.validate.samePath": "Watched and target folder are the same — nothing will ever be sorted.",
         "rule.validate.watchInsideTarget": "The watched folder lies inside the target folder — its files count as already sorted, so nothing will match.",
+        "rule.validate.targetInsideWatch": "The target folder lies inside the watched folder. Filed files stay in the watched tree; Sortomat skips them, but a target outside the watched folder is easier to reason about.",
         "rule.validate.badRegex": "This regular expression is invalid — the pre-rule will never match.",
 
         "match.glob": "Name glob",
@@ -259,7 +276,7 @@ public enum L10n {
         // Notifications
         "notify.filed.one": "Filed 1 file.",
         "notify.filed.other": "Filed %d files.",
-        "notify.failuresMore.one": "%2$@ (and 1 more failure)",
+        "notify.failuresMore.one": "%2$@ (and %1$d more failure)",
         "notify.failuresMore.other": "%2$@ (and %1$d more failures)",
 
         // Errors
@@ -420,6 +437,7 @@ public enum L10n {
         "rule.validate.targetMissing": "Der Zielordner existiert noch nicht – er wird bei der ersten Verwendung angelegt.",
         "rule.validate.samePath": "Überwachter und Zielordner sind identisch – es wird nie etwas einsortiert.",
         "rule.validate.watchInsideTarget": "Der überwachte Ordner liegt im Zielordner – seine Dateien gelten als bereits einsortiert, es wird nichts gefunden.",
+        "rule.validate.targetInsideWatch": "Der Zielordner liegt im überwachten Ordner. Einsortierte Dateien bleiben im überwachten Baum; Sortomat überspringt sie, aber ein Zielordner ausserhalb ist leichter nachvollziehbar.",
         "rule.validate.badRegex": "Dieser reguläre Ausdruck ist ungültig – die Vorregel trifft nie zu.",
 
         "match.glob": "Name-Glob",
@@ -536,7 +554,7 @@ public enum L10n {
 
         "notify.filed.one": "1 Datei einsortiert.",
         "notify.filed.other": "%d Dateien einsortiert.",
-        "notify.failuresMore.one": "%2$@ (und 1 weiterer Fehler)",
+        "notify.failuresMore.one": "%2$@ (und %1$d weiterer Fehler)",
         "notify.failuresMore.other": "%2$@ (und %1$d weitere Fehler)",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",

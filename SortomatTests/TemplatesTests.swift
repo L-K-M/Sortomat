@@ -54,4 +54,20 @@ final class TemplatesTests: XCTestCase {
         XCTAssertFalse(prompt.contains("visible text"))
         XCTAssertFalse(prompt.contains("sichtbaren text"))
     }
+
+
+    func testLegacyAndLocalizedScreenshotNamesReachTheModel() {
+        let rule = RuleTemplate.screenshots.makeRule()
+        func decision(for name: String) -> DeterministicEngine.Decision {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try? Data("x".utf8).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            return DeterministicEngine.evaluate(rule: rule, file: url)
+        }
+        // Pre-Big-Sur macOS wrote "Screen Shot …" with a space — no "creenshot"
+        // substring, so the catch-all skip swallowed those files entirely.
+        XCTAssertEqual(decision(for: "Screen Shot 2019-04-01 at 10.00.00.png"), .useLLM)
+        XCTAssertEqual(decision(for: "Capture d'écran 2024-01-01.png"), .useLLM)
+        XCTAssertEqual(decision(for: "Captura de pantalla 2024-01-01.png"), .useLLM)
+    }
 }

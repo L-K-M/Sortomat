@@ -77,6 +77,37 @@ final class MoverTests: XCTestCase {
         XCTAssertEqual(placedURL(outcome)?.lastPathComponent, "there (2).txt")
     }
 
+    func testSharedPrefixAndSizeIsNotADuplicate() throws {
+        // Two distinct files that share their size and their first 4 MiB: the
+        // bounded prefix digest cannot tell them apart, and calling this a
+        // duplicate would record the source as done and never file it again.
+        let prefix = Data(repeating: 0x41, count: 4 * 1024 * 1024)
+        let dest = root.appendingPathComponent("out/there.bin")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try (prefix + Data("tail-one".utf8)).write(to: dest)
+
+        let source = root.appendingPathComponent("in.bin")
+        try (prefix + Data("tail-two".utf8)).write(to: source)
+
+        let outcome = try Mover.place(source: source, destination: dest, copy: false)
+        XCTAssertEqual(placedURL(outcome)?.lastPathComponent, "there (2).bin")
+    }
+
+    func testIdenticalLargeFilesAreStillDuplicates() throws {
+        // The full-content check must not turn every large file into a
+        // collision: identical bytes past the prefix stay one file.
+        let bytes = Data(repeating: 0x42, count: 4 * 1024 * 1024) + Data("same tail".utf8)
+        let dest = root.appendingPathComponent("out/there.bin")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try bytes.write(to: dest)
+
+        let source = root.appendingPathComponent("in.bin")
+        try bytes.write(to: source)
+
+        let outcome = try Mover.place(source: source, destination: dest, copy: false)
+        if case .duplicate = outcome {} else { XCTFail("expected duplicate, got \(outcome)") }
+    }
+
     func testDanglingSymlinkAtDestinationGetsSuffixed() throws {
         // fileExists follows symlinks, so a dangling link used to answer
         // "free" — and the move then threw on every scan, forever. The link

@@ -45,7 +45,15 @@ final class Ledger {
     }
 
     func key(ruleID: UUID, fingerprint: String) -> String {
-        "\(ruleID.uuidString)|\(fingerprint)"
+        keyPrefix(ruleID: ruleID) + fingerprint
+    }
+
+    /// The prefix every key of one rule starts with. Callers that filter keys
+    /// by rule (the pipeline's preview set, `forget`) go through this rather
+    /// than re-spelling the separator — a format change here would otherwise
+    /// silently turn those filters into no-ops.
+    func keyPrefix(ruleID: UUID) -> String {
+        "\(ruleID.uuidString)|"
     }
 
     /// Should this (rule, file) be looked at now, or is it already accounted for?
@@ -70,7 +78,7 @@ final class Ledger {
 
     /// Drop entries for a rule (e.g. when it is deleted or reset).
     func forget(ruleID: UUID) {
-        let prefix = ruleID.uuidString + "|"
+        let prefix = keyPrefix(ruleID: ruleID)
         let before = entries.count
         entries = entries.filter { !$0.key.hasPrefix(prefix) }
         if entries.count != before { dirty = true }

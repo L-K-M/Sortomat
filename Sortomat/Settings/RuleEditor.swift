@@ -147,8 +147,16 @@ struct RuleEditor: View {
     private var pathWarnings: [String] {
         var warnings: [String] = []
         let fm = FileManager.default
-        let watch = (rule.watchPath as NSString).expandingTildeInPath
-        let target = (rule.targetPath as NSString).expandingTildeInPath
+        // Resolve links and compare case-insensitively: on a default APFS
+        // volume "~/Downloads" and "~/downloads" are the same folder, and a
+        // watch path that reaches the target through a symlink is the same
+        // misconfiguration as naming it directly.
+        func canonical(_ path: String) -> String {
+            URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                .resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        let watch = canonical(rule.watchPath)
+        let target = canonical(rule.targetPath)
         func isDirectory(_ path: String) -> Bool {
             var isDir: ObjCBool = false
             return fm.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
@@ -159,11 +167,16 @@ struct RuleEditor: View {
         if !rule.targetPath.isEmpty, !isDirectory(target) {
             warnings.append(L10n.t("rule.validate.targetMissing"))
         }
-        if !rule.watchPath.isEmpty, watch == target {
+        if !rule.watchPath.isEmpty, watch.compare(target, options: .caseInsensitive) == .orderedSame {
             warnings.append(L10n.t("rule.validate.samePath"))
         } else if !rule.watchPath.isEmpty, !rule.targetPath.isEmpty,
-                  watch.hasPrefix(target + "/") {
+                  watch.lowercased().hasPrefix(target.lowercased() + "/") {
             warnings.append(L10n.t("rule.validate.watchInsideTarget"))
+        } else if rule.recursive, !rule.watchPath.isEmpty, !rule.targetPath.isEmpty,
+                  target.lowercased().hasPrefix(watch.lowercased() + "/") {
+            // Filed files land back inside the watched tree. The scan skips the
+            // target subtree so nothing loops, but the folder is worth naming.
+            warnings.append(L10n.t("rule.validate.targetInsideWatch"))
         }
         return warnings
     }

@@ -4,9 +4,10 @@ struct ActivityEntry: Identifiable, Equatable {
     /// What the entry reports — lets callers summarize ("3 files filed",
     /// "1 failure") instead of guessing from message text.
     enum Kind: Equatable {
-        case filed   // a file was actually placed (moved/copied/quarantined)
+        case filed         // a file was actually placed (moved/copied/quarantined)
         case failed
-        case info    // skips, duplicates, previews, budget notes
+        case watchMissing  // the rule's watched folder is gone — one alert per outage
+        case info          // skips, duplicates, previews, budget notes
     }
 
     let id = UUID()
@@ -44,7 +45,11 @@ struct ScanResult {
             pending: lhs.pending + rhs.pending,
             usage: lhs.usage + rhs.usage,
             unstableCount: lhs.unstableCount + rhs.unstableCount,
-            ruleID: lhs.ruleID ?? rhs.ruleID,
+            // An aggregate of two *different* rules belongs to no single rule:
+            // keeping lhs's id while OR-ing rhs's watchMissing would blame the
+            // wrong rule for an outage.
+            ruleID: (lhs.ruleID == rhs.ruleID || rhs.ruleID == nil) ? lhs.ruleID
+                  : (lhs.ruleID == nil ? rhs.ruleID : nil),
             watchMissing: lhs.watchMissing || rhs.watchMissing
         )
     }

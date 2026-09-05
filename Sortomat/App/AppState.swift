@@ -112,8 +112,11 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Keyed by rule id, tolerating a hand-edited config that repeats one:
+    /// `uniqueKeysWithValues` would trap, and this runs at launch and after
+    /// every save, so a duplicated JSON block would make the app unlaunchable.
     private static func signatures(of rules: [Rule]) -> [UUID: Rule] {
-        Dictionary(uniqueKeysWithValues: rules.map { ($0.id, signature(of: $0)) })
+        Dictionary(rules.map { ($0.id, signature(of: $0)) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// The rule with everything that does *not* influence its decisions
@@ -173,6 +176,10 @@ final class AppState: ObservableObject {
     @discardableResult
     func importRule(_ rule: Rule) -> UUID {
         var imported = rule
+        // A pack exported from *this* config still carries its original id, so
+        // re-importing it would put two rules with one id in config.json —
+        // which every id-keyed dictionary in the app then has to survive.
+        imported.id = UUID()
         imported.name = uniqueName(imported.name)
         config.rules.append(imported)
         persistAndApply()
@@ -272,6 +279,7 @@ final class AppState: ObservableObject {
 
             let snapshot = config
             let batchID = UUID() // one pass = one undoable batch
+            var passResults: [ScanResult] = []
             for rule in snapshot.rules.inExecutionOrder() {
                 // Re-read per rule so selecting a rule to edit mid-pass takes
                 // effect immediately (rather than one stale execution).
@@ -280,7 +288,9 @@ final class AppState: ObservableObject {
                     rule: rule, config: snapshot, apiKey: apiKey, batchID: batchID
                 )
                 ingest(result)
+                passResults.append(result)
             }
+            notify(pass: passResults)
             await pipeline.persist()
             pruneStalePending()
             persistSpend()
@@ -311,6 +321,10 @@ final class AppState: ObservableObject {
 
     private func ingest(_ result: ScanResult) {
         accumulate(result.usage)
+        // Re-arm the missing-folder alert as soon as the folder is back, even
+        // on a pass that produced no entries at all — otherwise a second
+        // outage of the same folder would be silent.
+        if !result.watchMissing, let id = result.ruleID { missingWatchNotified.remove(id) }
         if result.unstableCount > 0 { scheduleFollowUpScan() }
         for plan in result.pending where !pendingActions.contains(where: { $0.source == plan.source && $0.ruleID == plan.ruleID }) {
             pendingActions.append(plan)
@@ -319,7 +333,6 @@ final class AppState: ObservableObject {
             activity.insert(contentsOf: result.entries.reversed(), at: 0)
             activity = Array(activity.prefix(80))
             result.entries.forEach { ConfigStore.appendLog($0.message) }
-            notify(result)
         }
     }
 
@@ -338,30 +351,36 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// What the notifications toggle promises: a summary of what was filed and
-    /// what failed, per pass — not just the first failure. A missing watch
-    /// folder alerts once per outage (the log still records every pass) and
-    /// re-arms when the folder comes back.
-    private func notify(_ result: ScanResult) {
+    /// What the notifications toggle promises: one summary of what a *pass*
+    /// filed and what failed — not one banner per rule, which is what
+    /// notifying from `ingest` produced once more than one rule was active.
+    /// A missing watch folder alerts once per outage; the log still records
+    /// every pass, and `ingest` re-arms the alert when the folder returns.
+    private func notify(pass results: [ScanResult]) {
         guard config.notificationsEnabled else { return }
-        if result.watchMissing, let id = result.ruleID {
-            let alreadyAnnounced = missingWatchNotified.contains(id)
-            missingWatchNotified.insert(id)
-            if alreadyAnnounced { return }
-        } else if let id = result.ruleID {
-            missingWatchNotified.remove(id)
-        }
+        let entries = results.flatMap(\.entries)
 
-        let filed = result.entries.filter { $0.kind == .filed }.count
+        let filed = entries.filter { $0.kind == .filed }.count
         if filed > 0 {
             Notifier.post(title: "Sortomat", body: L10n.plural("notify.filed", filed))
         }
-        let failures = result.entries.filter { $0.kind == .failed }
+
+        let failures = entries.filter { $0.kind == .failed }
         if let first = failures.first {
             let body = failures.count == 1
                 ? first.message
                 : L10n.plural("notify.failuresMore", failures.count - 1, first.message)
             Notifier.post(title: "Sortomat", body: body)
+        }
+
+        // Outages are their own bucket so a folder that stays missing doesn't
+        // re-announce itself on every pass alongside the real failures.
+        for result in results where result.watchMissing {
+            guard let id = result.ruleID, !missingWatchNotified.contains(id) else { continue }
+            missingWatchNotified.insert(id)
+            if let entry = result.entries.first(where: { $0.kind == .watchMissing }) {
+                Notifier.post(title: "Sortomat", body: entry.message)
+            }
         }
     }
 
@@ -371,19 +390,25 @@ final class AppState: ObservableObject {
     func refreshPreview() async {
         let apiKey = Keychain.apiKey() ?? ""
         let snapshot = config
+        var passResults: [ScanResult] = []
         for rule in snapshot.rules.inExecutionOrder() {
             let result = await pipeline.scan(
                 rule: rule, config: snapshot, apiKey: apiKey, forcePreview: true
             )
             ingest(result)
+            passResults.append(result)
         }
+        notify(pass: passResults)
         pruneStalePending()
+        // A preview can spend real tokens; without this the meter only reached
+        // disk on the next scan pass or at quit.
+        persistSpend()
         lastScan = Date()
     }
 
 
     func apply(_ plans: [PlannedAction]) async {
-        let rulesByID = Dictionary(uniqueKeysWithValues: config.rules.map { ($0.id, $0) })
+        let rulesByID = Dictionary(config.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let entries = await pipeline.applyApproved(plans, rules: rulesByID)
         let appliedIDs = Set(plans.map(\.id))
         pendingActions.removeAll { appliedIDs.contains($0.id) }
@@ -414,6 +439,10 @@ final class AppState: ObservableObject {
             ConfigStore.save(config)
         }
         persistSpend()
+        // Every pass persists the ledger when it ends, so only a pass that is
+        // still running can be holding unwritten records. Blocking the main
+        // thread otherwise would just add up to two seconds to every quit.
+        guard scanRunning else { return }
         let done = DispatchSemaphore(value: 0)
         Task.detached { [pipeline] in
             await pipeline.persist()
@@ -430,25 +459,33 @@ final class AppState: ObservableObject {
     /// copy it hashes the full content of both sides, which must not stall
     /// the UI on a large file.
     func undo(_ entry: JournalEntry) async throws {
+        try await undo(entry, persisting: true)
+    }
+
+    private func undo(_ entry: JournalEntry, persisting: Bool) async throws {
         try await Task.detached { try Journal.undo(entry) }.value
         guard !entry.wasCopy else { return } // nothing returned to the watch folder
         await pipeline.markUndone(ruleID: entry.ruleID, sourcePath: entry.sourcePath)
-        await pipeline.persist()
+        if persisting { await pipeline.persist() }
     }
 
     /// Undo the newest batch — one scan pass or one approved preview. Returns
     /// how many entries were reversed and how many refused.
     func undoLastBatch() async -> (undone: Int, failed: Int) {
-        let entries = await Task.detached { Journal.recent(limit: 500) }.value
+        // The whole journal, not a 500-entry window: one pass over a big
+        // folder can exceed it, and `lastBatch` would then reverse part of the
+        // batch while reporting the whole thing undone.
+        let entries = await Task.detached { Journal.recent(limit: .max) }.value
         var undone = 0, failed = 0
         for entry in Journal.lastBatch(in: entries) {
             do {
-                try await undo(entry)
+                try await undo(entry, persisting: false)
                 undone += 1
             } catch {
                 failed += 1
             }
         }
+        await pipeline.persist() // once for the batch, not once per entry
         return (undone, failed)
     }
 }

@@ -44,6 +44,24 @@ final class RulePackTests: XCTestCase {
         XCTAssertTrue(imported.dryRun, "imports arrive in preview mode")
     }
 
+    /// A pack is defined as path-free; a hand-edited one that carries paths
+    /// must not silently point a fresh import at folders its new owner never
+    /// chose (it arrives disabled, but the fields would already be filled in).
+    func testImportStripsPathsEvenFromAHandEditedPack() throws {
+        var pack = RulePack(exporting: sampleRule())
+        pack.rule.watchPath = "/Users/someone-else/Desktop"
+        pack.rule.targetPath = "/Volumes/Share/Filed"
+        let imported = try RulePack.decode(try pack.encoded()).makeImportedRule()
+        XCTAssertEqual(imported.watchPath, "")
+        XCTAssertEqual(imported.targetPath, "")
+    }
+
+    func testNonsenseFormatIsRejected() throws {
+        var pack = RulePack(exporting: sampleRule())
+        pack.format = 0 // a missing/zeroed version is not "older", it's broken
+        XCTAssertThrowsError(try RulePack.decode(try pack.encoded()))
+    }
+
     func testNewerFormatIsRejected() throws {
         var pack = RulePack(exporting: sampleRule())
         pack.format = RulePack.currentFormat + 1

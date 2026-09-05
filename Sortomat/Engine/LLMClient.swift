@@ -69,6 +69,21 @@ struct LLMClient {
     /// steers it into rambling — bills unbounded output tokens per file.
     static let maxCompletionTokens = 700
 
+    /// OpenAI's reasoning models (o1/o3/o4-mini, gpt-5*) reject the legacy
+    /// `max_tokens` name outright and refuse any temperature but their
+    /// default, both with a non-retryable 400. The model and base URL are
+    /// user-configurable, so the request shape follows the model name; every
+    /// other provider (Mistral, Ollama, LM Studio, older OpenAI) keeps the
+    /// classic parameters.
+    static func isReasoningModel(_ model: String) -> Bool {
+        // Gateways prefix the model with a provider ("openai/o3-mini").
+        let name = model.lowercased().split(separator: "/").last.map(String.init) ?? ""
+        for prefix in ["o1", "o3", "o4", "gpt-5", "gpt5"] where name.hasPrefix(prefix) {
+            return true
+        }
+        return false
+    }
+
     /// The chat/completions request body, extracted so tests can pin its shape.
     static func payload(
         model: String, rulePrompt: String, taxonomy: [String], fileDescription: String
@@ -79,16 +94,21 @@ struct LLMClient {
                 + taxonomy.joined(separator: ", ")
         }
         let userPrompt = "\(instruction)\n\n\(fileDescription)"
-        return [
+        var payload: [String: Any] = [
             "model": model,
-            "temperature": 0,
-            "max_tokens": maxCompletionTokens,
             "response_format": ["type": "json_object"],
             "messages": [
                 ["role": "system", "content": Self.systemPrompt],
                 ["role": "user", "content": userPrompt],
             ],
         ]
+        if isReasoningModel(model) {
+            payload["max_completion_tokens"] = maxCompletionTokens
+        } else {
+            payload["temperature"] = 0
+            payload["max_tokens"] = maxCompletionTokens
+        }
+        return payload
     }
 
     func classify(
