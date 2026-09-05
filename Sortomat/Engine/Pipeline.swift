@@ -324,6 +324,10 @@ actor Pipeline {
         } onCancel: {
             extraction.cancel()
         }
+        // Cancelling the extraction only stops the reading. Without this, a
+        // stopped pass still went on to pay for the classification it was
+        // stopped to avoid.
+        try Task.checkCancellation()
         let result = try await client.classify(
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )

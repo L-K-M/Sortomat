@@ -26,6 +26,7 @@ enum ImageText {
     // MARK: - Recognition
 
     static func recognize(imageAt url: URL) -> String {
+        guard !Task.isCancelled else { return "" }
         guard sizeAllows(url), let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return "" }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

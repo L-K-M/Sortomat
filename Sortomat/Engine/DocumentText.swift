@@ -114,6 +114,13 @@ enum DocumentText {
     }
 
     private static func sizeAllows(_ url: URL) -> Bool {
+        // An .rtfd is a *directory*: its own entry is a few kilobytes no matter
+        // how much wrapped RTF and TIFF data it holds, so the cap has to add up
+        // what is inside or it does not apply to bundles at all.
+        if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .totalFileAllocatedSizeKey]),
+           values.isDirectory == true {
+            return Int64(values.totalFileAllocatedSize ?? 0) <= maxDocumentBytes
+        }
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0
         return size <= maxDocumentBytes
     }

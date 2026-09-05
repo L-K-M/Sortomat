@@ -91,10 +91,14 @@ final class TextExtractionTests: XCTestCase {
         XCTAssertTrue(facts.contains { $0.0 == "Dimensions" && $0.1 == "900×300" }, "facts: \(facts)")
 
         let recognized = ImageText.recognize(imageAt: url)
-        XCTAssertTrue(recognized.contains("QX7"), "OCR produced: \(recognized)")
+        // Vision sometimes breaks a short token as "Q X7"; the question is
+        // whether it read the glyphs, not how it spaced them.
+        let normalized = recognized.replacingOccurrences(of: " ", with: "")
+        XCTAssertTrue(normalized.contains("QX7"), "OCR produced: \(recognized)")
 
         let description = FileContext.describe(url: url)
-        XCTAssertTrue(description.contains("recognized on-device"), "the model must know it's reading OCR")
+        XCTAssertTrue(description.contains(FileContext.ocrNotice),
+                      "the model must know it's reading OCR")
         XCTAssertTrue(description.contains("QX7"))
         // A token no metadata field can contain by accident: a bare number
         // would match a byte count like "14711 bytes" and fail for nothing.
@@ -132,6 +136,9 @@ final class TextExtractionTests: XCTestCase {
 
         let text = DocumentText.text(url: url, limit: 500)
         XCTAssertFalse(text.isEmpty)
+        // `limit` bounds what the *classifier* is given, and the readers cut
+        // at four bytes per allowed character before the caller trims again —
+        // so the guarantee is a bounded multiple, not an exact count.
         XCTAssertLessThanOrEqual(text.count, 500 * 4,
                                  "the limit has to bound what reaches the model")
     }

@@ -7,6 +7,10 @@ import PDFKit
 enum FileContext {
     static let sampleLimit = 4000
 
+    /// The model has to know it is reading recognized text rather than a text
+    /// layer. Named so a copy edit cannot silently desynchronize the test.
+    static let ocrNotice = "Content excerpt (text recognized on-device from the image):"
+
     private static let plainTextExtensions: Set<String> = [
         "txt", "md", "markdown", "csv", "tsv", "json", "xml", "yml", "yaml",
         "log", "tex", "srt",
@@ -26,6 +30,10 @@ enum FileContext {
         let size = (attrs[.size] as? Int64) ?? 0
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
+        // The calendar alone is not enough: `dateFormat` still renders through
+        // the locale, so an Arabic-Indic numbering system would send the model
+        // different digits for the same file.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
 
         var lines = ["File:", "Name: \(url.lastPathComponent)"]
@@ -64,7 +72,7 @@ enum FileContext {
         }
         if !sample.isEmpty {
             lines.append("")
-            lines.append(source == .recognized ? "Content excerpt (text recognized on-device from the image):" : "Content excerpt:")
+            lines.append(source == .recognized ? ocrNotice : "Content excerpt:")
             lines.append(String(sample.prefix(sampleLimit)))
         }
         return lines.joined(separator: "\n")
