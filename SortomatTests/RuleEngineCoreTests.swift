@@ -639,3 +639,50 @@ final class LegacyMigrationTests: XCTestCase {
         XCTAssertEqual(projected[0].action, .skip)
     }
 }
+
+final class RuleCatalogTests: XCTestCase {
+    func testEveryCatalogAttributeIsLabelledInBothLanguages() {
+        for spec in RuleCatalog.attributes {
+            L10n.forcedLanguage = "en"
+            XCTAssertNotEqual(RuleCatalog.label(for: spec.attribute), spec.attribute.rawValue,
+                              "EN label missing for \(spec.attribute.rawValue)")
+            L10n.forcedLanguage = "de"
+            XCTAssertNotEqual(RuleCatalog.label(for: spec.attribute), spec.attribute.rawValue,
+                              "DE label missing for \(spec.attribute.rawValue)")
+        }
+        L10n.forcedLanguage = nil
+    }
+
+    func testEveryOfferedOperatorAndActionIsLabelled() {
+        let operators = Set(RuleCatalog.attributes.flatMap(\.operators))
+        for language in ["en", "de"] {
+            L10n.forcedLanguage = language
+            for op in operators {
+                XCTAssertNotEqual(RuleCatalog.label(for: op), op.rawValue,
+                                  "\(language) label missing for operator \(op.rawValue)")
+            }
+            for action in RuleCatalog.actionTypes {
+                XCTAssertNotEqual(RuleCatalog.label(for: action), action.rawValue,
+                                  "\(language) label missing for action \(action.rawValue)")
+            }
+        }
+        L10n.forcedLanguage = nil
+    }
+
+    func testTheSummarySentenceReadsLikeASentence() {
+        L10n.forcedLanguage = "en"
+        let step = RuleStep(
+            name: "Invoices",
+            when: ConditionGroup(mode: .all, items: [
+                .test(ConditionTest(attribute: .ext, op: .equals, value: .text("pdf"))),
+                .test(ConditionTest(attribute: .name, op: .contains, value: .text("Rechnung")))
+            ]),
+            then: [RuleAction(type: .move, template: "Finanzen/{name}")]
+        )
+        let sentence = StepSentence.text(for: step)
+        XCTAssertTrue(sentence.contains("Extension is «pdf»"), sentence)
+        XCTAssertTrue(sentence.contains(" and "), sentence)
+        XCTAssertTrue(sentence.contains("Move to Finanzen/{name}"), sentence)
+        L10n.forcedLanguage = nil
+    }
+}

@@ -103,29 +103,39 @@ struct RuleEditor: View {
                 }
             }
 
-            Section(L10n.t("rule.preRules.section")) {
-                Text(L10n.t("rule.preRules.help"))
+            Section(L10n.t("rule.steps.section")) {
+                Text(L10n.t("rule.steps.help"))
                     .font(.caption).foregroundStyle(.secondary)
-                ForEach(rule.preRules) { preRule in
-                    if let index = rule.preRules.firstIndex(where: { $0.id == preRule.id }) {
-                        PreRuleCard(
-                            preRule: $rule.preRules[index],
-                            position: index + 1,
-                            canMoveUp: index > 0,
-                            canMoveDown: index < rule.preRules.count - 1,
-                            onMoveUp: { move(preRule.id, by: -1) },
-                            onMoveDown: { move(preRule.id, by: 1) },
-                            onDelete: { rule.preRules.removeAll { $0.id == preRule.id } }
-                        )
-                        .padding(.vertical, 4)
-                    }
+                ForEach(rule.steps.indices, id: \.self) { index in
+                    StepCard(
+                        step: $rule.steps[index],
+                        position: index + 1,
+                        canMoveUp: index > 0,
+                        canMoveDown: index < rule.steps.count - 1,
+                        metadataOnly: rule.privacyMode == .metadataOnly,
+                        onMoveUp: { move(index, by: -1) },
+                        onMoveDown: { move(index, by: 1) },
+                        onDelete: { rule.steps.remove(at: index) }
+                    )
+                    .padding(.vertical, 4)
                 }
                 Button {
-                    rule.preRules.append(PreRule())
+                    rule.steps.append(RuleStep(
+                        when: ConditionGroup(mode: .all, items: [.test(ConditionTest())]),
+                        then: [RuleAction(type: .move, template: "{name}")]
+                    ))
                 } label: {
-                    Label(L10n.t("rule.preRules.add"), systemImage: "plus.circle")
+                    Label(L10n.t("rule.steps.add"), systemImage: "plus.circle")
                 }
                 .buttonStyle(.borderless)
+
+                Picker(L10n.t("rule.fallback"), selection: $rule.fallback) {
+                    Text(L10n.t("rule.fallback.askModel")).tag(Rule.Fallback.askModel)
+                    Text(L10n.t("rule.fallback.skip")).tag(Rule.Fallback.skip)
+                    Text(L10n.t("rule.fallback.quarantine")).tag(Rule.Fallback.quarantine)
+                }
+                Text(L10n.t("rule.fallback.help"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -137,11 +147,10 @@ struct RuleEditor: View {
         .onChange(of: rule) { _ in state.persistAndApply() }
     }
 
-    private func move(_ id: UUID, by offset: Int) {
-        guard let i = rule.preRules.firstIndex(where: { $0.id == id }) else { return }
-        let j = i + offset
-        guard rule.preRules.indices.contains(j) else { return }
-        rule.preRules.swapAt(i, j)
+    private func move(_ index: Int, by offset: Int) {
+        let target = index + offset
+        guard rule.steps.indices.contains(index), rule.steps.indices.contains(target) else { return }
+        rule.steps.swapAt(index, target)
     }
 
     private var pathWarnings: [String] {
