@@ -19,7 +19,7 @@ enum MoveError: LocalizedError {
 
 /// Executes a placement decision safely: content-hash duplicate detection,
 /// collision suffixes, a guard against a vanished source, and a cross-volume
-/// fallback that verifies the copy before deleting the original.
+/// path that verifies the copy before deleting the original.
 enum Mover {
     /// Move or copy `source` to `destination` (creating parents), resolving
     /// collisions with ` (2)`, ` (3)` … and skipping true duplicates (same
@@ -41,41 +41,104 @@ enum Mover {
         )
 
         if copy {
-            try fm.copyItem(at: source, to: target)
+            try copyCleaningUpOnFailure(source: source, to: target)
+            return .placed(target)
+        }
+
+        // Foundation's `moveItem` quietly degrades to an *unverified*
+        // copy-then-delete when source and destination sit on different
+        // volumes — exactly the posture this app promises not to have. Detect
+        // that case up front and take the verified path instead of waiting
+        // for an error that normally never comes.
+        if isCrossVolume(source: source, destination: target) {
+            try copyVerifyDelete(source: source, to: target)
             return .placed(target)
         }
 
         do {
             try fm.moveItem(at: source, to: target)
         } catch {
-            // Only fall back to copy-then-delete for a genuine cross-volume move;
-            // and only delete the original once the copy is verified intact.
-            guard isCrossVolume(source: source, destination: target) else { throw error }
+            // A move that still fails with a cross-device error (a mount point
+            // or firmlink inside the tree) gets the verified fallback; any
+            // other error surfaces as-is.
+            guard isCrossDeviceError(error) else { throw error }
             try copyVerifyDelete(source: source, to: target)
         }
         return .placed(target)
     }
 
-    /// Cross-volume fallback: copy, verify the copy over its *entire* content,
-    /// and only then delete the original. Fails closed — when either side can't
-    /// be hashed (`digest` returns nil), the copy is discarded and the original
-    /// kept, because `nil == nil` must never count as a successful verification.
-    static func copyVerifyDelete(source: URL, to target: URL) throws {
+    /// Copy `source` to `target`, removing a half-written target on failure
+    /// (disk full, NAS drop) so the canonical name isn't left holding a
+    /// truncated file forever. Only a target *this call created* is cleaned
+    /// up: an occupant that appeared after the placement was resolved is not
+    /// ours to delete — `copyItem` refuses to overwrite it, and so do we.
+    static func copyCleaningUpOnFailure(source: URL, to target: URL) throws {
         let fm = FileManager.default
+        let existedBefore = occupied(target)
         do {
             try fm.copyItem(at: source, to: target)
         } catch {
-            try? fm.removeItem(at: target) // don't leave a partial copy behind
+            if !existedBefore { try? fm.removeItem(at: target) }
             throw error
         }
-        guard let sourceDigest = ContentHash.digest(of: source, limit: .max),
-              let targetDigest = ContentHash.digest(of: target, limit: .max),
+    }
+
+    /// Cross-volume path: copy, verify the copy over its *entire* content, and
+    /// only then delete the original. Fails closed — when either side can't be
+    /// hashed (`digest` returns nil), the copy is discarded and the original
+    /// kept, because `nil == nil` must never count as a successful verification.
+    static func copyVerifyDelete(source: URL, to target: URL) throws {
+        let fm = FileManager.default
+        try copyCleaningUpOnFailure(source: source, to: target)
+        guard let sourceDigest = treeDigest(of: source),
+              let targetDigest = treeDigest(of: target),
               sourceDigest == targetDigest
         else {
             try? fm.removeItem(at: target)
             throw MoveError.verifyFailed
         }
         try fm.removeItem(at: source)
+    }
+
+    /// Full-content digest of a file — or, for a package, of every entry inside
+    /// it keyed by relative path, so a document bundle is verified as a whole
+    /// before its original is deleted. Nil when anything can't be read.
+    ///
+    /// Every entry, not just the regular files: two bundles that hold nothing
+    /// but folders (or nothing but symlinks — how a `.framework` is built) both
+    /// used to hash the empty string, so the second was "verified" against the
+    /// first and its original deleted. Anything that is neither file, folder
+    /// nor link can't be hashed, and an unhashable side fails closed.
+    static func treeDigest(of root: URL) -> String? {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else { return nil }
+        if !isDirectory.boolValue { return ContentHash.digest(of: root, limit: .max) }
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
+        guard let enumerator = fm.enumerator(
+            at: root, includingPropertiesForKeys: Array(keys), options: []
+        ) else { return nil }
+        let base = root.standardizedFileURL.path
+        var lines: [String] = []
+        for case let url as URL in enumerator {
+            let relative = String(url.standardizedFileURL.path.dropFirst(base.count))
+            guard let values = try? url.resourceValues(forKeys: keys) else { return nil }
+            if values.isSymbolicLink == true {
+                // The link itself is the content: resolving it would hash the
+                // target a second time, or follow a link out of the package.
+                guard let target = try? fm.destinationOfSymbolicLink(atPath: url.path) else { return nil }
+                lines.append(relative + "|L|" + target)
+            } else if values.isDirectory == true {
+                lines.append(relative + "|D|")
+            } else if values.isRegularFile == true {
+                guard let digest = ContentHash.digest(of: url, limit: .max) else { return nil }
+                lines.append(relative + "|F|" + digest)
+            } else {
+                return nil
+            }
+        }
+        lines.sort()
+        return ContentHash.digest(ofString: lines.joined(separator: "\n"))
     }
 
     private enum Placement {
@@ -90,7 +153,19 @@ enum Mover {
             return .place(destination)
         }
 
-        let sourceHash = ContentHash.digest(of: source)
+        // Nil for a package: a directory has no prefix digest, so the
+        // comparison below goes straight to the whole-tree digest.
+        let sourcePrefix = ContentHash.digest(of: source)
+        // Hashing a package reads every file inside it, and the loop below runs
+        // up to 99 times — so the source is hashed at most once, on the first
+        // candidate that survives the prefix filter.
+        var cachedSourceTree: String??
+        func sourceTree() -> String? {
+            if let cached = cachedSourceTree { return cached }
+            let digest = treeDigest(of: source)
+            cachedSourceTree = digest
+            return digest
+        }
         let stem = destination.deletingPathExtension().lastPathComponent
         let ext = destination.pathExtension
         let dir = destination.deletingLastPathComponent()
@@ -103,25 +178,28 @@ enum Mover {
             if !occupied(candidate) {
                 return .place(candidate)
             }
-            if let sourceHash, isDuplicate(candidate, of: source, prefixDigest: sourceHash) {
+            if isDuplicate(candidate, prefixDigest: sourcePrefix, sourceTree: sourceTree) {
                 return .duplicate(candidate)
             }
         }
         throw PathError.tooManyCollisions(destination.path)
     }
 
-    /// Whether two files are byte-for-byte the same. The bounded prefix digest
-    /// (size + first 4 MiB) is the cheap pre-filter that excludes almost
-    /// everything for one small read; only a file that survives it is read in
-    /// full. A prefix match alone is not enough here: calling a distinct file a
-    /// duplicate records it as done and it is then never filed again — a
-    /// silent loss, and exactly the trade-off the bounded hash was never meant
-    /// to make. Fails closed: an unreadable side is never a duplicate, so the
-    /// file gets a ` (n)` suffix instead of disappearing from the queue.
-    private static func isDuplicate(_ candidate: URL, of source: URL, prefixDigest: String) -> Bool {
-        guard ContentHash.digest(of: candidate) == prefixDigest else { return false }
-        guard let full = ContentHash.digest(of: source, limit: .max),
-              ContentHash.digest(of: candidate, limit: .max) == full else { return false }
+    /// Whether two items are byte-for-byte the same — for a package, every file
+    /// inside it. The bounded prefix digest (size + first 4 MiB) is the cheap
+    /// pre-filter that excludes almost everything for one small read; only an
+    /// item that survives it is read in full. A prefix match alone is not
+    /// enough: calling a distinct file a duplicate records it as done and it is
+    /// then never filed again — a silent loss, and exactly the trade-off the
+    /// bounded hash was never meant to make. A package has no prefix digest
+    /// (it is a directory), so it goes straight to the full comparison. Fails
+    /// closed: an unreadable side is never a duplicate, so the item gets a
+    /// ` (n)` suffix instead of disappearing from the queue.
+    private static func isDuplicate(
+        _ candidate: URL, prefixDigest: String?, sourceTree: () -> String?
+    ) -> Bool {
+        if let prefixDigest, ContentHash.digest(of: candidate) != prefixDigest { return false }
+        guard let full = sourceTree(), treeDigest(of: candidate) == full else { return false }
         return true
     }
 
@@ -129,11 +207,11 @@ enum Mover {
     /// a dangling link answered "free" — and the subsequent move threw, every
     /// scan, forever. `attributesOfItem` has lstat semantics: the link itself
     /// counts, so a dangling link gets a ` (n)` suffix like any other occupant.
-    private static func occupied(_ url: URL) -> Bool {
+    static func occupied(_ url: URL) -> Bool {
         (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 
-    private static func isCrossVolume(source: URL, destination: URL) -> Bool {
+    static func isCrossVolume(source: URL, destination: URL) -> Bool {
         let keys: Set<URLResourceKey> = [.volumeURLKey]
         let srcVol = (try? source.deletingLastPathComponent()
             .resourceValues(forKeys: keys))?.volume
@@ -141,5 +219,14 @@ enum Mover {
             .resourceValues(forKeys: keys))?.volume
         guard let srcVol, let dstVol else { return false }
         return srcVol.standardizedFileURL != dstVol.standardizedFileURL
+    }
+
+    private static func isCrossDeviceError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain, nsError.code == Int(EXDEV) { return true }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isCrossDeviceError(underlying)
+        }
+        return false
     }
 }

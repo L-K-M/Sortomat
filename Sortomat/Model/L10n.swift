@@ -297,6 +297,32 @@ public enum L10n {
         "error.sourceVanished": "Source file vanished before it could be filed",
         "error.verifyFailed": "Cross-volume copy could not be verified; original kept",
         "component.unknown": "Unknown",
+
+        // Decision reasons (shown in Review rows and logged)
+        "reason.preRule": "pre-rule «%@»",
+        "reason.notInTaxonomy": "folder «%@» is not in the allowed set",
+        "reason.lowConfidence": "confidence %d%% is below the threshold",
+        "reason.noConfidence": "the model reported no usable confidence",
+        "reason.ruleDoesNotApply": "rule does not apply",
+
+        // Journal
+        "journal.undo.destinationReplaced": "The file at %@ is not the one Sortomat put there (it was edited or replaced since), so it was left alone.",
+        "journal.writeFailed": "Couldn't record the move of %@ in the journal (%@) — it can't be undone from History.",
+
+        // Command line
+        "headless.usage": """
+        Usage: Sortomat <command>
+
+          scan-once   Sort every enabled rule once, then exit (1 on any error).
+          preview     Print what scan-once would do, without touching files.
+          undo        Reverse the most recent batch of moves.
+          version     Print the version and exit.
+          help        Show this text.
+
+        Run with no arguments to start the menu-bar app.
+        SORTOMAT_API_KEY overrides the Keychain key; SORTOMAT_CONFIG_DIR the config folder.
+        """,
+        "headless.version": "Sortomat %@ (%@)",
         "process.locked": "Another Sortomat process is using this configuration — not running, to avoid clobbering its records.",
         "process.lockWarning": "Warning: another Sortomat process holds this configuration; concurrent runs may conflict.",
 
@@ -580,6 +606,29 @@ public enum L10n {
         "error.sourceVanished": "Quelldatei verschwand, bevor sie einsortiert werden konnte",
         "error.verifyFailed": "Volumen-übergreifende Kopie nicht verifizierbar; Original behalten",
         "component.unknown": "Unbekannt",
+
+        "reason.preRule": "Vorregel «%@»",
+        "reason.notInTaxonomy": "Ordner «%@» ist nicht in der erlaubten Liste",
+        "reason.lowConfidence": "Konfidenz %d%% liegt unter der Schwelle",
+        "reason.noConfidence": "das Modell hat keine brauchbare Konfidenz gemeldet",
+        "reason.ruleDoesNotApply": "Regel trifft nicht zu",
+
+        "journal.undo.destinationReplaced": "Die Datei unter %@ ist nicht die, die Sortomat dort abgelegt hat (seither bearbeitet oder ersetzt) – sie wurde nicht angerührt.",
+        "journal.writeFailed": "Die Verschiebung von %@ konnte nicht im Verlauf protokolliert werden (%@) – sie lässt sich dort nicht rückgängig machen.",
+
+        "headless.usage": """
+        Verwendung: Sortomat <Befehl>
+
+          scan-once   Alle aktiven Regeln einmal ausführen, dann beenden (1 bei Fehlern).
+          preview     Ausgeben, was scan-once tun würde, ohne Dateien anzufassen.
+          undo        Den letzten Stapel Verschiebungen rückgängig machen.
+          version     Version ausgeben und beenden.
+          help        Diesen Text anzeigen.
+
+        Ohne Argumente startet die Menüleisten-App.
+        SORTOMAT_API_KEY übersteuert den Schlüsselbund-Key; SORTOMAT_CONFIG_DIR den Konfigurationsordner.
+        """,
+        "headless.version": "Sortomat %@ (%@)",
         "process.locked": "Ein anderer Sortomat-Prozess verwendet diese Konfiguration – Abbruch, um dessen Aufzeichnungen nicht zu überschreiben.",
         "process.lockWarning": "Warnung: Ein anderer Sortomat-Prozess hält diese Konfiguration; gleichzeitige Läufe können kollidieren.",
 
