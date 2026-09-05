@@ -107,7 +107,16 @@ struct EpubReader {
             guard let entry = zip.entry(named: docPath),
                   let data = zip.data(for: entry) else { continue }
 
-            let text = HTMLText.strip(TextDecoding.decode(data))
+            // Bounded twice over: only a few thousand characters are kept, so
+            // a multi-megabyte (or hostile) chapter must not be fully decoded
+            // and regex-stripped just to be truncated. The *byte* cap comes
+            // first — decoding is what allocates, so capping only the decoded
+            // String still turns a 200 MB chapter into a 200 MB String before
+            // throwing it away. 4 MiB covers the 512 K characters kept below
+            // even at UTF-8's four-bytes-per-character worst case.
+            let bounded = TextDecoding.trimmingPartialUTF8Tail(data.prefix(Self.maxChapterBytes))
+            let markup = String(TextDecoding.decode(bounded).prefix(HTMLText.maxInputCharacters))
+            let text = HTMLText.strip(markup)
             if text.count < 200 { continue } // skip cover/title/TOC pages
             chunks.append(text)
             collected += text.count
@@ -115,6 +124,9 @@ struct EpubReader {
         }
         return String(chunks.joined(separator: " ").prefix(limit))
     }
+
+    /// Byte ceiling on a single chapter read before decoding.
+    static let maxChapterBytes = 4 * 1024 * 1024
 
     private static func resolvePath(dir: String, href: String) -> String {
         let joined = dir.isEmpty ? href : "\(dir)/\(href)"
@@ -129,11 +141,15 @@ struct EpubReader {
 
     // MARK: - Lenient XML
 
+    /// container.xml and the OPF are attacker-controlled (any downloaded
+    /// EPUB); external entities are never resolved, so a
+    /// `<!ENTITY x SYSTEM "file:///…">` can't pull local file contents into
+    /// the metadata that is sent to the model and used in folder names.
     private static func parseXML(_ data: Data) -> XMLElement? {
-        if let doc = try? XMLDocument(data: data, options: [.nodePreserveWhitespace]) {
+        if let doc = try? XMLDocument(data: data, options: [.nodePreserveWhitespace, .nodeLoadExternalEntitiesNever]) {
             return doc.rootElement()
         }
-        if let doc = try? XMLDocument(data: data, options: [.documentTidyXML]) {
+        if let doc = try? XMLDocument(data: data, options: [.documentTidyXML, .nodeLoadExternalEntitiesNever]) {
             return doc.rootElement()
         }
         return nil
