@@ -3,6 +3,16 @@ import Foundation
 /// Cheap, dependency-free (X)HTML → visible-text extraction. Good enough for
 /// building a classification sample; not a full HTML parser.
 enum HTMLText {
+    /// Markup beyond this is ignored: only a few thousand characters of text
+    /// ever reach the model, and a multi-megabyte chapter (or a hostile one)
+    /// must not hold the scan hostage in the regexes below.
+    static let maxInputCharacters = 512 * 1024
+
+    /// An entity body (`amp`, `#x1F600`) is at most this many characters; the
+    /// semicolon search is bounded to it so a chapter full of bare ampersands
+    /// costs O(n), not O(n²).
+    static let maxEntityLength = 12
+
     private static let namedEntities: [String: String] = [
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'",
         "nbsp": " ", "auml": "ä", "ouml": "ö", "uuml": "ü", "szlig": "ß",
@@ -13,9 +23,12 @@ enum HTMLText {
     ]
 
     static func strip(_ html: String) -> String {
+        let bounded = html.utf8.count > maxInputCharacters
+            ? String(html.prefix(maxInputCharacters))
+            : html
         // (?s) — dot must match newlines, or any multi-line <style>/<script>
         // body (i.e. nearly all of them) survives into the "visible text".
-        var text = html.replacingOccurrences(
+        var text = bounded.replacingOccurrences(
             of: "(?s)<(script|style)[^>]*>.*?</\\1>", with: " ",
             options: [.regularExpression, .caseInsensitive]
         )
@@ -37,10 +50,17 @@ enum HTMLText {
 
         while index < input.endIndex {
             let char = input[index]
-            guard char == "&",
-                  let semicolon = input[index...].firstIndex(of: ";"),
-                  input.distance(from: index, to: semicolon) <= 12
-            else {
+            guard char == "&" else {
+                result.append(char)
+                index = input.index(after: index)
+                continue
+            }
+            // Look for the closing semicolon only within the longest possible
+            // entity — `input[index...].firstIndex(of:)` scanned the whole
+            // remainder for every bare ampersand.
+            let windowEnd = input.index(index, offsetBy: maxEntityLength + 2, limitedBy: input.endIndex)
+                ?? input.endIndex
+            guard let semicolon = input[index..<windowEnd].firstIndex(of: ";") else {
                 result.append(char)
                 index = input.index(after: index)
                 continue
