@@ -27,7 +27,7 @@ final class KeylessScanTests: XCTestCase {
     private func plantStableFile(named name: String) throws -> URL {
         let url = dir.appendingPathComponent("watch/\(name)")
         try "content".write(to: url, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -24 * 60 * 60)],
                              ofItemAtPath: url.path)
         return url
     }
@@ -73,5 +73,7 @@ final class KeylessScanTests: XCTestCase {
         // file gets classified. (A second keyless scan defers again.)
         let again = await pipeline.scan(rule: rule, config: config, apiKey: "")
         XCTAssertEqual(again.entries.count, 1)
+        XCTAssertTrue(fm.fileExists(atPath: file.path),
+                      "a deferred file must survive repeated keyless scans untouched")
     }
 }

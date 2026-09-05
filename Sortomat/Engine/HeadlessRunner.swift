@@ -36,7 +36,9 @@ enum HeadlessRunner {
         if config.providerRequiresKey && apiKey.isEmpty {
             // Not fatal anymore: deterministic pre-rules still run without a
             // key; files that need the model are deferred and reported per rule.
-            print(L10n.t("error.noKey"))
+            // stderr: stdout is the machine-readable OK/ERR stream a launchd
+            // job or a shell pipeline reads.
+            FileHandle.standardError.write(Data((L10n.t("error.noKey") + "\n").utf8))
         }
 
         let pipeline = Pipeline()

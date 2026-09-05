@@ -176,6 +176,10 @@ final class AppState: ObservableObject {
     @discardableResult
     func importRule(_ rule: Rule) -> UUID {
         var imported = rule
+        // A pack exported from *this* config still carries its original id, so
+        // re-importing it would put two rules with one id in config.json —
+        // which every id-keyed dictionary in the app then has to survive.
+        imported.id = UUID()
         imported.name = uniqueName(imported.name)
         config.rules.append(imported)
         persistAndApply()

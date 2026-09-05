@@ -87,5 +87,27 @@ final class ApplyRevalidationTests: XCTestCase {
 
         XCTAssertEqual(entries.count, 1)
         XCTAssertTrue(entries[0].ok)
+        XCTAssertFalse(fm.fileExists(atPath: source.path), "a legacy plan must still move the file")
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent("target/filed.txt").path))
+    }
+
+    /// The other half of the window the fingerprint guards: the file is gone by
+    /// the time the user clicks Apply. Reporting success for a move that never
+    /// happened would journal a placement that can't be undone.
+    func testApplyRefusesWhenFileVanishedSincePlanning() async throws {
+        let source = dir.appendingPathComponent("watch/doc.txt")
+        try "original".write(to: source, atomically: true, encoding: .utf8)
+        let rule = makeRule()
+        let plan = makePlan(rule: rule, source: source, fingerprint: Ledger.fingerprint(source))
+
+        try fm.removeItem(at: source)
+
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: DecisionMemo(url: dir.appendingPathComponent("memo.json")))
+        let entries = await pipeline.applyApproved([plan], rules: [rule.id: rule])
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertFalse(entries[0].ok)
+        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent("target/filed.txt").path))
     }
 }

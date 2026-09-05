@@ -26,7 +26,7 @@ final class PreviewHygieneTests: XCTestCase {
     private func makeRule() throws -> Rule {
         let file = dir.appendingPathComponent("watch/doc.txt")
         try "content".write(to: file, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -24 * 60 * 60)],
                              ofItemAtPath: file.path)
         return Rule(
             name: "R",

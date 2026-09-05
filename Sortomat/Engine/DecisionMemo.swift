@@ -29,11 +29,12 @@ final class DecisionMemo {
     /// share a prefix can never share a verdict — or nil when the file is too
     /// large to be worth hashing (or can't be read).
     static func digest(of url: URL) -> String? {
-        // Resource values follow symlinks; `attributesOfItem` has lstat
-        // semantics and would report the *link's* few bytes, letting a link to
-        // a huge file sail past the cap and get hashed in full.
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        guard Int64(size) <= maxHashedBytes else { return nil }
+        // `stat` is the only one of the three that traverses the final symlink:
+        // `attributesOfItem` has lstat semantics, and URL resource values
+        // report the *link's* few bytes too (CI caught that the hard way). Both
+        // would let a link to a huge file sail past the cap and be hashed whole.
+        var info = stat()
+        guard stat(url.path, &info) == 0, info.st_size <= maxHashedBytes else { return nil }
         return ContentHash.digest(of: url, limit: .max)
     }
 

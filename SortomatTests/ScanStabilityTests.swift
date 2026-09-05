@@ -30,7 +30,7 @@ final class ScanStabilityTests: XCTestCase {
 
         let old = dir.appendingPathComponent("watch/settled.txt")
         try "settled".write(to: old, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -24 * 60 * 60)],
                              ofItemAtPath: old.path)
 
         let rule = Rule(

@@ -33,10 +33,18 @@ final class L10nTests: XCTestCase {
     /// Every plural key must exist in both forms in both tables — a missing
     /// form would render as the raw key at runtime.
     func testPluralKeyPairsAreComplete() {
-        let pluralBases = ["app.status.active", "menu.pendingReview",
-                           "preview.applied", "preview.dismissed",
-                           "journal.undoBatchDone", "journal.undoBatchFailed",
-                           "notify.filed", "notify.failuresMore", "activity.keyDeferred"]
+        // Derived from the tables rather than listed here: a hand-kept list
+        // grows stale silently, and a new key with only one form would then
+        // pass both this test and the key-parity test below.
+        let pluralBases = Set(
+            (Array(L10n.english.keys) + Array(L10n.german.keys))
+                .compactMap { key -> String? in
+                    if key.hasSuffix(".one") { return String(key.dropLast(4)) }
+                    if key.hasSuffix(".other") { return String(key.dropLast(6)) }
+                    return nil
+                }
+        ).sorted()
+        XCTAssertFalse(pluralBases.isEmpty, "sanity: the tables do contain plural keys")
         for base in pluralBases {
             for suffix in [".one", ".other"] {
                 XCTAssertNotNil(L10n.english[base + suffix], "EN missing \(base + suffix)")

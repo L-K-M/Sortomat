@@ -81,7 +81,7 @@ final class DecisionMemoTests: XCTestCase {
     func testMemoHitPlansWithoutAnyModelCall() async throws {
         let file = dir.appendingPathComponent("watch/book.epub")
         try "identical bytes".write(to: file, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -24 * 60 * 60)],
                              ofItemAtPath: file.path)
 
         let rule = Rule(
@@ -139,11 +139,36 @@ final class DecisionMemoTests: XCTestCase {
         let link = dir.appendingPathComponent("link.bin")
         try fm.createSymbolicLink(at: link, withDestinationURL: big)
 
-        // Under the real cap both resolve; the point is that the link is sized
-        // like its target rather than like a link.
+        // The digest folds in the size, so a link sized like a link (rather
+        // than like its target) would hash differently from the file itself.
         XCTAssertEqual(DecisionMemo.digest(of: link), DecisionMemo.digest(of: big))
-        let size = try XCTUnwrap((try? link.resourceValues(forKeys: [.fileSizeKey]))?.fileSize)
-        XCTAssertEqual(size, 1024, "resource values must report the target's size, not the link's")
+
+        // Why the cap probes with stat(2) and neither of the obvious
+        // alternatives: both of those size the link, not the target.
+        var info = stat()
+        XCTAssertEqual(stat(link.path, &info), 0)
+        XCTAssertEqual(info.st_size, 1024, "stat must traverse the link")
+        let linkAttributes = (try? fm.attributesOfItem(atPath: link.path)) ?? [:]
+        let lstatSize = linkAttributes[.size] as? Int64
+        XCTAssertTrue(lstatSize != 1024, "attributesOfItem sizes the link — unusable for the cap")
+        let resourceSize = (try? link.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+        XCTAssertTrue(resourceSize != 1024, "resource values size the link — unusable for the cap")
+    }
+
+    /// The cap exists so a huge file is never hashed just to look up a verdict;
+    /// a symlink must not be a way around it.
+    func testDigestRefusesFilesOverTheCapThroughALink() throws {
+        let huge = dir.appendingPathComponent("huge.bin")
+        XCTAssertTrue(fm.createFile(atPath: huge.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: huge)
+        // Sparse: the bytes are never written, only the size is set.
+        try handle.truncate(atOffset: UInt64(DecisionMemo.maxHashedBytes) + 1)
+        try handle.close()
+        let link = dir.appendingPathComponent("huge-link.bin")
+        try fm.createSymbolicLink(at: link, withDestinationURL: huge)
+
+        XCTAssertNil(DecisionMemo.digest(of: huge))
+        XCTAssertNil(DecisionMemo.digest(of: link), "a link must not smuggle its target past the cap")
     }
 
     /// Editing a rule drops its previews so it re-plans — which only works if

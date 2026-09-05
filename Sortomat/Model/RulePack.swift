@@ -45,7 +45,7 @@ struct RulePack: Codable {
 
     static func decode(_ data: Data) throws -> RulePack {
         let pack = try JSONDecoder().decode(RulePack.self, from: data)
-        guard pack.format <= currentFormat else {
+        guard pack.format >= 1, pack.format <= currentFormat else {
             throw PackError.unsupportedFormat(pack.format)
         }
         return pack
@@ -58,6 +58,11 @@ struct RulePack: Codable {
         imported.id = UUID()
         imported.enabled = false
         imported.dryRun = true
+        // The format promises no machine-local paths; enforce that on the way
+        // in too, so a hand-edited pack can't arrive pointing at folders its
+        // new owner never chose.
+        imported.watchPath = ""
+        imported.targetPath = ""
         return imported
     }
 }

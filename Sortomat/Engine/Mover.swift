@@ -103,11 +103,26 @@ enum Mover {
             if !occupied(candidate) {
                 return .place(candidate)
             }
-            if let sourceHash, ContentHash.digest(of: candidate) == sourceHash {
+            if let sourceHash, isDuplicate(candidate, of: source, prefixDigest: sourceHash) {
                 return .duplicate(candidate)
             }
         }
         throw PathError.tooManyCollisions(destination.path)
+    }
+
+    /// Whether two files are byte-for-byte the same. The bounded prefix digest
+    /// (size + first 4 MiB) is the cheap pre-filter that excludes almost
+    /// everything for one small read; only a file that survives it is read in
+    /// full. A prefix match alone is not enough here: calling a distinct file a
+    /// duplicate records it as done and it is then never filed again — a
+    /// silent loss, and exactly the trade-off the bounded hash was never meant
+    /// to make. Fails closed: an unreadable side is never a duplicate, so the
+    /// file gets a ` (n)` suffix instead of disappearing from the queue.
+    private static func isDuplicate(_ candidate: URL, of source: URL, prefixDigest: String) -> Bool {
+        guard ContentHash.digest(of: candidate) == prefixDigest else { return false }
+        guard let full = ContentHash.digest(of: source, limit: .max),
+              ContentHash.digest(of: candidate, limit: .max) == full else { return false }
+        return true
     }
 
     /// Whether *anything* sits at this path. `fileExists` follows symlinks, so
