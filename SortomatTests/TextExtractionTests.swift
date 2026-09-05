@@ -101,7 +101,11 @@ final class TextExtractionTests: XCTestCase {
         let description = FileContext.describe(url: url)
         XCTAssertTrue(description.contains(FileContext.ocrNotice),
                       "the model must know it's reading OCR")
-        XCTAssertTrue(description.contains("QX7"))
+        // Same normalization as above: `describe` embeds the same
+        // variable-spacing OCR text, so asserting the raw form here would fail
+        // on exactly the runs where the assertion above passed.
+        XCTAssertTrue(description.replacingOccurrences(of: " ", with: "").contains("QX7"),
+                      "OCR produced: \(description)")
         // A token no metadata field can contain by accident: a bare number
         // would match a byte count like "14711 bytes" and fail for nothing.
         XCTAssertFalse(FileContext.describe(url: url, privacyMode: .metadataOnly).contains("QX7"),
@@ -201,7 +205,12 @@ final class TextExtractionTests: XCTestCase {
         for index in 0..<5 {
             try Data(count: 100_000).write(to: bundle.appendingPathComponent("part\(index).bin"))
         }
-        XCTAssertGreaterThan(DocumentText.bundleSize(of: bundle, stoppingAbove: 150_000), 150_000)
+        let capped = DocumentText.bundleSize(of: bundle, stoppingAbove: 150_000)
+        XCTAssertGreaterThan(capped, 150_000)
+        // Under the bundle's real 500 KB: "over the ceiling" is also what an
+        // implementation that ignored the ceiling and walked everything would
+        // report, so the upper bound is what actually pins the early exit.
+        XCTAssertLessThan(capped, 500_000, "counting has to stop once the ceiling is passed")
     }
 
     func testInlineStringWorkbooksAreNotEmpty() throws {
@@ -221,6 +230,42 @@ final class TextExtractionTests: XCTestCase {
         XCTAssertFalse(text.contains("1234.5"), "got: \(text)")
     }
 
+    func testDocumentPropertiesDoNotMaskTheInlineStringFallback() throws {
+        // Almost every generator writes a creator into docProps/core.xml —
+        // openpyxl included. Reading it in the same pass as the shared-string
+        // table made that boilerplate count as "the table had text", so for
+        // exactly the workbooks the fallback exists for the model got a tool
+        // name and not one cell of the sheet.
+        var zip = ZipWriter()
+        zip.add("docProps/core.xml",
+                #"<cp:coreProperties><dc:creator>openpyxl</dc:creator></cp:coreProperties>"#)
+        zip.add("xl/worksheets/sheet1.xml",
+                #"<worksheet><sheetData><row><c t="inlineStr"><is><t>Rechnung Nr. 4711</t></is></c></row></sheetData></worksheet>"#)
+        let url = dir.appendingPathComponent("properties.xlsx")
+        try zip.data().write(to: url, options: .atomic)
+
+        let text = DocumentText.text(url: url, limit: 4000)
+        XCTAssertTrue(text.contains("Rechnung Nr. 4711"), "got: \(text)")
+    }
+
+    func testSymlinkedFilesAreMeasuredByWhatTheyPointAt() throws {
+        // `attributesOfItem` describes the link; every reader follows it. A
+        // symlink to something enormous weighed a few bytes and passed the cap
+        // that exists to stop that read.
+        let big = dir.appendingPathComponent("big.rtf")
+        try Data(count: 4096).write(to: big)
+        let link = dir.appendingPathComponent("link.rtf")
+        try fm.createSymbolicLink(at: link, withDestinationItemAt: big)
+
+        let direct = (try? fm.attributesOfItem(atPath: link.path))?[.size] as? Int64 ?? 0
+        XCTAssertLessThan(direct, 4096, "sanity: the link itself weighs its target's path, not its bytes")
+        XCTAssertEqual(
+            (try? fm.attributesOfItem(atPath: link.resolvingSymlinksInPath().path))?[.size] as? Int64,
+            4096,
+            "resolving is what makes the cap measure the bytes that will actually be read"
+        )
+    }
+
     func testSharedStringsStillWinWhenBothArePresent() throws {
         var zip = ZipWriter()
         zip.add("xl/sharedStrings.xml", "<sst><si><t>Umsatz Q3</t></si></sst>")
@@ -230,7 +275,11 @@ final class TextExtractionTests: XCTestCase {
 
         let text = DocumentText.text(url: url, limit: 4000)
         XCTAssertTrue(text.contains("Umsatz Q3"), "got: \(text)")
-        XCTAssertFalse(text.contains("0"), "got: \(text)")
+        // No standalone number: a bare "0" is a leaked shared-string index,
+        // while the "3" in "Q3" is part of a word. `contains("0")` would fail
+        // on any year the reader might legitimately emit one day.
+        XCTAssertNil(text.range(of: #"(?<![A-Za-z])\d+"#, options: .regularExpression),
+                     "numeric cell values must not leak, got: \(text)")
     }
 
     func testACommaInAURLPathIsNotAnOriginBoundary() {

@@ -80,10 +80,18 @@ enum DocumentText {
     /// Excel keeps every distinct cell string in one shared table — exactly
     /// the vocabulary a classifier needs (headers, names, subjects).
     private static func spreadsheetText(url: URL, limit: Int) -> String {
-        let shared = zipXMLText(url: url, entries: ["xl/sharedStrings.xml", "docProps/core.xml"],
-                                limit: limit)
-        guard shared.isEmpty else { return shared }
-        return inlineWorksheetText(url: url, limit: limit)
+        // Read separately. Reading both in one pass and falling back only when
+        // the *combined* result was empty made `docProps/core.xml` — which
+        // almost always carries a creator name, `openpyxl` included — count as
+        // evidence that the shared table had text. So for exactly the files the
+        // fallback exists for, the model got the document properties and not
+        // one cell of the sheet.
+        let strings = zipXMLText(url: url, entries: ["xl/sharedStrings.xml"], limit: limit)
+        let properties = zipXMLText(url: url, entries: ["docProps/core.xml"], limit: limit)
+        let body = strings.isEmpty ? inlineWorksheetText(url: url, limit: limit) : strings
+        if body.isEmpty { return properties }
+        if properties.isEmpty { return body }
+        return String((body + " " + properties).prefix(limit))
     }
 
     /// The fallback for exporters that skip the shared table and write every
@@ -170,15 +178,21 @@ enum DocumentText {
     }
 
     private static func sizeAllows(_ url: URL) -> Bool {
+        // Resolve first: `attributesOfItem` and `resourceValues` describe the
+        // *link*, while every reader below them — `NSAttributedString(url:)`,
+        // `ZipArchive`, `FileHandle` — follows it. A symlink to a four-gigabyte
+        // file therefore weighed a few bytes and sailed through the cap that
+        // exists to stop exactly that read.
+        let target = url.resolvingSymlinksInPath()
         // An .rtfd is a *directory*, and no resource key answers for what a
         // directory contains: `totalFileAllocatedSize` reports the folder entry
         // itself — a few kilobytes however much wrapped RTF and TIFF data the
         // bundle holds — so the cap has to add the contents up, or it does not
         // apply to the one format in this list that is a bundle.
-        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            return bundleSize(of: url, stoppingAbove: maxDocumentBytes) <= maxDocumentBytes
+        if (try? target.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            return bundleSize(of: target, stoppingAbove: maxDocumentBytes) <= maxDocumentBytes
         }
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path))?[.size] as? Int64 ?? 0
         return size <= maxDocumentBytes
     }
 

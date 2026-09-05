@@ -58,6 +58,10 @@ enum ImageText {
     }
 
     static func recognize(_ image: CGImage) -> String {
+        // One `.accurate` request is seconds of CPU that cannot be interrupted
+        // once it starts; the cheapest place to notice a stopped pass is right
+        // before it does.
+        guard !Task.isCancelled else { return "" }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -102,7 +106,11 @@ enum ImageText {
     }
 
     private static func sizeAllows(_ url: URL) -> Bool {
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0
+        // `attributesOfItem` describes the *link*; `CGImageSourceCreateWithURL`
+        // follows it. A symlink to a forty-megapixel original weighed a few
+        // bytes and passed the cap that exists to stop that decode.
+        let target = url.resolvingSymlinksInPath()
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path))?[.size] as? Int64 ?? 0
         return size <= maxImageBytes
     }
 }
