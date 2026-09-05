@@ -182,6 +182,178 @@ where a wave-3 item was still open and is now fixed.
   `main` CI runs (August) are red with expired logs; the composed branch is
   green, so this is not a code failure — re-check after the next merge.
 
-*(Sections 3.4–3.9 — the verified fleet findings for pipeline/state,
-performance, security, LLM valves, UX, visual, localization, the deterministic
-gap and product gaps — are appended below as the fleets report.)*
+### 3.4 Product findings the fleets raised **and** an adversarial verifier confirmed
+
+Seventeen survived. Each was checked against the source by a second agent whose
+instructions were to refute it; the file:line references are that agent's, not
+the finder's.
+
+**The engine's deterministic half is wrong as often as it is weak**
+
+- **[P0-13] Age and `{year}/{month}/{day}` silently mean *modification* time.**
+  `DeterministicEngine` reads `contentModificationDate` for both. Browsers,
+  mail clients, AirDrop, `unzip` and `curl` all preserve the origin's
+  `Last-Modified`, so a 2019 invoice downloaded this morning is "older than 30
+  days" on the first pass and files into `2019/`. Nothing in the UI says which
+  date is used, so the user cannot even predict it. Hazel exposes Date Added,
+  Created, Modified and Last Opened separately — engine v2 must too, and
+  should default to *date added* for age.
+- **[P0-14] Route templates throw away everything interesting.** `matches()`
+  returns `Bool` and discards the `NSTextCheckingResult`, so
+  `^Rechnung[-_ ](\d{4})-(\d{2})` cannot route to `Finanzen/{1}/{2}` — the
+  canonical Hazel rename is impossible. `expandRoute` knows five tokens: no
+  date *formats* (`{date:yyyy-MM}`), no date *sources*, no `{parent}` or
+  `{relpath}` (a file found at `watch/2020/Trip/IMG.jpg` loses that context on
+  a recursive rule), no `{counter}`, `{kind}`, `{size}`.
+- **[P0-12] Globs are anchored, the help implies they are not.** `globToRegex`
+  wraps the pattern in `^…$`, so `Screenshot`, `IMG_` and `.pdf` — exactly what
+  someone types coming from Finder or Hazel's "name contains" — match nothing.
+  The seeded template works around it with `*creenshot*`, which is proof the
+  authors know. Nothing tells the user the pattern matches zero files.
+- **[P0-16] Globs reject brace sets and character classes.** `*.{jpg,png}` and
+  `IMG_[0-9]*.jpg` are escaped into literals; a glob containing `/` can never
+  match, because matching runs on `lastPathComponent`. Silent no-ops, all of
+  them.
+- **[P0-17] Matching is Unicode-normalization-sensitive.** Filenames from HFS+
+  volumes and many apps are NFD (`Ärzte` = `A` + `U+0308` + `rzte`); a pattern
+  typed into a SwiftUI field is NFC, and ICU's regex engine does not implement
+  canonical equivalence. So `*Ärzte*` misses the file. `Sanitizer`
+  NFC-normalizes *output* already; the matcher never normalizes *input*. For a
+  German-first audience this is routine, not exotic.
+- **[P0-15] "Kind" is free text against a hand-maintained table.** The
+  placeholder advertises `image, pdf, ebook…` while the engine does a
+  dictionary lookup on the whole untrimmed lowercased string, so `image, pdf`
+  and `image ` match nothing forever. The table has no svg/avif/heic-raw,
+  no dmg/iso/pkg, no code or font kinds, and an extensionless file can never
+  have a kind. `UTType` already knows all of this, including declared types
+  from installed apps.
+
+**State that does not survive a relaunch, or a window being left open**
+
+- **[P0-2] Pause is not persisted.** It is a plain `@Published var` with no
+  `Config` field. The emergency brake pulled at 23:00 because a rule is
+  misfiling is released by the next launch — including the relaunch the update
+  checker itself offers.
+- **[P0-5] The editing lock is keyed on selection, not on editing.**
+  `editingRuleID` is non-nil whenever Settings is open with a rule selected —
+  the resting state of that window, since a rule is auto-selected on appear.
+  Leave Settings open and switch to another app for the afternoon and that rule
+  is skipped by every pass, with no way to say "I'm done, run it now".
+- **[P0-3] "Dismiss" means "until relaunch", and nothing says so.** It clears
+  `pendingActions`; the pipeline's `previewed` set still holds the key, and the
+  ledger records nothing. So the file stays gone this session and is
+  re-classified — re-paid — after a relaunch. Users expect "ignore this file"
+  or "remind me later"; this is neither.
+- **[P0-4] Two rules matching one file produce two competing Review rows.** In
+  live mode priority resolves contention because the first rule moves the file.
+  In preview mode — the default for every new rule — each rule plans
+  independently, `ingest` de-duplicates only by `(source, ruleID)`, and
+  "Apply all" executes both: the second fails with "source file vanished",
+  visible only in the activity submenu, while Review reports "Applied N
+  changes". The Priority stepper promises an arbitration the preview never
+  performs.
+
+**Cost and power awareness**
+
+- **[P0-8] There is no money cap.** The only budget is calls *per pass*; at the
+  default 60 s interval, a folder that keeps producing unclassifiable files
+  bills up to 14 400 calls a day. The spend meter is display-only — nothing
+  reads it to stop scanning. The integration branch's keyless-deferral path
+  (pre-rules still run, model-bound files defer with an activity line) is
+  exactly the mechanism a monthly cap needs; only the comparison is missing.
+- **[P0-9] Scans ignore power and time of day.** The timer loops
+  unconditionally and FSEvents fires immediately; nothing consults
+  `isLowPowerModeEnabled`, thermal state or AC status. A laptop on battery with
+  a backlog hashes, OCRs and calls out at the worst possible moment, and a
+  NAS-backed watch folder is woken every minute all night.
+- **[P0-1] launchd parity is a README promise, not a feature.** The documented
+  LaunchAgent puts the API key in a plist environment variable in plaintext
+  while the GUI keeps it in the Keychain, `Notifier` is GUI-only so a failing
+  headless run is silent apart from exit code 1, and the new `ProcessLock`
+  means the agent and the GUI cannot coexist at all. The honest target is "the
+  GUI *is* the agent".
+
+**Interface and platform manners**
+
+- **[P0-11] Notifications carry no actions, no payload, no click handler.** No
+  `categoryIdentifier`, no `userInfo`, and the delegate implements only
+  `willPresent` — clicking a banner does not even open the window. The
+  integration branch's per-pass summaries and journal batch ids are precisely
+  the payload an "Undo" button needs.
+- **[P0-6] The notification permission prompt is the first thing the app ever
+  shows** — before any window or explanation. Decline it and the "Notify about
+  filed files and failures" toggle stays on, forever, pointing nowhere.
+- **[P0-10] The app leaves a dead menu bar behind.** `revertToAccessoryIfNoOrdinaryWindows`
+  flips the activation policy back to `.accessory` without handing focus on;
+  AppKit leaves the Sortomat menu in the bar with no key window until the user
+  clicks another app.
+- **[P0-7] Spend is formatted as `String(format: "$%.4f")`.** In the German UI
+  that is a dollar sign, in front, with a decimal point — for a user who may be
+  paying in EUR or running a free local model.
+
+### 3.5 The unverified backlog
+
+Sixty-six findings survived deduplication but not verification (the
+verification fleet was cut short mid-flight). They are not asserted here; they
+are the queue `ANALYSIS.md` inherits, and the strongest of them are:
+
+*Rules and templates* — a blank rule is created **enabled**, and an empty
+prompt is accepted, so paid instruction-less calls can start as soon as folders
+are picked [P1-13]; the seeded e-book rule pairs an English prompt with a
+German-only 31-genre taxonomy [P1-14, E1-20]; the invoice and e-book templates
+ship *zero* pre-rules, so a keyless user gets nothing from them [P1-16]; one
+rule = one watched folder, so covering Downloads *and* Desktop means two
+diverging copies of the same prompt [P1-10]; there is no whole-config
+backup/restore, only single-rule packs [P1-12].
+
+*Review* — Return anywhere in the window fires "Apply all", the riskiest
+action, as the default button with no confirmation [P1-17]; "Undo" on a copy
+row silently deletes a file, with the same label and no hint the row was a copy
+[P1-18]; a nearly-right suggestion can only be applied or dismissed, never
+corrected — and a correction would be the single most valuable thing the memo
+could learn [P1-23]; the empty state says "Nothing to file right now" when the
+truth is "no rules are enabled" or "you are paused" [P1-19]; no Reveal, no
+Quick Look, no Finder tags [P1-24].
+
+*Rule editor* — the prompt is the hero and the deterministic pre-rules are
+buried ~700 pt below it, which is the pipeline upside down [P1-35]; kind and
+age take free text behind a placeholder that promises a list, so "images" or
+"30 days" fails silently [P1-34]; there is no way to test a rule against
+existing files without enabling it or paying [P1-45]; rule state is two
+independent toggles plus an unexplained coloured dot [P1-36]; pre-rule cards
+are card-in-card, invisible in light mode and sunken in dark [P1-38].
+
+*Engine* — an undone mis-filing is not forgotten by the memo, so a
+byte-identical re-arrival is filed the same wrong way automatically [E1-10];
+model answers with a leading `/` or `~` are rejected *after* payment and
+re-paid every interval forever [E1-16]; `ZipArchive` reads the whole EPUB into
+memory before checking its 200 MB cap and then copies it again [E1-14];
+Sortomat's own moves re-trigger a full pass because FSEvents paths are not
+filtered [E1-25]; model-supplied `reason` text reaches the line-based
+`activity.log` unsanitized [E1-9].
+
+*Chrome* — the app icon is full-bleed with no Apple icon-grid margin, so it
+renders about a quarter larger than every neighbour in the Dock [P1-52]; the
+brand has three unrelated greens and no codified palette [P1-53]; the update
+check steals focus with a modal alert [P1-51]; image-only buttons have no
+accessibility labels, so VoiceOver reads "plus", "minus", "trash" [P1-48].
+
+### 3.6 What the fleets got wrong
+
+Two hundred and six findings survived deduplication; **123 were refuted against
+the source** by the verification pass and never reached this document. The
+pattern is worth recording, because it is the failure mode of review fleets in
+general: most refuted items were *plausible from a diff and false in context* —
+a guard that exists three lines above the quoted range, a cap enforced by the
+caller, a "silent failure" that logs one function up. The engine fleet in
+particular produced 91 deduplicated findings and had 70 of them refuted, which
+says less about the finders than about how much of this codebase's safety
+reasoning is written where a reader skimming a hunk will not see it.
+
+Two of the review bot's rounds on the integration PR were refuted the same way
+and are recorded in the commit messages rather than here: `.filed` "is never
+inferred" (the one site that actually files a file passes it explicitly), and
+the removed/renamed L10n keys "leave orphan call sites" (every literal key in
+the module resolves). One claim was *right in a way the reviewer did not
+realize*: `URL.resourceValues(forKeys: [.fileSizeKey])` does not follow a
+symlink on Darwin, which CI proved by failing a test that asserted it does.
