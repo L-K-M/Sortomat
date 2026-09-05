@@ -89,7 +89,14 @@ struct Classification: Decodable, Equatable {
     /// because some models omit it while supplying a path.
     private static func decodeAction(_ c: KeyedDecodingContainer<CodingKeys>) -> String {
         if let s = try? c.decode(String.self, forKey: .action) {
-            return s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let action = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            // A serializer that stringifies its booleans is common enough to
+            // be worth reading: a JSON `true` already means move, and `"true"`
+            // meaning the same thing otherwise fell out of the whitelist and
+            // was skipped — safe, but not what the model said.
+            if action == "true" { return "move" }
+            if action == "false" { return "skip" }
+            return action
         }
         if let b = try? c.decode(Bool.self, forKey: .action) { return b ? "move" : "skip" }
         if let n = try? c.decode(Int.self, forKey: .action) { return n != 0 ? "move" : "skip" }
@@ -126,7 +133,14 @@ struct Classification: Decodable, Equatable {
     /// Models sometimes answer in percent (`85` or `"85%"`) instead of 0…1.
     /// Without normalizing the *numeric* form too, `85 < threshold` is never
     /// true and the low-confidence quarantine is silently defeated.
-    private static func normalizeConfidence(_ value: Double) -> Double {
+    ///
+    /// Nil for anything that isn't a finite number. `Double("nan")` parses, and
+    /// NaN survives both the scaling and the clamp (`min`/`max` return the
+    /// other operand when a comparison with NaN is false) — after which every
+    /// `confidence < threshold` test is false too, and a garbage answer reads
+    /// as full confidence. Unparseable text already means "low"; so does this.
+    private static func normalizeConfidence(_ value: Double) -> Double? {
+        guard value.isFinite else { return nil }
         let scaled = value > 1 ? value / 100 : value
         return min(max(scaled, 0), 1)
     }

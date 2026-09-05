@@ -17,8 +17,20 @@ struct ZipWriter {
     private var buffer = Data()
 
     mutating func add(_ name: String, _ contents: Data, deflate: Bool = false) {
-        let payload = deflate ? Self.deflate(contents) : contents
-        let method: UInt16 = deflate ? 8 : 0
+        // `compression_encode_buffer` answers 0 both for "the output didn't
+        // fit" and for an outright failure. Emitting that as a deflate entry
+        // writes an archive whose payload is empty, and the test then fails for
+        // a reason that has nothing to do with the reader under test — so fall
+        // back to storing the bytes instead.
+        var payload = contents
+        var method: UInt16 = 0
+        if deflate, !contents.isEmpty {
+            let compressed = Self.deflate(contents)
+            if !compressed.isEmpty {
+                payload = compressed
+                method = 8
+            }
+        }
         let offset = buffer.count
         var header = Data()
         header.le32(0x0403_4b50)   // local file header signature
@@ -90,7 +102,10 @@ struct ZipWriter {
     /// same format `ZipArchive.inflate` decodes.
     static func deflate(_ data: Data) -> Data {
         guard !data.isEmpty else { return data }
-        let capacity = data.count + 1024
+        // Deflate wraps incompressible input in stored blocks of at most 64 KiB,
+        // each costing five bytes of header — so the output can exceed the
+        // input, and a fixed 1 KiB of slack is not enough for a large fixture.
+        let capacity = data.count + data.count / 64 + 1024
         var dst = Data(count: capacity)
         let written = dst.withUnsafeMutableBytes { dstRaw -> Int in
             guard let dstBase = dstRaw.bindMemory(to: UInt8.self).baseAddress else { return 0 }

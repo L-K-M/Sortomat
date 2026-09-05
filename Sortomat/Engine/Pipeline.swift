@@ -239,7 +239,11 @@ actor Pipeline {
             // body, network) still counts against the per-check budget —
             // otherwise a backlog against a rate-limited endpoint fires one
             // paid request per file with no cap at all.
-            if error is LLMError || error is URLError { outcome.usedLLM = true }
+            // Everything except cancellation: a sanitizer rejection or a decode
+            // failure happens *after* the request was paid for, and counting
+            // only LLMError and URLError let those files cost money for free.
+            // Over-counting is the safe direction for a spend cap.
+            if !(error is CancellationError) { outcome.usedLLM = true }
             outcome.entry = ActivityEntry(
                 ok: false,
                 message: L10n.t("activity.error", rule.name, file.lastPathComponent, error.localizedDescription)
@@ -679,6 +683,12 @@ actor Pipeline {
     /// where Pages isn't installed.
     static let packageExtensions: Set<String> = [
         "pages", "numbers", "key", "rtfd", "textbundle", "sketch", "band", "bundle", "app",
+        // Launch Services only knows a bundle type if something declares it,
+        // so a Mac without the owning app sees a plain folder — and a
+        // recursive rule would file a photo library's innards one by one.
+        "photoslibrary", "aplibrary", "tvlibrary", "logicx", "fcpbundle",
+        "framework", "kext", "prefpane", "qlgenerator", "dtbase2", "lpdf",
+        "scptd", "workflow", "download", "photobooth",
     ]
 
     /// A regular file, or a package: a Pages/Numbers/Keynote document, an
