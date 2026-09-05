@@ -104,5 +104,57 @@ final class JournalTests: XCTestCase {
         let json = #"{"id":"22222222-2222-2222-2222-222222222222","date":700000000,"ruleID":"11111111-1111-1111-1111-111111111111","ruleName":"R","sourcePath":"/a","destinationPath":"/b","wasCopy":false,"reason":"r"}"#
         let entry = try JSONDecoder().decode(JournalEntry.self, from: Data(json.utf8))
         XCTAssertNil(entry.undoOf)
+        XCTAssertNil(entry.batchID)
+    }
+
+    func testUndoCopyRefusesWhenLargeCopyDivergesPastHashPrefix() throws {
+        // The divergence check must hash the *entire* content: an edit past the
+        // 4 MiB prefix (with the size unchanged) is exactly what a bounded
+        // digest misses — and what must not get the user's edits deleted.
+        let source = dir.appendingPathComponent("original/big.bin")
+        let dest = dir.appendingPathComponent("sorted/big.bin")
+        try fm.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var bytes = Data(count: 5 * 1024 * 1024)
+        try bytes.write(to: source)
+        bytes[4 * 1024 * 1024 + 512 * 1024] = 0xFF // same size, differs past 4 MiB
+        try bytes.write(to: dest)
+
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: true, reason: "r")
+        XCTAssertThrowsError(try Journal.undo(entry))
+        XCTAssertTrue(fm.fileExists(atPath: dest.path), "the diverged copy must survive")
+    }
+
+    func testLastBatchGroupsByBatchID() {
+        let ruleID = UUID()
+        let older = UUID(), newest = UUID()
+        let now = Date()
+        // Newest-first, the order `recent` returns.
+        let entries = [
+            JournalEntry(date: now, ruleID: ruleID, ruleName: "R", sourcePath: "/a1",
+                         destinationPath: "/b1", wasCopy: false, reason: "r", batchID: newest),
+            JournalEntry(date: now.addingTimeInterval(-1), ruleID: ruleID, ruleName: "R", sourcePath: "/a2",
+                         destinationPath: "/b2", wasCopy: false, reason: "r", batchID: newest),
+            JournalEntry(date: now.addingTimeInterval(-2), ruleID: ruleID, ruleName: "R", sourcePath: "/a3",
+                         destinationPath: "/b3", wasCopy: false, reason: "r", batchID: older),
+        ]
+        let batch = Journal.lastBatch(in: entries)
+        XCTAssertEqual(batch.map(\.sourcePath), ["/a1", "/a2"])
+    }
+
+    func testLastBatchFallsBackToTimeWindowForLegacyEntries() {
+        let ruleID = UUID()
+        let now = Date()
+        let entries = [
+            JournalEntry(date: now, ruleID: ruleID, ruleName: "R", sourcePath: "/a1",
+                         destinationPath: "/b1", wasCopy: false, reason: "r"),
+            JournalEntry(date: now.addingTimeInterval(-3), ruleID: ruleID, ruleName: "R", sourcePath: "/a2",
+                         destinationPath: "/b2", wasCopy: false, reason: "r"),
+            JournalEntry(date: now.addingTimeInterval(-60), ruleID: ruleID, ruleName: "R", sourcePath: "/a3",
+                         destinationPath: "/b3", wasCopy: false, reason: "r"),
+        ]
+        let batch = Journal.lastBatch(in: entries)
+        XCTAssertEqual(batch.map(\.sourcePath), ["/a1", "/a2"])
     }
 }

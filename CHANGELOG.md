@@ -5,6 +5,56 @@ All notable changes to Sortomat are documented here. The format loosely follows
 
 ## [Unreleased]
 
+### Review wave 1 (merged as #1–#16; findings in `fable-is-awesome.md`)
+
+Data safety & correctness:
+- Cross-volume moves verify the **entire content** of the copy and fail
+  closed when either side can't be hashed (previously a 4 MiB prefix, and
+  two failed reads counted as a successful verification).
+- Undo got honest: diverged copies are refused instead of deleted, undone
+  entries no longer resurrect in the History tab (journal tombstones), and
+  undo pins the restored file in the ledger so the next scan doesn't just
+  move it back.
+- A corrupt `config.json` is preserved as a timestamped backup instead of
+  being silently replaced by an empty config on the next save.
+- Percent-style numeric confidences are normalized (the quarantine
+  threshold was silently defeated), unknown model actions skip instead of
+  moving, non-retryable HTTP errors surface immediately instead of being
+  retried four times, and base URLs ending in `/v1` work (the Ollama /
+  LM Studio convention).
+- `Rule.priority` is actually honored (it was a documented no-op); the
+  per-scan LLM budget actually holds; `<style>`/`<script>` bodies and
+  split multi-byte UTF-8 characters no longer pollute the excerpts sent to
+  the model; Keychain saves update in place with checked statuses.
+
+UI & localization:
+- Review tab: a Dismiss button, an honest empty state when no API key is
+  set, refresh/apply feedback, and rule + decision-origin badges on rows;
+  both windows remember their frames.
+- Menu bar: a pending-review count badge, real disabled states, ⌘W, and
+  notifications that appear while the app is frontmost; the update checker
+  no longer strands a Dock icon, stamps its check time only on success,
+  and re-checks periodically instead of only at launch.
+- Rule deletion asks for confirmation; the launch-at-login toggle the
+  README promised exists; default names, the quarantine folder and the
+  template prompts follow the UI language (EN/DE).
+- Pre-release tags publish as GitHub pre-releases instead of becoming
+  "latest".
+
+### Review wave 2 (merged as one integration PR)
+
+- Full findings, the re-verified backlog and the branch plan live in
+  `fable-is-awesome.md`; the eighteen branches were composed in the
+  conflict-minimizing order that review computed, with the three silent-loss
+  composition hazards (W30–W32) resolved explicitly: undo hardening + batch undo, stale-plan
+  revalidation on apply, keyless deterministic sorting, engine edge cases
+  (future mtimes, dangling symlinks, fake zip EOCDs), FSEvents lifetime,
+  preview hygiene, honest notifications, monthly spend persistence, ledger
+  pruning + log rotation, rule export/import, a content-addressed decision
+  memo, and a cross-process config lock.
+
+### Earlier
+
 UX fixes from first hands-on use:
 - Installed a real **Edit menu** so ⌘X/⌘C/⌘V/⌘A/⌘Z work in text fields (a
   menu-bar agent has no menu bar of its own by default).

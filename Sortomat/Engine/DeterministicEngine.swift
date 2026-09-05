@@ -89,6 +89,13 @@ enum DeterministicEngine {
         return path
     }
 
+    /// Whether a pattern parses as a regular expression. The rule editor uses
+    /// this to flag patterns that would otherwise fail in silence — an invalid
+    /// regex simply never matches anything.
+    static func isValidRegex(_ pattern: String) -> Bool {
+        (try? NSRegularExpression(pattern: pattern)) != nil
+    }
+
     /// Translate a shell glob (`*`, `?`) to an anchored regex, escaping the rest.
     static func globToRegex(_ glob: String) -> String? {
         guard !glob.isEmpty else { return nil }

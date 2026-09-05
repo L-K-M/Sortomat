@@ -80,10 +80,10 @@ final class UpdateChecker: ObservableObject {
                 if !userInitiated, defaults.string(forKey: skipVersionKey) == release.tagName {
                     return
                 }
-                lastResult = "Update available: \(release.tagName)"
+                lastResult = L10n.t("updates.lastResult.available", release.tagName)
                 present(release: release)
             } else {
-                lastResult = "You're up to date (\(config.currentVersion))."
+                lastResult = L10n.t("updates.lastResult.upToDate", config.currentVersion)
                 if userInitiated { presentUpToDate() }
             }
         } catch {

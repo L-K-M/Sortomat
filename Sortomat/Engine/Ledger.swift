@@ -21,6 +21,9 @@ final class Ledger {
     private var entries: [String: Entry]
     private let url: URL
     private let failRetryInterval: TimeInterval
+    /// Whether anything changed since the last save — the whole-file rewrite
+    /// used to run after every pass even when nothing had.
+    private var dirty = false
 
     init(url: URL = ConfigStore.ledgerFile, failRetryInterval: TimeInterval = 1800) {
         self.url = url
@@ -42,7 +45,15 @@ final class Ledger {
     }
 
     func key(ruleID: UUID, fingerprint: String) -> String {
-        "\(ruleID.uuidString)|\(fingerprint)"
+        keyPrefix(ruleID: ruleID) + fingerprint
+    }
+
+    /// The prefix every key of one rule starts with. Callers that filter keys
+    /// by rule (the pipeline's preview set, `forget`) go through this rather
+    /// than re-spelling the separator — a format change here would otherwise
+    /// silently turn those filters into no-ops.
+    func keyPrefix(ruleID: UUID) -> String {
+        "\(ruleID.uuidString)|"
     }
 
     /// Should this (rule, file) be looked at now, or is it already accounted for?
@@ -62,22 +73,48 @@ final class Ledger {
         let retryAfter = status == .failed ? now.addingTimeInterval(failRetryInterval) : nil
         entries[key(ruleID: ruleID, fingerprint: fingerprint)] =
             Entry(status: status, date: now, retryAfter: retryAfter)
+        dirty = true
     }
 
     /// Drop entries for a rule (e.g. when it is deleted or reset).
     func forget(ruleID: UUID) {
-        let prefix = ruleID.uuidString + "|"
+        let prefix = keyPrefix(ruleID: ruleID)
+        let before = entries.count
         entries = entries.filter { !$0.key.hasPrefix(prefix) }
+        if entries.count != before { dirty = true }
+    }
+
+    /// Drop entries whose file has vanished and whose record is old. A
+    /// path|size|mtime key for a file that no longer exists can never match
+    /// again — it only grows the file forever. Entries for files that *still
+    /// exist* are always kept, however old: they are exactly the memory that
+    /// prevents re-paying for an untouched file. The age guard keeps records
+    /// for files on unmounted volumes or mid-rename from being dropped hastily.
+    func prune(olderThan: TimeInterval = 30 * 86_400, now: Date = Date()) {
+        let fm = FileManager.default
+        let before = entries.count
+        entries = entries.filter { key, entry in
+            guard now.timeIntervalSince(entry.date) > olderThan else { return true }
+            // Key layout: ruleUUID|path|size|mtime — the path may itself
+            // contain "|", so strip one component from the front, two from
+            // the back, and rejoin the middle.
+            let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+            guard parts.count >= 4 else { return false } // malformed: drop
+            let path = parts.dropFirst().dropLast(2).joined(separator: "|")
+            return fm.fileExists(atPath: path)
+        }
+        if entries.count != before { dirty = true }
     }
 
     var count: Int { entries.count }
 
     func save() {
+        guard dirty else { return }
         ConfigStore.ensureDirectory()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        if let data = try? encoder.encode(entries) {
-            try? data.write(to: url, options: .atomic)
+        if let data = try? encoder.encode(entries), (try? data.write(to: url, options: .atomic)) != nil {
+            dirty = false
         }
     }
 }

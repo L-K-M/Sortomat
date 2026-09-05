@@ -3,7 +3,8 @@ import SwiftUI
 struct GeneralTab: View {
     @EnvironmentObject private var state: AppState
     @State private var apiKey = ""
-    @State private var keySaved = false
+    /// nil = no verdict shown; true/false = the last save's actual outcome.
+    @State private var keySaveSucceeded: Bool?
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
@@ -17,15 +18,15 @@ struct GeneralTab: View {
                             : L10n.t("general.apiKey.placeholder.set"))
                     )
                     Button(L10n.t("general.apiKey.save")) {
-                        state.saveAPIKey(apiKey)
-                        apiKey = ""
-                        keySaved = true
+                        keySaveSucceeded = state.saveAPIKey(apiKey)
+                        if keySaveSucceeded == true { apiKey = "" }
                     }
                     .disabled(apiKey.isEmpty)
                 }
-                if keySaved {
-                    Text(L10n.t("general.apiKey.saved"))
-                        .font(.caption).foregroundStyle(.green)
+                if let outcome = keySaveSucceeded {
+                    Text(L10n.t(outcome ? "general.apiKey.saved" : "general.apiKey.saveFailed"))
+                        .font(.caption)
+                        .foregroundStyle(outcome ? Color.green : Color.red)
                 }
                 TextField(L10n.t("general.model"), text: $state.config.model)
                 TextField(L10n.t("general.apiBase"), text: $state.config.apiBase)
@@ -78,6 +79,12 @@ struct GeneralTab: View {
         .formStyle(.grouped)
         .padding()
         .onChange(of: state.config) { _ in state.persistAndApply() }
+        // A stale save verdict must not linger under a key being retyped —
+        // but clearing the field after a *successful* save is not typing, and
+        // used to wipe the success caption in the same update cycle.
+        .onChange(of: apiKey) { newValue in
+            if !newValue.isEmpty { keySaveSucceeded = nil }
+        }
         // The user may have toggled login items in System Settings meanwhile.
         .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
     }

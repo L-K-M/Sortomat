@@ -40,4 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Quit mid-scan used to drop every in-memory ledger record of the
+        // running pass (skips the model was just paid for) and the session's
+        // token usage.
+        state?.flushOnTerminate()
+    }
 }

@@ -23,4 +23,51 @@ final class TemplatesTests: XCTestCase {
             XCTAssertFalse(rule.name.isEmpty)
         }
     }
+
+    func testScreenshotsTemplateOnlySendsScreenshotsToTheModel() throws {
+        let rule = RuleTemplate.screenshots.makeRule()
+        // The last pre-rule must be a catch-all skip: without it, "route
+        // screenshots to the model" was a no-op (the model is the fall-through
+        // anyway) and every image in the folder was classified and paid for.
+        XCTAssertEqual(rule.preRules.last?.action, .skip)
+        XCTAssertEqual(rule.preRules.last?.pattern, "*")
+
+        func decision(for name: String) -> DeterministicEngine.Decision {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try? Data("x".utf8).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            return DeterministicEngine.evaluate(rule: rule, file: url)
+        }
+
+        XCTAssertEqual(decision(for: "Screenshot 2026-07-05 at 10.00.00.png"), .useLLM)
+        XCTAssertEqual(decision(for: "Bildschirmfoto 2026-07-05.png"), .useLLM,
+                       "the German screenshot naming must reach the model too")
+        if case .skip = decision(for: "IMG_1234.png") {} else {
+            XCTFail("a non-screenshot image must be skipped, not classified")
+        }
+    }
+
+    func testScreenshotsPromptDoesNotReferenceUnavailableImageContent() {
+        // The app sends no pixels and no OCR; the prompt must not tell the
+        // model to use "the visible text and the image description".
+        let prompt = RuleTemplate.screenshots.makeRule().prompt.lowercased()
+        XCTAssertFalse(prompt.contains("visible text"))
+        XCTAssertFalse(prompt.contains("sichtbaren text"))
+    }
+
+
+    func testLegacyAndLocalizedScreenshotNamesReachTheModel() {
+        let rule = RuleTemplate.screenshots.makeRule()
+        func decision(for name: String) -> DeterministicEngine.Decision {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try? Data("x".utf8).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            return DeterministicEngine.evaluate(rule: rule, file: url)
+        }
+        // Pre-Big-Sur macOS wrote "Screen Shot …" with a space — no "creenshot"
+        // substring, so the catch-all skip swallowed those files entirely.
+        XCTAssertEqual(decision(for: "Screen Shot 2019-04-01 at 10.00.00.png"), .useLLM)
+        XCTAssertEqual(decision(for: "Capture d'écran 2024-01-01.png"), .useLLM)
+        XCTAssertEqual(decision(for: "Captura de pantalla 2024-01-01.png"), .useLLM)
+    }
 }

@@ -47,13 +47,53 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
                 enabled: false,
                 prompt: Self.screenshotPrompt,
                 extensions: ["png", "jpg", "jpeg", "heic"],
+                // The old single pre-rule sent screenshot-named files to the
+                // LLM — which is the fall-through anyway, so it changed
+                // nothing: every image in the folder was classified (and paid
+                // for). Now only screenshot-named files (English and German
+                // conventions) reach the model; the catch-all skip keeps
+                // everything else off the paid path.
                 preRules: [
                     PreRule(
                         name: "Screenshots",
                         match: .glob,
                         pattern: "*creenshot*",
                         action: .useLLM
-                    )
+                    ),
+                    PreRule(
+                        name: "Bildschirmfotos",
+                        match: .glob,
+                        pattern: "*ildschirmfoto*",
+                        action: .useLLM
+                    ),
+                    // macOS before Big Sur wrote "Screen Shot 2024-01-01 at …"
+                    // with a space, which contains no "creenshot" substring —
+                    // without this those files fall into the catch-all skip
+                    // below and are never classified.
+                    PreRule(
+                        name: "Screen Shot (legacy)",
+                        match: .glob,
+                        pattern: "*creen Shot*",
+                        action: .useLLM
+                    ),
+                    PreRule(
+                        name: "Capture d'écran",
+                        match: .glob,
+                        pattern: "*apture d*cran*",
+                        action: .useLLM
+                    ),
+                    PreRule(
+                        name: "Captura de pantalla",
+                        match: .glob,
+                        pattern: "*aptura de pantalla*",
+                        action: .useLLM
+                    ),
+                    PreRule(
+                        name: L10n.t("template.screenshots.preSkip"),
+                        match: .glob,
+                        pattern: "*",
+                        action: .skip
+                    ),
                 ],
                 dryRun: true
             )

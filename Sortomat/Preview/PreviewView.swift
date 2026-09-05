@@ -67,7 +67,7 @@ private struct ReviewTab: View {
             Button(L10n.t("preview.dismiss")) {
                 let plans = state.pendingActions.filter { selected.contains($0.id) }
                 plans.forEach { state.dismiss($0) }
-                status = L10n.t("preview.dismissed", plans.count)
+                status = L10n.plural("preview.dismissed", plans.count)
                 selected.removeAll()
             }
             .disabled(selected.isEmpty || busy)
@@ -91,7 +91,7 @@ private struct ReviewTab: View {
             await state.apply(plans)
             selected.removeAll()
             busy = false
-            status = L10n.t("preview.applied", plans.count)
+            status = L10n.plural("preview.applied", plans.count)
         }
     }
 
@@ -183,6 +183,10 @@ private struct HistoryTab: View {
     @EnvironmentObject private var state: AppState
     @State private var entries: [JournalEntry] = []
     @State private var error: String?
+    @State private var status: String?
+    /// Undo can hash a large copy's full content; while one runs, the buttons
+    /// must not accept a second click (a double-undo can only fail noisily).
+    @State private var busy = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -204,6 +208,7 @@ private struct HistoryTab: View {
                             Spacer()
                             Button(L10n.t("journal.undo")) { undo(entry) }
                                 .buttonStyle(.borderless)
+                                .disabled(busy)
                         }
                     }
                 }
@@ -214,7 +219,15 @@ private struct HistoryTab: View {
             Divider()
             HStack {
                 Button(L10n.t("preview.refresh")) { reload() }
+                    .disabled(busy)
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else if let status {
+                    Text(status).font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
+                Button(L10n.t("journal.undoAll")) { undoLastBatch() }
+                    .disabled(entries.isEmpty || busy)
             }
             .padding(8)
         }
@@ -227,14 +240,32 @@ private struct HistoryTab: View {
     }
 
     private func undo(_ entry: JournalEntry) {
+        guard !busy else { return }
         Task { @MainActor in
+            busy = true
+            defer { busy = false }
             do {
                 // Via AppState so the ledger learns about the restored file —
                 // otherwise the next scan would just move it back.
                 try await state.undo(entry)
                 entries.removeAll { $0.id == entry.id }
+                status = L10n.t("journal.undone", entry.destination.lastPathComponent)
             } catch {
                 self.error = L10n.t("journal.undoFailed", entry.destination.lastPathComponent, error.localizedDescription)
+            }
+        }
+    }
+
+    private func undoLastBatch() {
+        guard !busy else { return }
+        Task { @MainActor in
+            busy = true
+            defer { busy = false }
+            let result = await state.undoLastBatch()
+            reload()
+            status = L10n.plural("journal.undoBatchDone", result.undone)
+            if result.failed > 0 {
+                error = L10n.plural("journal.undoBatchFailed", result.failed)
             }
         }
     }

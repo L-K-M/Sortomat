@@ -118,15 +118,25 @@ struct ZipArchive {
     }
 
     /// Scan backwards for the End-Of-Central-Directory signature (`PK\5\6`).
+    /// A candidate only wins outright if its comment-length field reaches
+    /// exactly to the end of the file — a *fake* signature embedded in the
+    /// real EOCD's comment won't line up, so the scan keeps going instead of
+    /// rejecting a perfectly valid archive. Archives with trailing junk (no
+    /// candidate validates) fall back to the first signature found.
     private static func findEOCD(_ bytes: [UInt8]) -> Int? {
         guard bytes.count >= 22 else { return nil }
         var i = bytes.count - 22
         let lowerBound = max(0, bytes.count - 22 - 65_536) // max comment length
+        var firstSignature: Int?
         while i >= lowerBound {
-            if u32(bytes, i) == 0x0605_4b50 { return i }
+            if u32(bytes, i) == 0x0605_4b50 {
+                let commentLen = Int(u16(bytes, i + 20))
+                if i + 22 + commentLen == bytes.count { return i }
+                if firstSignature == nil { firstSignature = i }
+            }
             i -= 1
         }
-        return nil
+        return firstSignature
     }
 
     private static func inflate(_ input: [UInt8], expectedSize: Int) -> Data? {

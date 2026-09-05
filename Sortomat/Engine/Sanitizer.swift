@@ -30,8 +30,10 @@ enum Sanitizer {
         cleaned = String(cleaned.prefix(maxLength))
             .trimmingCharacters(in: CharacterSet(charactersIn: " ."))
         // Never let a component become empty, "." or ".." after sanitizing.
+        // The fallback name follows the UI language (it used to be German for
+        // everyone).
         if cleaned.isEmpty || cleaned == "." || cleaned == ".." {
-            return "Unbekannt"
+            return L10n.t("component.unknown")
         }
         return cleaned
     }
