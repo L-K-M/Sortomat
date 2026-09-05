@@ -242,6 +242,10 @@ public enum L10n {
         "activity.stalePlan": "[%@] Skipped %@: the file changed after this suggestion was made — refresh the preview.",
         "activity.keyDeferred": "[%@] %d file(s) need the model, but no API key is set — pre-rules still ran.",
 
+        // Decision memo
+        "memo.remembered": "%@ · remembered from an identical file",
+        "memo.rememberedBare": "Remembered from an identical file",
+
         // Errors
         "error.unsafePath": "Unsafe destination path: %@",
         "error.tooManyCollisions": "Too many name collisions: %@",
@@ -504,6 +508,9 @@ public enum L10n {
         "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
         "activity.stalePlan": "[%@] Übersprungen: %@ wurde seit dem Vorschlag geändert – Vorschau aktualisieren.",
         "activity.keyDeferred": "[%@] %d Datei(en) benötigen das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
+
+        "memo.remembered": "%@ · von einer identischen Datei übernommen",
+        "memo.rememberedBare": "Von einer identischen Datei übernommen",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",
         "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",
