@@ -79,6 +79,17 @@ public struct PreRule: Codable, Identifiable, Equatable, Sendable {
 
 /// One watched folder + how to file its new contents away.
 public struct Rule: Codable, Identifiable, Equatable, Sendable {
+    /// The config schema this build writes. 1 = pre-rules only (legacy).
+    public static let currentSchema = 2
+
+    /// What happens to a file no step claimed.
+    public enum Fallback: String, Codable, Sendable, CaseIterable {
+        case skip
+        /// Legacy behaviour: anything unclaimed goes to the model.
+        case askModel
+        case quarantine
+    }
+
     public var id: UUID
     public var name: String
     public var enabled: Bool
@@ -107,6 +118,18 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
     public var confidenceThreshold: Double
     /// New rules preview (never touch files) until the user disables this.
     public var dryRun: Bool
+    /// 1 when this rule was loaded from a config written before steps existed,
+    /// 2 once this build has written it.
+    public var schemaVersion: Int
+    /// The ordered "if … then …" list. Empty on a legacy rule until migration.
+    public var steps: [RuleStep]
+    /// What happens to a file no step claimed.
+    public var fallback: Fallback
+    /// Extra folders (besides `targetPath`) an action's `root` may name. A
+    /// destination can only ever leave the target folder through a root the
+    /// user typed here, and `Sanitizer.destination` still confines the
+    /// rendered path inside whichever root was chosen.
+    public var destinationRoots: [DestinationRoot]
 
     public init(
         id: UUID = UUID(),
@@ -124,7 +147,11 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         taxonomy: [String] = [],
         quarantineSubfolder: String = L10n.t("rule.defaultQuarantine"),
         confidenceThreshold: Double = 0,
-        dryRun: Bool = false
+        dryRun: Bool = false,
+        schemaVersion: Int = Rule.currentSchema,
+        steps: [RuleStep] = [],
+        fallback: Fallback = .askModel,
+        destinationRoots: [DestinationRoot] = []
     ) {
         self.id = id
         self.name = name
@@ -142,6 +169,10 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         self.quarantineSubfolder = quarantineSubfolder
         self.confidenceThreshold = confidenceThreshold
         self.dryRun = dryRun
+        self.schemaVersion = schemaVersion
+        self.steps = steps
+        self.fallback = fallback
+        self.destinationRoots = destinationRoots
     }
 
     public init(from decoder: Decoder) throws {
@@ -162,6 +193,17 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         quarantineSubfolder = try c.decodeIfPresent(String.self, forKey: .quarantineSubfolder) ?? L10n.t("rule.defaultQuarantine")
         confidenceThreshold = try c.decodeIfPresent(Double.self, forKey: .confidenceThreshold) ?? 0
         dryRun = try c.decodeIfPresent(Bool.self, forKey: .dryRun) ?? false
+        // A config written before this build has no schema key and *is* a
+        // legacy config, so the default here is 1 rather than currentSchema.
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        steps = try c.decodeIfPresent([RuleStep].self, forKey: .steps) ?? []
+        // Decoded as a raw string and mapped, never as the enum directly:
+        // synthesized `Decodable` for a String enum *throws* on an unknown
+        // value, and one such value would send the whole config to
+        // `config.json.corrupt-…`.
+        let fallbackRaw = try c.decodeIfPresent(String.self, forKey: .fallback) ?? ""
+        fallback = Fallback(rawValue: fallbackRaw) ?? .askModel
+        destinationRoots = try c.decodeIfPresent([DestinationRoot].self, forKey: .destinationRoots) ?? []
     }
 }
 

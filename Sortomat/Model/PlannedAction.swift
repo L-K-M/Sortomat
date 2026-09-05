@@ -19,6 +19,8 @@ struct PlannedAction: Identifiable, Equatable {
         case taxonomy      // model answered but was constrained/redirected by taxonomy
         case confidence    // routed to quarantine for low confidence
         case system        // duplicate/skip decided locally
+        case step          // an engine-v2 step claimed the file
+        case fallback      // no step matched; rule.fallback decided
     }
 
     let id = UUID()
