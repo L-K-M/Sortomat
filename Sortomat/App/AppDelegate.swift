@@ -36,6 +36,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onCheckForUpdates: { [weak self] in Task { await self?.updateChecker.check(userInitiated: true) } }
         )
 
+        // What the buttons on a notification do. Installed before the first
+        // pass can post one.
+        Notifier.handler = { [weak self] action in
+            guard let self, let state = self.state else { return }
+            switch action {
+            case .undo(let batch):
+                Task { await state.undo(batch: batch) }
+            case .reveal(let url):
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            case .openLog:
+                NSWorkspace.shared.open(ConfigStore.logFile)
+            case .open:
+                self.previewWindow.show()
+            }
+        }
+
         updateChecker.checkOnLaunch()
     }
 

@@ -436,7 +436,7 @@ actor Pipeline {
                     ))
                     return ActivityEntry(ok: true,
                                          message: filedMessage(plan, finalURL: url, target: target, name: name),
-                                         kind: .filed)
+                                         kind: .filed, placed: url)
                 case .duplicate(let url):
                     ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .done)
                     return ActivityEntry(ok: true, message: L10n.t("activity.duplicate", rule.name, name, url.lastPathComponent))

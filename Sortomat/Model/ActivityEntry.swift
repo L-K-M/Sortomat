@@ -15,12 +15,18 @@ struct ActivityEntry: Identifiable, Equatable {
     let ok: Bool
     let message: String
     let kind: Kind
+    /// Where the file actually landed, for a `.filed` entry. The message is a
+    /// sentence for a log; a notification that offers "Show in Finder" needs
+    /// the path itself, and re-parsing it out of the sentence would break in
+    /// German first.
+    let placed: URL?
 
-    init(ok: Bool, message: String, date: Date = Date(), kind: Kind? = nil) {
+    init(ok: Bool, message: String, date: Date = Date(), kind: Kind? = nil, placed: URL? = nil) {
         self.ok = ok
         self.message = message
         self.date = date
         self.kind = kind ?? (ok ? .info : .failed)
+        self.placed = placed
     }
 }
 

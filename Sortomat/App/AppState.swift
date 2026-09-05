@@ -290,7 +290,7 @@ final class AppState: ObservableObject {
                 ingest(result)
                 passResults.append(result)
             }
-            notify(pass: passResults)
+            notify(pass: passResults, batch: batchID)
             await pipeline.persist()
             pruneStalePending()
             persistSpend()
@@ -356,13 +356,16 @@ final class AppState: ObservableObject {
     /// notifying from `ingest` produced once more than one rule was active.
     /// A missing watch folder alerts once per outage; the log still records
     /// every pass, and `ingest` re-arms the alert when the folder returns.
-    private func notify(pass results: [ScanResult]) {
+    private func notify(pass results: [ScanResult], batch: UUID?) {
         guard config.notificationsEnabled else { return }
         let entries = results.flatMap(\.entries)
 
-        let filed = entries.filter { $0.kind == .filed }.count
-        if filed > 0 {
-            Notifier.post(title: "Sortomat", body: L10n.plural("notify.filed", filed))
+        let filed = entries.filter { $0.kind == .filed }
+        if !filed.isEmpty {
+            // The banner carries Undo and Show in Finder, so it needs the paths
+            // as well as the count — "Sortomat / Filed 5 files." told you
+            // something had happened and nothing about what.
+            Notifier.postFiled(filed.compactMap(\.placed), count: filed.count, batch: batch)
         }
 
         let failures = entries.filter { $0.kind == .failed }
@@ -370,7 +373,7 @@ final class AppState: ObservableObject {
             let body = failures.count == 1
                 ? first.message
                 : L10n.plural("notify.failuresMore", failures.count - 1, first.message)
-            Notifier.post(title: "Sortomat", body: body)
+            Notifier.postFailed(count: failures.count, message: body)
         }
 
         // Outages are their own bucket so a folder that stays missing doesn't
@@ -398,7 +401,8 @@ final class AppState: ObservableObject {
             ingest(result)
             passResults.append(result)
         }
-        notify(pass: passResults)
+        // A refreshed preview files nothing, so there is no batch to undo.
+        notify(pass: passResults, batch: nil)
         pruneStalePending()
         // A preview can spend real tokens; without this the meter only reached
         // disk on the next scan pass or at quit.
@@ -476,8 +480,21 @@ final class AppState: ObservableObject {
         // folder can exceed it, and `lastBatch` would then reverse part of the
         // batch while reporting the whole thing undone.
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
+        return await reverse(Journal.lastBatch(in: entries))
+    }
+
+    /// Undo one *named* pass. The Undo button on a notification has to reverse
+    /// the pass that notification is about — a banner from ten minutes ago
+    /// must not quietly undo whatever happened since.
+    @discardableResult
+    func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
+        let entries = await Task.detached { Journal.recent(limit: .max) }.value
+        return await reverse(entries.filter { $0.batchID == id })
+    }
+
+    private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {
         var undone = 0, failed = 0
-        for entry in Journal.lastBatch(in: entries) {
+        for entry in entries {
             do {
                 try await undo(entry, persisting: false)
                 undone += 1

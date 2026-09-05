@@ -274,8 +274,15 @@ public enum L10n {
         "memo.rememberedBare": "Remembered from an identical file",
 
         // Notifications
-        "notify.filed.one": "Filed 1 file.",
-        "notify.filed.other": "Filed %d files.",
+        "notify.filed.one": "Filed 1 file",
+        "notify.filed.other": "Filed %d files",
+        "notify.failed.one": "1 file couldn't be filed",
+        "notify.failed.other": "%d files couldn't be filed",
+        "notify.andMore.one": "and 1 more",
+        "notify.andMore.other": "and %d more",
+        "notify.action.undo": "Undo",
+        "notify.action.reveal": "Show in Finder",
+        "notify.action.log": "Open log",
         "notify.failuresMore.one": "%2$@ (and %1$d more failure)",
         "notify.failuresMore.other": "%2$@ (and %1$d more failures)",
 
@@ -551,8 +558,15 @@ public enum L10n {
         "memo.remembered": "%@ · von einer identischen Datei übernommen",
         "memo.rememberedBare": "Von einer identischen Datei übernommen",
 
-        "notify.filed.one": "1 Datei einsortiert.",
-        "notify.filed.other": "%d Dateien einsortiert.",
+        "notify.filed.one": "1 Datei einsortiert",
+        "notify.filed.other": "%d Dateien einsortiert",
+        "notify.failed.one": "1 Datei konnte nicht abgelegt werden",
+        "notify.failed.other": "%d Dateien konnten nicht abgelegt werden",
+        "notify.andMore.one": "und 1 weitere",
+        "notify.andMore.other": "und %d weitere",
+        "notify.action.undo": "Rückgängig",
+        "notify.action.reveal": "Im Finder zeigen",
+        "notify.action.log": "Protokoll öffnen",
         "notify.failuresMore.one": "%2$@ (und %1$d weiterer Fehler)",
         "notify.failuresMore.other": "%2$@ (und %1$d weitere Fehler)",
 
