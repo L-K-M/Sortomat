@@ -147,10 +147,13 @@ actor Pipeline {
             )
             outcome.usage = decision.usage
             outcome.usedLLM = decision.usedLLM
-            guard let plan = decision.plan else {
+            guard var plan = decision.plan else {
                 outcome.budgetDeferred = true
                 return outcome
             }
+            // Stamp what the decision was *about*, so apply can refuse if the
+            // file changes between preview and approval.
+            plan.fingerprint = fingerprint
 
             if previewing {
                 // Surface for review; remember so we don't re-classify next interval.
@@ -289,6 +292,16 @@ actor Pipeline {
         case .move, .copy, .quarantine:
             guard let destination = plan.destination else {
                 return ActivityEntry(ok: false, message: L10n.t("error.missingPath"))
+            }
+            // The plan was computed for a specific file state; if the content
+            // changed since (edited, replaced, re-downloaded), executing the
+            // stale suggestion would file the *new* file under the *old*
+            // decision. Leave it for the next scan to re-decide instead.
+            if let expected = plan.fingerprint, expected != fingerprint {
+                return ActivityEntry(
+                    ok: false,
+                    message: L10n.t("activity.stalePlan", rule.name, name)
+                )
             }
             do {
                 let outcome = try Mover.place(
