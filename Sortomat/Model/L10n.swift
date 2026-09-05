@@ -376,6 +376,12 @@ public enum L10n {
         "process.lockWarning": "Warning: another Sortomat process holds this configuration; concurrent runs may conflict.",
 
         // Templates
+        "template.tidy.title": "Tidy up by kind",
+        "template.tidy.summary": "Sort images, documents, media and archives into folders. Needs no API key.",
+        "template.tidy.folder.images": "Images",
+        "template.tidy.folder.documents": "Documents",
+        "template.tidy.folder.media": "Media",
+        "template.tidy.folder.archives": "Archives",
         "template.ebooks.title": "E-books",
         "template.ebooks.summary": "Sort EPUBs into Genre / Author / Title.",
         "template.ebooks.prompt": """
@@ -769,6 +775,12 @@ public enum L10n {
         "process.locked": "Ein anderer Sortomat-Prozess verwendet diese Konfiguration – Abbruch, um dessen Aufzeichnungen nicht zu überschreiben.",
         "process.lockWarning": "Warnung: Ein anderer Sortomat-Prozess hält diese Konfiguration; gleichzeitige Läufe können kollidieren.",
 
+        "template.tidy.title": "Nach Art aufräumen",
+        "template.tidy.summary": "Sortiert Bilder, Dokumente, Medien und Archive in Ordner. Braucht keinen API-Schlüssel.",
+        "template.tidy.folder.images": "Bilder",
+        "template.tidy.folder.documents": "Dokumente",
+        "template.tidy.folder.media": "Medien",
+        "template.tidy.folder.archives": "Archive",
         "template.ebooks.title": "E-Books",
         "template.ebooks.summary": "EPUBs nach Genre / Autor / Titel sortieren.",
         "template.ebooks.prompt": """

@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import Sortomat
 
@@ -69,5 +70,71 @@ final class TemplatesTests: XCTestCase {
         XCTAssertEqual(decision(for: "Screen Shot 2019-04-01 at 10.00.00.png"), .useLLM)
         XCTAssertEqual(decision(for: "Capture d'écran 2024-01-01.png"), .useLLM)
         XCTAssertEqual(decision(for: "Captura de pantalla 2024-01-01.png"), .useLLM)
+    }
+
+    // MARK: - The one template that needs no key
+
+    /// A stub fact source, so what the tidy template decides is pinned without
+    /// a file system and without Launch Services.
+    private struct Kinded: FactSource {
+        var resolved: Kind
+        func kind() -> Kind? { resolved }
+    }
+
+    private func tidyPlacement(_ name: String, kind: Kind) -> Placement? {
+        let rule = RuleTemplate.tidy.makeRule()
+        let root = URL(fileURLWithPath: "/watch")
+        let facts = FileFacts(url: root.appendingPathComponent(name), watchRoot: root,
+                              source: Kinded(resolved: kind))
+        let context = RuleEvaluator.Context(rule: rule, facts: facts,
+                                            timeZone: TimeZone(identifier: "UTC")!,
+                                            allowModel: false)
+        guard case .decided(let placement, _) = RuleEvaluator.evaluate(context) else { return nil }
+        return placement
+    }
+
+    func testTheTidyTemplateFilesByKindWithoutAModel() throws {
+        let image = try XCTUnwrap(tidyPlacement("holiday.png", kind: .image))
+        XCTAssertEqual(image.operation, .move)
+        XCTAssertEqual(image.relativePath?.string(),
+                       "\(L10n.t("template.tidy.folder.images"))/holiday.png")
+
+        let document = try XCTUnwrap(tidyPlacement("lease.pdf", kind: .pdf))
+        XCTAssertEqual(document.relativePath?.string(),
+                       "\(L10n.t("template.tidy.folder.documents"))/lease.pdf")
+
+        let archive = try XCTUnwrap(tidyPlacement("backup.zip", kind: .archive))
+        XCTAssertEqual(archive.relativePath?.string(),
+                       "\(L10n.t("template.tidy.folder.archives"))/backup.zip")
+    }
+
+    func testTheTidyTemplateLeavesWhatItDoesNotRecognizeAlone() throws {
+        // The fallback is `skip`, not `askModel`: a tidy-up rule that starts
+        // spending money on the files it did not understand would be the
+        // opposite of what it says on the tin.
+        let rule = RuleTemplate.tidy.makeRule()
+        XCTAssertEqual(rule.fallback, .skip)
+        XCTAssertTrue(rule.prompt.isEmpty, "nothing here should reach the model")
+        XCTAssertTrue(rule.taxonomy.isEmpty)
+
+        let other = try XCTUnwrap(tidyPlacement("thing.xyz", kind: .other))
+        XCTAssertEqual(other.operation, .skip)
+        XCTAssertNil(other.relativePath)
+    }
+
+    func testEveryTidyStepKeepsTheFileName() {
+        // The one thing a tidy-up rule must never get wrong.
+        for step in RuleTemplate.tidySteps {
+            let template = step.placement?.template ?? ""
+            XCTAssertTrue(template.hasSuffix("/{name}"), "\(step.name): «\(template)»")
+        }
+    }
+
+    func testTheTidyTemplatePassesItsOwnValidator() {
+        var rule = RuleTemplate.tidy.makeRule()
+        rule.watchPath = "~/Downloads"
+        rule.targetPath = "~/Downloads"
+        XCTAssertEqual(RuleValidator.findings(for: rule), [],
+                       "a template must not ship with something to complain about")
     }
 }
