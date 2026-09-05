@@ -253,7 +253,7 @@ enum ConditionEvaluator {
     private static func isEmpty(_ value: FactValue) -> Bool {
         switch value {
         case .string(let text): return text.trimmingCharacters(in: .whitespaces).isEmpty
-        case .strings(let values): return list.isEmpty
+        case .strings(let values): return values.isEmpty
         case .number(let number): return number == 0
         case .bool(let flag): return !flag
         case .date: return false
