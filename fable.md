@@ -357,3 +357,145 @@ the removed/renamed L10n keys "leave orphan call sites" (every literal key in
 the module resolves). One claim was *right in a way the reviewer did not
 realize*: `URL.resourceValues(forKeys: [.fileSizeKey])` does not follow a
 symlink on Darwin, which CI proved by failing a test that asserted it does.
+
+
+## 5. The interface
+
+Three independent designs were produced against the same brief and the same
+constraints (macOS 13 SDK floor, SwiftUI inside AppKit windows, no
+dependencies, CI as the only compiler), then synthesized. The synthesis is
+`designs/ui-SYNTHESIS.md`; what follows is the decision record.
+
+**The product is the list of things it wants to do, not a settings form.**
+Today the app's only real window is a `TabView` of settings, and the thing a
+user actually needs — "here is what I would do with your files, is that right?"
+— lives in a second window called *Preview changes* that nothing points at.
+That inverts. The new main window (`⌘0`, `NSWindowController` +
+`NSToolbar` + `NSSplitViewController`) opens on an **Inbox**, and the rule
+editor is the second thing.
+
+The eleven decisions that settle the rest:
+
+1. **The engine contract is engine v2's**: a rule stays "one watched folder →
+   one target folder" and gains `steps: [RuleStep]`. No `WatchedFolder` type,
+   no splitting one rule into several. `rule.id` is the key for the ledger, the
+   decision memo, the journal, preview memory and rule packs; keeping it intact
+   is what makes the migration lossless and keeps "your 2 rules became 5" from
+   ever happening.
+2. **AppKit shell, SwiftUI panes.** No `NavigationSplitView`, no SwiftUI
+   `.toolbar`, no `.searchable` — those three are the least predictable surface
+   inside an `NSHostingController` on the 13.0 floor, and this session cannot
+   run a compiler.
+3. **The Inbox is the home screen** and the default sidebar selection.
+4. **"Why" is a bottom pane** (`VSplitView`) inside the Inbox, plus a popover
+   everywhere else — never a third column (`.inspector` is macOS 14).
+5. **Destination and rename fields are a monospaced `TextField` + a token menu
+   + a live "e.g." line.** `NSTokenField` chips are a later, flag-gated
+   upgrade: the example line carries most of the value at a fraction of the
+   risk.
+6. **Rows reorder by `⌘⌥↑/↓` and context menu;** drag is polish added last,
+   and it is the accessible path anyway.
+7. **Nested condition groups are a recursive `VStack` with depth rails** —
+   never a nested `List`.
+8. **"Always do this" inserts a deterministic step into the same rule.** The
+   file stops costing a model call, the rule's history stays attached, and the
+   sidebar does not grow.
+9. **Snooze reuses `Ledger.Status.failed(retryAfter:)`** plus a small
+   `snoozed.json`; no new ledger status is required.
+10. **No "Parked"/"Unsure" sidebar section.** Quarantine plans are Inbox rows
+    marked *Unsure* whose destination is the unsure folder — a destination is
+    not a place in the app.
+11. **Settings is a separate `⌘,` window** (`NSTabViewController(tabStyle:
+    .toolbar)`); the main window never shows an API-key field.
+
+**The words change too**, everywhere the user can read them (the old ones
+survive in code, logs and the CLI): *Preview changes* → **Inbox**; `dryRun` →
+the rule mode **Ask first**; `enabled && !dryRun` → **Automatic**; pre-rule →
+**step**; `prompt` → **Instruction**; `taxonomy` → **Allowed folders**;
+quarantine → **Unsure folder**; `confidenceThreshold` → **How sure it must
+be**; confidence → a four-step heat scale (**Certain · Sure · Probably ·
+Unsure**). *Dry run*, *taxonomy*, *quarantine*, *pre-rule* and *LLM* are never
+shown again.
+
+Also landing with it: a first-run **Welcome** window (four steps) so the app
+stops being invisible on launch [H-D]; a **template gallery** sheet; provider
+presets with a **Test connection** button [H-E, P1-28]; a menu-bar **status
+popover** that replaces the un-wrappable activity submenu [H-H] and accepts
+**dropped files** in a "what would happen?" mode; **actionable notifications**
+with Undo [P0-11]; and a per-rule **Try it** pane that answers "does this match
+anything?" without enabling the rule or paying for a call [P1-45].
+
+
+## 6. Ideas worth having
+
+Three idea panels ran against the same brief — *delight*, *deterministic
+power*, *approachability* — and produced thirty-six proposals with effort and
+"wow" estimates. The ones that survive a second look, in the order I would
+build them.
+
+**They make the deterministic engine genuinely better**
+
+- **`{ask:genre}` — the model as a token inside a deterministic template.**
+  `Bücher/{ask:genre}/{author}.{ext}` is a rule that is deterministic
+  everywhere except one slot, and the slot is the only thing anyone pays for.
+  It collapses the current "either a pre-rule or the model" fork into a
+  gradient, and it is the single most Sortomat-shaped idea in the set. (M)
+- **Smart attributes and token filters.** `{date:added|yyyy-MM}`,
+  `{amount}`, `{iban}`, `{invoiceNumber}` — extracted by the engine so users
+  never write a regex for the five things everyone extracts. (M)
+- **Rule examples as regression tests.** Every rule keeps a handful of "this
+  file → this destination" examples; `sortomat test` (and a green/red strip in
+  the editor) re-runs them. Editing a rule stops being scary because the rule
+  can prove it still does what it did. (M)
+- **Carried captures and `continue`.** A step that matches can hand its
+  captures to the next step instead of ending the pass — staged pipelines
+  ("strip the vendor prefix, *then* file by year") without one giant regex. (M)
+- **Backfill mode.** Point it at a folder with 8 000 files, get a coverage
+  report ("4 100 of these match a rule deterministically"), approve by bucket,
+  resume where it stopped. This is the difference between a tool for new files
+  and a tool for the mess you already have. (L)
+
+**They make it approachable**
+
+- **Describe it, don't configure it.** Type "put invoices from Amazon in
+  Finanzen/2026" and get a *draft rule* — conditions, actions and destination
+  filled in, every field editable, nothing saved until the user looks at it.
+  One model call, at rule-writing time, to avoid a thousand at filing time. (L)
+- **The fill-in-the-blanks editor.** The summary sentence *is* the control:
+  every underlined fragment is a popover. This is the honest version of "the
+  rule is a sentence" — the app's own tagline, currently contradicted by the
+  editor. (L)
+- **"Your folder right now."** A live pane beside the editor: the actual files
+  in the watched folder, each showing what this rule would do with it as you
+  type. It answers the question every rule editor in the world dodges — *does
+  this match anything?* (M)
+- **Imagine a file.** Type a filename that does not exist and watch the rule
+  evaluate against it. Free, instant, and the fastest way to learn a pattern
+  language. (S)
+- **Drop a folder on Sortomat and it profiles it** — 60 % PDFs named
+  `Rechnung_*`, 30 % screenshots — and proposes starter rules from what it
+  found. The first-run experience writes itself. (M)
+- **The trust dial:** *Ask me first · Do it and tell me · Do it quietly.* Three
+  words replace two booleans and one coloured dot. (S)
+- **"Why isn't anything happening?"** A readiness checklist that never nags and
+  always answers: no rules enabled, paused, no key, watched folder missing,
+  everything already filed. Today the answer is silence. (M)
+
+**They make it a pleasure**
+
+- **The receipt.** A small tear-off ticket after an automatic filing: what
+  moved, why, and an Undo that stays valid for a minute. It turns the app's
+  most anxious moment — "it did something while I wasn't looking" — into its
+  most reassuring one. (M)
+- **Ghost example.** The destination template renders against a real file from
+  the folder, live, as you type. Cheap, and it removes an entire class of
+  "why did it go there?". (M)
+- **Rewind.** Drag the History timeline backwards and watch filings undo in
+  batches. Undo as a *place*, not a button. (L)
+- **Clean streak.** How many days in a row your Downloads folder ended empty.
+  Trivial, and it is the only part of the app that will ever make someone
+  smile on purpose. (S)
+- **"Where did it go?"** A menu-bar search over everything Sortomat ever filed
+  — the journal already holds every answer; nothing reads it back. (S)
+- **Finder Quick Action: "File with Sortomat."** Any file, anywhere,
+  right-click, filed by whichever rule claims it. (M)
