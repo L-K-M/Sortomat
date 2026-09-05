@@ -98,11 +98,25 @@ enum FileContext {
             ("Authors (metadata)", str(kMDItemAuthors)),
             ("Album/Work", str(kMDItemAlbum)),
             ("Description (metadata)", String(str(kMDItemDescription).prefix(800))),
-            ("Downloaded from", str(kMDItemWhereFroms)),
+            ("Downloaded from", withoutQuery(str(kMDItemWhereFroms))),
         ]
         let text = str(kMDItemTextContent)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return (fields, String(text.prefix(sampleLimit)))
+    }
+
+    /// A download URL cut at its query string. Where a file came from is worth
+    /// knowing — a bank's domain files differently from a camera's — but the
+    /// query routinely carries a credential: presigned S3 links, OAuth
+    /// redirects and share links all put a token there, and none of it helps
+    /// decide a folder. Spotlight stores a comma-joined list when a file was
+    /// downloaded more than once, so each entry is cut separately.
+    static func withoutQuery(_ value: String) -> String {
+        let parts = value.split(separator: ",", omittingEmptySubsequences: false)
+        let trimmed = parts.map { part -> Substring in
+            part.drop(while: { $0 == " " }).prefix(while: { $0 != "?" && $0 != "#" })
+        }
+        return trimmed.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
     // MARK: - Content extraction
@@ -150,6 +164,13 @@ enum FileContext {
         return normalized ? normalize(text) : text
     }
 
+    /// A PDF text layer shorter than this is a scanner's own mark — "Scanned
+    /// by …", a page number, a date footer — not the document's text. Scanner
+    /// apps and MFP drivers stamp one on routinely, and treating it as the
+    /// sample was how the flagship case for recognition, a scanned page,
+    /// reached the model as a single line of boilerplate with no OCR at all.
+    static let minimumPDFTextLayer = 100
+
     private static func readPDF(url: URL) -> (text: String, source: SampleSource) {
         guard let document = PDFDocument(url: url) else { return ("", .none) }
         var text = ""
@@ -158,9 +179,15 @@ enum FileContext {
             if text.count >= sampleLimit { break }
         }
         let normalized = normalize(text)
-        if !normalized.isEmpty { return (normalized, .text) }
-        // No text layer: a scan. Read it the way a person would.
-        return (normalize(ImageText.recognize(scannedPDF: document)), .recognized)
+        if normalized.count >= minimumPDFTextLayer { return (normalized, .text) }
+        // No usable text layer: a scan. Read it the way a person would — and
+        // if recognition finds nothing either, the little the layer did hold
+        // is still better than nothing.
+        let recognized = normalize(ImageText.recognize(scannedPDF: document))
+        if recognized.isEmpty {
+            return normalized.isEmpty ? ("", .none) : (normalized, .text)
+        }
+        return (recognized, .recognized)
     }
 
     private static func normalize(_ text: String) -> String {

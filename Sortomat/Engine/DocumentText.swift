@@ -32,7 +32,12 @@ enum DocumentText {
         guard richTextExtensions.contains(ext) || openDocumentExtensions.contains(ext) else {
             return ""
         }
-        if let text = attributedStringText(url: url, limit: limit), !text.isEmpty { return text }
+        if let text = attributedStringText(url: url, limit: limit), !text.isEmpty {
+            // `limit` is what reaches the model, so it bounds the return value
+            // here rather than four times over: the readers cut at four bytes
+            // per allowed character only to keep the *intermediate* small.
+            return String(text.prefix(limit))
+        }
         // What AppKit cannot read (or rejects) is still a zip with the body in
         // a known entry. Whether the reader handles OpenDocument at all varies;
         // going through the zip makes the answer the same either way.
@@ -66,7 +71,40 @@ enum DocumentText {
     /// Excel keeps every distinct cell string in one shared table — exactly
     /// the vocabulary a classifier needs (headers, names, subjects).
     private static func spreadsheetText(url: URL, limit: Int) -> String {
-        zipXMLText(url: url, entries: ["xl/sharedStrings.xml", "docProps/core.xml"], limit: limit)
+        let shared = zipXMLText(url: url, entries: ["xl/sharedStrings.xml", "docProps/core.xml"],
+                                limit: limit)
+        guard shared.isEmpty else { return shared }
+        return inlineWorksheetText(url: url, limit: limit)
+    }
+
+    /// The fallback for exporters that skip the shared table and write every
+    /// string inline (`<is><t>…</t></is>`), which leaves the workbook above
+    /// with no text at all.
+    ///
+    /// Only the inline runs are taken, not the worksheet wholesale: a cell's
+    /// other values are shared-string *indices* and date serial numbers, so
+    /// reading the sheet as markup would hand the model a stream of integers
+    /// that mean nothing without the style table to decode them.
+    private static func inlineWorksheetText(url: URL, limit: Int) -> String {
+        guard sizeAllows(url), let zip = ZipArchive(url: url) else { return "" }
+        let sheets = zip.entries
+            .filter { $0.name.hasPrefix("xl/worksheets/sheet") && $0.name.hasSuffix(".xml") }
+            .sorted { partNumber($0.name) < partNumber($1.name) }
+            .prefix(3)
+        return collect(from: Array(sheets), in: zip, limit: limit) { inlineStrings(in: $0) }
+    }
+
+    /// The contents of every `<is>…</is>` run, joined; everything outside them
+    /// dropped.
+    private static func inlineStrings(in markup: String) -> String {
+        var pieces: [Substring] = []
+        var rest = Substring(markup)
+        while let open = rest.range(of: "<is>"),
+              let close = rest[open.upperBound...].range(of: "</is>") {
+            pieces.append(rest[open.upperBound..<close.lowerBound])
+            rest = rest[close.upperBound...]
+        }
+        return pieces.joined(separator: " ")
     }
 
     /// Slides in deck order (slide1, slide2, …, not the lexical slide10-first).
@@ -74,11 +112,13 @@ enum DocumentText {
         guard sizeAllows(url), let zip = ZipArchive(url: url) else { return "" }
         let slides = zip.entries
             .filter { $0.name.hasPrefix("ppt/slides/slide") && $0.name.hasSuffix(".xml") }
-            .sorted { slideNumber($0.name) < slideNumber($1.name) }
+            .sorted { partNumber($0.name) < partNumber($1.name) }
         return collect(from: slides, in: zip, limit: limit)
     }
 
-    private static func slideNumber(_ name: String) -> Int {
+    /// The first run of digits in a part name — `slide10.xml` is the tenth
+    /// slide, not the second.
+    private static func partNumber(_ name: String) -> Int {
         let digits = name.drop { !$0.isNumber }.prefix { $0.isNumber }
         return Int(digits) ?? Int.max
     }
@@ -89,7 +129,10 @@ enum DocumentText {
         return collect(from: entries, in: zip, limit: limit)
     }
 
-    private static func collect(from entries: [ZipArchive.Entry], in zip: ZipArchive, limit: Int) -> String {
+    private static func collect(
+        from entries: [ZipArchive.Entry], in zip: ZipArchive, limit: Int,
+        keeping select: (String) -> String = { $0 }
+    ) -> String {
         var pieces: [String] = []
         var collected = 0
         for entry in entries {
@@ -104,7 +147,7 @@ enum DocumentText {
                 Data(data.prefix(maxMarkupCharacters * 4))
             )
             let markup = String(TextDecoding.decode(bounded).prefix(maxMarkupCharacters))
-            let text = HTMLText.strip(markup)
+            let text = HTMLText.strip(select(markup))
             guard !text.isEmpty else { continue }
             pieces.append(text)
             collected += text.count
@@ -114,14 +157,30 @@ enum DocumentText {
     }
 
     private static func sizeAllows(_ url: URL) -> Bool {
-        // An .rtfd is a *directory*: its own entry is a few kilobytes no matter
-        // how much wrapped RTF and TIFF data it holds, so the cap has to add up
-        // what is inside or it does not apply to bundles at all.
-        if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .totalFileAllocatedSizeKey]),
-           values.isDirectory == true {
-            return Int64(values.totalFileAllocatedSize ?? 0) <= maxDocumentBytes
+        // An .rtfd is a *directory*, and no resource key answers for what a
+        // directory contains: `totalFileAllocatedSize` reports the folder entry
+        // itself — a few kilobytes however much wrapped RTF and TIFF data the
+        // bundle holds — so the cap has to add the contents up, or it does not
+        // apply to the one format in this list that is a bundle.
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            return bundleSize(of: url, stoppingAbove: maxDocumentBytes) <= maxDocumentBytes
         }
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0
         return size <= maxDocumentBytes
+    }
+
+    /// Bytes held by the files inside a bundle. Stops as soon as `ceiling` is
+    /// passed: a bundle of a million files must not cost a million stats just
+    /// to be rejected, so the answer is "over the ceiling", not the true total.
+    static func bundleSize(of url: URL, stoppingAbove ceiling: Int64 = .max) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: [.fileSizeKey], options: []
+        ) else { return .max }
+        var total: Int64 = 0
+        for case let child as URL in enumerator {
+            total += Int64((try? child.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+            if total > ceiling { return total }
+        }
+        return total
     }
 }

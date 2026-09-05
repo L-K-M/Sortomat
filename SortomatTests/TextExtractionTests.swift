@@ -1,4 +1,6 @@
 import AppKit
+import CoreText
+import PDFKit
 import XCTest
 @testable import Sortomat
 
@@ -136,11 +138,24 @@ final class TextExtractionTests: XCTestCase {
 
         let text = DocumentText.text(url: url, limit: 500)
         XCTAssertFalse(text.isEmpty)
-        // `limit` bounds what the *classifier* is given, and the readers cut
-        // at four bytes per allowed character before the caller trims again —
-        // so the guarantee is a bounded multiple, not an exact count.
-        XCTAssertLessThanOrEqual(text.count, 500 * 4,
+        // `limit` is what reaches the model, so it bounds the return value —
+        // a bounded *multiple* would let a regression quadruple the sample and
+        // still pass, and the fixture is ASCII, so the byte cut alone lands on
+        // exactly 2 000 characters.
+        XCTAssertLessThanOrEqual(text.count, 500,
                                  "the limit has to bound what reaches the model")
+    }
+
+    func testTheLimitBoundsTheDocumentReaderPathToo() throws {
+        // The zip readers trim on the way out; the AppKit reader hands back
+        // four bytes per allowed character and used to be returned untouched.
+        let attributed = NSAttributedString(string: String(repeating: "lorem ipsum ", count: 2000))
+        let rtf = try XCTUnwrap(attributed.rtf(from: NSRange(location: 0, length: attributed.length),
+                                               documentAttributes: [:]))
+        let url = dir.appendingPathComponent("long.rtf")
+        try rtf.write(to: url)
+
+        XCTAssertLessThanOrEqual(DocumentText.text(url: url, limit: 500).count, 500)
     }
 
     func testMalformedOfficeFilesReturnNothingRatherThanTrapping() throws {
@@ -158,10 +173,138 @@ final class TextExtractionTests: XCTestCase {
         truncated.add("content.xml", "<office:text><text:p>unclosed")
         let partial = dir.appendingPathComponent("partial.odt")
         try truncated.data().write(to: partial, options: .atomic)
-        _ = DocumentText.text(url: partial, limit: 4000)   // must not trap
+        let partialText = DocumentText.text(url: partial, limit: 4000)   // must not trap
+        // Pinned, not merely survived: a lenient parser that started returning
+        // raw tag fragments would otherwise slip through unnoticed.
+        XCTAssertTrue(partialText.isEmpty || partialText.contains("unclosed"),
+                      "unexpected extraction result: \(partialText)")
+    }
+
+    func testBundleSizeCapAddsUpWhatIsInsideTheBundle() throws {
+        // An .rtfd is a directory, and no resource key reports what a directory
+        // holds — the cap was measuring the folder entry, so it never applied
+        // to the one format in the list that is a bundle.
+        let bundle = dir.appendingPathComponent("Note.rtfd")
+        try fm.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try Data(count: 300_000).write(to: bundle.appendingPathComponent("TXT.rtf"))
+        try Data(count: 200_000).write(to: bundle.appendingPathComponent("image.tiff"))
+
+        let reported = (try? bundle.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?
+            .totalFileAllocatedSize ?? 0
+        XCTAssertLessThan(reported, 100_000, "the resource key is not recursive")
+        XCTAssertGreaterThanOrEqual(DocumentText.bundleSize(of: bundle), 500_000)
+    }
+
+    func testBundleSizeStopsCountingOnceTheCeilingIsPassed() throws {
+        let bundle = dir.appendingPathComponent("Big.rtfd")
+        try fm.createDirectory(at: bundle, withIntermediateDirectories: true)
+        for index in 0..<5 {
+            try Data(count: 100_000).write(to: bundle.appendingPathComponent("part\(index).bin"))
+        }
+        XCTAssertGreaterThan(DocumentText.bundleSize(of: bundle, stoppingAbove: 150_000), 150_000)
+    }
+
+    func testInlineStringWorkbooksAreNotEmpty() throws {
+        // Plenty of exporters skip the shared table and write every string
+        // inline, which left the sample completely empty.
+        var zip = ZipWriter()
+        zip.add("xl/worksheets/sheet1.xml",
+                #"<worksheet><sheetData><row><c t="inlineStr"><is><t>Rechnung Nr. 4711</t></is></c>"# +
+                #"<c><v>1234.5</v></c></row></sheetData></worksheet>"#)
+        let url = dir.appendingPathComponent("inline.xlsx")
+        try zip.data().write(to: url, options: .atomic)
+
+        let text = DocumentText.text(url: url, limit: 4000)
+        XCTAssertTrue(text.contains("Rechnung Nr. 4711"), "got: \(text)")
+        // The other cell values are shared-string indices and date serials;
+        // handing the model a stream of integers would be worse than nothing.
+        XCTAssertFalse(text.contains("1234.5"), "got: \(text)")
+    }
+
+    func testSharedStringsStillWinWhenBothArePresent() throws {
+        var zip = ZipWriter()
+        zip.add("xl/sharedStrings.xml", "<sst><si><t>Umsatz Q3</t></si></sst>")
+        zip.add("xl/worksheets/sheet1.xml", "<worksheet><sheetData><row><c><v>0</v></c></row></sheetData></worksheet>")
+        let url = dir.appendingPathComponent("both.xlsx")
+        try zip.data().write(to: url, options: .atomic)
+
+        let text = DocumentText.text(url: url, limit: 4000)
+        XCTAssertTrue(text.contains("Umsatz Q3"), "got: \(text)")
+        XCTAssertFalse(text.contains("0"), "got: \(text)")
+    }
+
+    func testDownloadURLsReachTheModelWithoutTheirQueryString() {
+        XCTAssertEqual(
+            FileContext.withoutQuery("https://files.example.com/report.pdf?token=SECRET&sig=abc"),
+            "https://files.example.com/report.pdf"
+        )
+        XCTAssertEqual(
+            FileContext.withoutQuery("https://a.example/x.pdf?t=1, https://b.example/y.pdf#frag"),
+            "https://a.example/x.pdf, https://b.example/y.pdf"
+        )
+        XCTAssertEqual(FileContext.withoutQuery(""), "")
+        XCTAssertEqual(FileContext.withoutQuery("https://plain.example/a.pdf"),
+                       "https://plain.example/a.pdf")
+    }
+
+    func testAScannerWatermarkDoesNotCountAsATextLayer() throws {
+        // Scanner apps stamp a line of their own onto an image-only page. The
+        // page's real content is reachable only by recognizing it, but a
+        // non-empty text layer used to be taken as the whole sample.
+        let png = try renderedPNG(text: "INVOICE QX7 4711", width: 900, height: 300)
+        let url = dir.appendingPathComponent("scan.pdf")
+        try scannedPDF(imagePNG: png, watermark: "Scanned by TestScanner").write(to: url)
+
+        let sample = FileContext.extractSample(url: url)
+        XCTAssertEqual(sample.source, .recognized, "got \(sample.source): \(sample.text)")
+        XCTAssertTrue(sample.text.replacingOccurrences(of: " ", with: "").contains("QX7"),
+                      "OCR produced: \(sample.text)")
+    }
+
+    func testARealTextLayerIsUsedWithoutRecognition() throws {
+        let body = String(repeating: "Mietvertrag Wohnung Zuerich ", count: 8)
+        let url = dir.appendingPathComponent("lease.pdf")
+        try scannedPDF(imagePNG: nil, watermark: body).write(to: url)
+
+        let sample = FileContext.extractSample(url: url)
+        XCTAssertEqual(sample.source, .text, "got \(sample.source): \(sample.text)")
+        XCTAssertTrue(sample.text.contains("Mietvertrag"), "got: \(sample.text)")
     }
 
     // MARK: - Fixture rendering
+
+    /// A one-page PDF holding an optional image and a line of real text — the
+    /// shape a scanner app produces: pixels plus a watermark.
+    private func scannedPDF(imagePNG: Data?, watermark: String) throws -> Data {
+        let data = NSMutableData()
+        let consumer = try XCTUnwrap(CGDataConsumer(data: data))
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &box, nil))
+        context.beginPDFPage(nil)
+        if let imagePNG {
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(imagePNG as CFData, nil))
+            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            context.draw(image, in: CGRect(x: 30, y: 300, width: 552, height: 184))
+        }
+        // Wrapped by hand: one very long CTLine would run off the media box,
+        // and glyphs drawn past the page edge are not reliably extracted back.
+        var remaining = Substring(watermark)
+        var baseline: CGFloat = 240
+        while !remaining.isEmpty, baseline > 20 {
+            let chunk = remaining.prefix(46)
+            remaining = remaining.dropFirst(chunk.count)
+            let attributed = NSAttributedString(
+                string: String(chunk), attributes: [.font: NSFont.systemFont(ofSize: 12)]
+            )
+            context.textPosition = CGPoint(x: 40, y: baseline)
+            CTLineDraw(CTLineCreateWithAttributedString(attributed), context)
+            baseline -= 16
+        }
+        context.endPDFPage()
+        context.closePDF()
+        return data as Data
+    }
+
 
     private func renderedPNG(text: String, width: Int, height: Int) throws -> Data {
         let rep = try XCTUnwrap(NSBitmapImageRep(
