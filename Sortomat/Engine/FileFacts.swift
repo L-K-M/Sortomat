@@ -289,7 +289,12 @@ final class FileFacts {
 
     // MARK: Lookup
 
-    func cost(of attribute: Attribute) -> FactCost {
+    func cost(of attribute: Attribute) -> FactCost { Self.cost(of: attribute) }
+
+    /// Static because the answer is a property of the attribute, not of the
+    /// file: the validator has to know what a condition would cost before
+    /// there is any file to ask about.
+    static func cost(of attribute: Attribute) -> FactCost {
         switch attribute {
         case .name, .stem, .ext, .relPath, .parent, .subfolder, .depth:
             return .free

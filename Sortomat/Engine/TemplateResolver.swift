@@ -3,6 +3,23 @@ import Foundation
 /// Turns a template token into a value. The only place that knows the token
 /// vocabulary, so the editor's token menu and the renderer can never drift.
 enum TemplateResolver {
+    /// The tokens that are not simply an attribute name. Kept beside the
+    /// switch that resolves them so the editor's token menu, the validator and
+    /// the renderer cannot drift apart.
+    static let namedTokens: Set<String> = [
+        "name", "stem", "ext", "parent", "subfolder", "relpath", "depth",
+        "rule", "step", "now", "uuid", "counter",
+        "tags.first", "authors.first", "subjects.first", "whereFrom.host",
+        "date", "added", "created", "modified", "opened", "captured"
+    ]
+
+    /// Tokens that always produce something for any file that exists. A
+    /// destination whose last component holds only tokens *outside* this set
+    /// can render to nothing, which would leave the file with no name.
+    static let alwaysRenders: Set<String> = [
+        "name", "stem", "rule", "now", "uuid", "counter", "depth"
+    ]
+
     static func value(for token: String, facts: FileFacts, captures: CaptureStore,
                       model: ModelAnswer?, rule: Rule, step: String,
                       now: Date) -> TemplateValue? {

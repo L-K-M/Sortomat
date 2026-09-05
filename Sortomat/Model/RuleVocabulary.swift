@@ -157,6 +157,25 @@ public extension Operator {
     // The model.
     static let saysYes = Operator("saysYes")
     static let saysNo = Operator("saysNo")
+
+    /// Every operator this build understands. An operator outside this set
+    /// still decodes and round-trips — it evaluates to `unknownOperator` and
+    /// the validator names it, which is the whole point of an open vocabulary.
+    static let all: Set<Operator> = [
+        .equals, .isNot, .contains, .notContains, .beginsWith, .endsWith,
+        .matchesGlob, .notMatchesGlob, .matchesRegex, .notMatchesRegex,
+        .isIn, .notIn, .isEmpty, .isNotEmpty,
+        .eq, .ne, .gt, .gte, .lt, .lte, .between,
+        .before, .after, .olderThan, .newerThan, .inLast, .notInLast,
+        .containsAny, .containsAll, .containsNone,
+        .isTrue, .isFalse, .conformsTo, .saysYes, .saysNo
+    ]
+
+    /// Operators that ask about the fact itself and take no value.
+    static let valueless: Set<Operator> = [.isEmpty, .isNotEmpty, .isTrue, .isFalse]
+
+    /// Operators whose value is a regular expression.
+    static let regexes: Set<Operator> = [.matchesRegex, .notMatchesRegex]
 }
 
 public struct ActionType: RawRepresentable, Hashable, Sendable, Codable {
@@ -214,6 +233,11 @@ public extension ActionType {
     static let sideEffects: Set<ActionType> = [
         .addTags, .removeTags, .setComment, .setLabel, .notify, .reveal, .open, .runShortcut
     ]
+
+    /// Everything this build can execute. Anything else decodes, survives a
+    /// re-save, does nothing, and is named by the validator.
+    static let known: Set<ActionType> =
+        placements.union(sideEffects).union([.askModel, .stop, .proceed])
 }
 
 /// A coarse content kind. Resolved through `UTType` conformance for new rules

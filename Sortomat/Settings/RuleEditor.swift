@@ -107,6 +107,8 @@ struct RuleEditor: View {
                 }
             }
 
+            RuleIssues(rule: rule)
+
             Section(L10n.t("rule.steps.section")) {
                 Text(L10n.t("rule.steps.help"))
                     .font(.caption).foregroundStyle(.secondary)
