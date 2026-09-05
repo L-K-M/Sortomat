@@ -198,6 +198,13 @@ public enum L10n {
         "general.pricing.section": "Cost estimation",
         "general.pricing.input": "Input $/1M tokens:",
         "general.pricing.output": "Output $/1M tokens:",
+        "general.pricing.currency": "Currency (ISO code):",
+        "general.monthlyBudget": "Stop after (per month, 0 = no limit):",
+        "general.monthlyBudget.help": "The per-check limit caps one burst. This caps the month: once estimated spend passes it, steps keep filing what they can for free and files that need the model wait.",
+        "general.monthlyBudget.reached": "Monthly limit reached — %@ spent. Steps still run; nothing is being sent to the model.",
+        "general.onlyOnPower": "Only check while plugged in",
+        "general.pauseInLowPower": "Pause in Low Power Mode",
+        "general.power.help": "Reading a file can mean OCR, a full-content hash and a paid request. On battery that is the most expensive possible work at the worst possible moment.",
         "general.watch.section": "Watching",
         "general.interval": "Check interval: %d s",
         "general.interval.help": "Folders are also checked immediately when something changes. The interval is only the safety net.",
@@ -268,6 +275,12 @@ public enum L10n {
         "activity.stalePlan": "[%@] Skipped %@: the file changed after this suggestion was made — refresh the preview.",
         "activity.keyDeferred.one": "[%2$@] %1$d file needs the model, but no API key is set — pre-rules still ran.",
         "activity.keyDeferred.other": "[%2$@] %1$d files need the model, but no API key is set — pre-rules still ran.",
+        "activity.modelHeld.one": "[%2$@] %1$d file is waiting for the model — the monthly limit is reached. Pre-rules still ran.",
+        "activity.modelHeld.other": "[%2$@] %1$d files are waiting for the model — the monthly limit is reached. Pre-rules still ran.",
+
+        // Why nothing is running
+        "hold.lowPower": "Paused — Low Power Mode",
+        "hold.onBattery": "Paused — on battery",
 
         // Decision memo
         "memo.remembered": "%@ · remembered from an identical file",
@@ -481,6 +494,13 @@ public enum L10n {
         "general.pricing.section": "Kostenschätzung",
         "general.pricing.input": "Eingabe $/1M Tokens:",
         "general.pricing.output": "Ausgabe $/1M Tokens:",
+        "general.pricing.currency": "Währung (ISO-Code):",
+        "general.monthlyBudget": "Stopp ab (pro Monat, 0 = kein Limit):",
+        "general.monthlyBudget.help": "Das Limit pro Prüfung begrenzt einen einzelnen Schub. Dieses begrenzt den Monat: ist die geschätzte Summe überschritten, legen Schritte weiterhin kostenlos ab, und Dateien fürs Modell warten.",
+        "general.monthlyBudget.reached": "Monatslimit erreicht – %@ ausgegeben. Schritte laufen weiter; ans Modell geht nichts.",
+        "general.onlyOnPower": "Nur am Stromnetz prüfen",
+        "general.pauseInLowPower": "Im Stromsparmodus pausieren",
+        "general.power.help": "Eine Datei zu lesen kann OCR, einen Hash über den ganzen Inhalt und eine kostenpflichtige Anfrage bedeuten. Im Akkubetrieb ist das die teuerste denkbare Arbeit zum schlechtesten denkbaren Zeitpunkt.",
         "general.watch.section": "Überwachung",
         "general.interval": "Prüfintervall: %d s",
         "general.interval.help": "Ordner werden zusätzlich sofort geprüft, wenn sich etwas ändert. Das Intervall ist nur das Sicherheitsnetz.",
@@ -547,6 +567,12 @@ public enum L10n {
         "activity.stalePlan": "[%@] Übersprungen: %@ wurde seit dem Vorschlag geändert – Vorschau aktualisieren.",
         "activity.keyDeferred.one": "[%2$@] %1$d Datei benötigt das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
         "activity.keyDeferred.other": "[%2$@] %1$d Dateien benötigen das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
+        "activity.modelHeld.one": "[%2$@] %1$d Datei wartet auf das Modell – das Monatslimit ist erreicht. Vorregeln liefen trotzdem.",
+        "activity.modelHeld.other": "[%2$@] %1$d Dateien warten auf das Modell – das Monatslimit ist erreicht. Vorregeln liefen trotzdem.",
+
+        // Why nothing is running
+        "hold.lowPower": "Pausiert – Stromsparmodus",
+        "hold.onBattery": "Pausiert – Akkubetrieb",
 
         "memo.remembered": "%@ · von einer identischen Datei übernommen",
         "memo.rememberedBare": "Von einer identischen Datei übernommen",

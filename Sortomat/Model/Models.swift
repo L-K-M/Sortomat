@@ -202,6 +202,23 @@ public struct Config: Codable, Equatable, Sendable {
     /// Max LLM calls per scan pass; 0 = unlimited.
     public var perScanBudget: Int
     public var notificationsEnabled: Bool
+    /// Emergency brake, persisted. A pause pulled at 23:00 because a rule is
+    /// misfiling used to be released by the next launch — including the
+    /// relaunch the update checker itself offers.
+    public var paused: Bool
+    /// Ceiling on estimated spend for the calendar month, in `currencyCode`;
+    /// 0 = no ceiling. The per-pass budget caps a *burst*; at the default 60 s
+    /// interval, a folder that keeps producing unclassifiable files bills up to
+    /// 14 400 calls a day within it.
+    public var monthlyBudget: Double
+    /// ISO 4217 code the price fields are quoted in. The meter used to be
+    /// `String(format: "$%.4f")` — a dollar sign, in front, with a decimal
+    /// point, for a user who may be paying in EUR or running a free local model.
+    public var currencyCode: String
+    /// Don't call the model (or scan at all) while running on battery.
+    public var onlyOnPower: Bool
+    /// Don't scan while macOS is in Low Power Mode.
+    public var pauseInLowPowerMode: Bool
 
     public init(
         rules: [Rule] = [],
@@ -213,7 +230,12 @@ public struct Config: Codable, Equatable, Sendable {
         scanIntervalSeconds: Double = 60,
         maxConcurrentClassifications: Int = 2,
         perScanBudget: Int = 0,
-        notificationsEnabled: Bool = true
+        notificationsEnabled: Bool = true,
+        paused: Bool = false,
+        monthlyBudget: Double = 0,
+        currencyCode: String = "USD",
+        onlyOnPower: Bool = false,
+        pauseInLowPowerMode: Bool = true
     ) {
         self.rules = rules
         self.model = model
@@ -225,6 +247,11 @@ public struct Config: Codable, Equatable, Sendable {
         self.maxConcurrentClassifications = maxConcurrentClassifications
         self.perScanBudget = perScanBudget
         self.notificationsEnabled = notificationsEnabled
+        self.paused = paused
+        self.monthlyBudget = monthlyBudget
+        self.currencyCode = currencyCode
+        self.onlyOnPower = onlyOnPower
+        self.pauseInLowPowerMode = pauseInLowPowerMode
     }
 
     public init(from decoder: Decoder) throws {
@@ -239,5 +266,13 @@ public struct Config: Codable, Equatable, Sendable {
         maxConcurrentClassifications = try c.decodeIfPresent(Int.self, forKey: .maxConcurrentClassifications) ?? 2
         perScanBudget = try c.decodeIfPresent(Int.self, forKey: .perScanBudget) ?? 0
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
+        paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        monthlyBudget = try c.decodeIfPresent(Double.self, forKey: .monthlyBudget) ?? 0
+        currencyCode = try c.decodeIfPresent(String.self, forKey: .currencyCode) ?? "USD"
+        onlyOnPower = try c.decodeIfPresent(Bool.self, forKey: .onlyOnPower) ?? false
+        // Default on: the setting only does anything while the user has
+        // explicitly asked macOS to conserve power, and doing the most
+        // expensive possible work then is what nobody wants.
+        pauseInLowPowerMode = try c.decodeIfPresent(Bool.self, forKey: .pauseInLowPowerMode) ?? true
     }
 }

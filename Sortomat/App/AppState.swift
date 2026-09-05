@@ -9,9 +9,19 @@ import SwiftUI
 @MainActor
 final class AppState: ObservableObject {
     @Published var config: Config
-    @Published var paused = false {
-        didSet { if !paused { requestScan() } }
+    /// The emergency brake. Written through to the config so it survives a
+    /// relaunch — including the relaunch the update checker offers.
+    @Published var paused: Bool {
+        didSet {
+            guard paused != config.paused else { return }
+            config.paused = paused
+            persistAndApply()
+            if !paused { requestScan() }
+        }
     }
+    /// Why passes are being held right now, in the user's words, or nil when
+    /// they aren't. A brake nobody can see is indistinguishable from a bug.
+    @Published private(set) var holdReason: String?
     @Published var activity: [ActivityEntry] = []
     @Published var pendingActions: [PlannedAction] = []
     @Published var lastScan: Date?
@@ -52,6 +62,7 @@ final class AppState: ObservableObject {
     init() {
         let loaded = ConfigStore.load()
         config = loaded
+        paused = loaded.paused
         apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && loaded.providerRequiresKey
         if processLock == nil {
             ConfigStore.appendLog(L10n.t("process.lockWarning"))
@@ -74,7 +85,49 @@ final class AppState: ObservableObject {
     }
 
     var estimatedSpendString: String {
-        String(format: "$%.4f", estimatedSpend)
+        Self.money(estimatedSpend, code: config.currencyCode)
+    }
+
+    /// Four decimals because a single classification costs fractions of a cent,
+    /// and a meter that reads "0.00" for the first two hundred files teaches
+    /// the user that it doesn't work.
+    static func money(_ amount: Double, code: String) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = code
+        formatter.minimumFractionDigits = 4
+        formatter.maximumFractionDigits = 4
+        // Locale placement and separators, not a hardcoded leading "$" and a
+        // decimal point, for a German user paying a European provider in EUR.
+        return formatter.string(from: NSNumber(value: amount))
+            ?? String(format: "%.4f %@", amount, code)
+    }
+
+    /// Whether an estimated spend is still under a ceiling. 0 = no ceiling.
+    /// Pure, so the one comparison that stands between a misbehaving rule and
+    /// a real bill can be tested without a running app.
+    static func withinBudget(spend: Double, ceiling: Double) -> Bool {
+        ceiling <= 0 || spend < ceiling
+    }
+
+    var withinMonthlyBudget: Bool {
+        Self.withinBudget(spend: estimatedSpend, ceiling: config.monthlyBudget)
+    }
+
+    /// Why a pass may not run, given the settings and the machine's state, or
+    /// nil when it may. Deliberately separate from `paused`: this one
+    /// re-answers itself as the machine changes, so unplugging holds and
+    /// plugging back in resumes without anyone touching a switch.
+    static func hold(for config: Config, lowPower: Bool, onBattery: Bool) -> String? {
+        if config.pauseInLowPowerMode, lowPower { return L10n.t("hold.lowPower") }
+        if config.onlyOnPower, onBattery { return L10n.t("hold.onBattery") }
+        return nil
+    }
+
+    func scanHold() -> String? {
+        Self.hold(for: config,
+                  lowPower: PowerSource.isInLowPowerMode,
+                  onBattery: PowerSource.isOnBattery)
     }
 
     // MARK: - Config persistence
@@ -273,6 +326,12 @@ final class AppState: ObservableObject {
         while scanRequested {
             scanRequested = false
             guard !paused else { return }
+            // Re-checked every pass, not once at launch: the answer changes
+            // when the user unplugs, and the timer keeps ticking so the hold
+            // lifts by itself.
+            let hold = scanHold()
+            holdReason = hold
+            guard hold == nil else { return }
             // No early bail on a missing key: the pipeline runs deterministic
             // pre-rules regardless and defers only the files that need the model.
             let apiKey = Keychain.apiKey() ?? ""
@@ -284,8 +343,11 @@ final class AppState: ObservableObject {
                 // Re-read per rule so selecting a rule to edit mid-pass takes
                 // effect immediately (rather than one stale execution).
                 if rule.id == editingRuleID { continue }
+                // Re-read per rule so a ceiling reached mid-pass stops the
+                // *next* rule rather than only the next pass.
                 let result = await pipeline.scan(
-                    rule: rule, config: snapshot, apiKey: apiKey, batchID: batchID
+                    rule: rule, config: snapshot, apiKey: apiKey, batchID: batchID,
+                    modelAllowed: withinMonthlyBudget
                 )
                 ingest(result)
                 passResults.append(result)
@@ -393,7 +455,8 @@ final class AppState: ObservableObject {
         var passResults: [ScanResult] = []
         for rule in snapshot.rules.inExecutionOrder() {
             let result = await pipeline.scan(
-                rule: rule, config: snapshot, apiKey: apiKey, forcePreview: true
+                rule: rule, config: snapshot, apiKey: apiKey, forcePreview: true,
+                modelAllowed: withinMonthlyBudget
             )
             ingest(result)
             passResults.append(result)
