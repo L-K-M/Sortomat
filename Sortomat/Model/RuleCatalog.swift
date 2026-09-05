@@ -229,6 +229,22 @@ enum RuleCatalog {
         "stop": "Hier aufhören", "continue": "Weitere Schritte prüfen"
     ]
 
+    /// Whether both tables carry this term. The editor never asks; the tests
+    /// do, because a label that falls back to its raw value looks fine in
+    /// English (where "contains" *is* the raw value) and reads as gibberish in
+    /// German.
+    static func isLabelled(_ attribute: Attribute) -> Bool {
+        englishAttributes[attribute.rawValue] != nil && germanAttributes[attribute.rawValue] != nil
+    }
+
+    static func isLabelled(_ op: Operator) -> Bool {
+        englishOperators[op.rawValue] != nil && germanOperators[op.rawValue] != nil
+    }
+
+    static func isLabelled(_ action: ActionType) -> Bool {
+        englishActions[action.rawValue] != nil && germanActions[action.rawValue] != nil
+    }
+
     static func label(for attribute: Attribute) -> String {
         localized(attribute.rawValue, english: englishAttributes, german: germanAttributes)
     }

@@ -641,32 +641,27 @@ final class LegacyMigrationTests: XCTestCase {
 }
 
 final class RuleCatalogTests: XCTestCase {
-    func testEveryCatalogAttributeIsLabelledInBothLanguages() {
+    func testEverythingTheEditorOffersIsLabelledInBothLanguages() {
+        // Comparing the label to the raw value would not work: in English
+        // "contains" *is* the raw value. Coverage is the actual question.
         for spec in RuleCatalog.attributes {
-            L10n.forcedLanguage = "en"
-            XCTAssertNotEqual(RuleCatalog.label(for: spec.attribute), spec.attribute.rawValue,
-                              "EN label missing for \(spec.attribute.rawValue)")
-            L10n.forcedLanguage = "de"
-            XCTAssertNotEqual(RuleCatalog.label(for: spec.attribute), spec.attribute.rawValue,
-                              "DE label missing for \(spec.attribute.rawValue)")
+            XCTAssertTrue(RuleCatalog.isLabelled(spec.attribute),
+                          "label missing for attribute \(spec.attribute.rawValue)")
         }
-        L10n.forcedLanguage = nil
+        for op in Set(RuleCatalog.attributes.flatMap(\.operators)) {
+            XCTAssertTrue(RuleCatalog.isLabelled(op),
+                          "label missing for operator \(op.rawValue)")
+        }
+        for action in RuleCatalog.actionTypes {
+            XCTAssertTrue(RuleCatalog.isLabelled(action),
+                          "label missing for action \(action.rawValue)")
+        }
     }
 
-    func testEveryOfferedOperatorAndActionIsLabelled() {
-        let operators = Set(RuleCatalog.attributes.flatMap(\.operators))
-        for language in ["en", "de"] {
-            L10n.forcedLanguage = language
-            for op in operators {
-                XCTAssertNotEqual(RuleCatalog.label(for: op), op.rawValue,
-                                  "\(language) label missing for operator \(op.rawValue)")
-            }
-            for action in RuleCatalog.actionTypes {
-                XCTAssertNotEqual(RuleCatalog.label(for: action), action.rawValue,
-                                  "\(language) label missing for action \(action.rawValue)")
-            }
-        }
-        L10n.forcedLanguage = nil
+    func testAnUnknownTermShowsItsOwnNameRatherThanNothing() {
+        // A value from a newer build has no label; the user has to be able to
+        // see what it is, and re-saving has to keep it.
+        XCTAssertEqual(RuleCatalog.label(for: Attribute("fromTheFuture")), "fromTheFuture")
     }
 
     func testTheSummarySentenceReadsLikeASentence() {
