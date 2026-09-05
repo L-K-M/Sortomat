@@ -175,6 +175,16 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         self.destinationRoots = destinationRoots
     }
 
+    /// Spelled out because this type provides *both* `init(from:)` and
+    /// `encode(to:)`, and Swift only synthesizes `CodingKeys` when it
+    /// synthesizes at least one of them.
+    private enum CodingKeys: String, CodingKey {
+        case id, name, enabled, priority, watchPath, targetPath, recursive, prompt
+        case extensions, copyInsteadOfMove, privacyMode, preRules, taxonomy
+        case quarantineSubfolder, confidenceThreshold, dryRun
+        case schemaVersion, steps, fallback, destinationRoots
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
