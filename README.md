@@ -90,9 +90,11 @@ hidden files are ignored):
 4. The file is moved/copied with collision suffixing and duplicate detection,
    and the move is journaled.
 
-Folders are watched via FSEvents (instant reaction) plus a periodic safety-net
-scan. Everything a rule has decided is remembered in a persistent ledger, so
-files aren't re-classified — or re-paid for — on every scan or relaunch.
+Folders are watched via FSEvents — new files are picked up within seconds of
+*settling* (a short stability probe guards against half-written downloads) —
+plus a periodic safety-net scan. Everything a rule has decided is remembered in
+a persistent ledger, so files aren't re-classified — or re-paid for — on every
+scan or relaunch.
 
 ## Headless mode
 
@@ -124,12 +126,15 @@ xcodebuild -project Sortomat.xcodeproj -scheme Sortomat -configuration Debug bui
 xcodebuild -project Sortomat.xcodeproj -scheme Sortomat -destination 'platform=macOS' test
 
 # Build Sortomat.app and reveal it in Finder
+# (requires the shared lkm-build tool: https://github.com/L-K-M/release-tool —
+#  the xcodebuild commands above are the dependency-free path)
 ./scripts/build.sh
 ```
 
-See [`CICD.md`](CICD.md) for the release process and [`AGENTS.md`](AGENTS.md)
-for the architecture. `sort_epubs.py` is the original dependency-free batch
-EPUB sorter that seeded the idea.
+See [`CICD.md`](CICD.md) for the release process, [`AGENTS.md`](AGENTS.md)
+for the architecture, and [`fable-is-awesome.md`](fable-is-awesome.md) for the
+ongoing code review (findings, fixes, and what's still open). `sort_epubs.py`
+is the original dependency-free batch EPUB sorter that seeded the idea.
 
 ## Releasing
 
