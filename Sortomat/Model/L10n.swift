@@ -225,6 +225,7 @@ public enum L10n {
         "error.missingPath": "relative_path missing for action=move",
         "error.sourceVanished": "Source file vanished before it could be filed",
         "error.verifyFailed": "Cross-volume copy could not be verified; original kept",
+        "component.unknown": "Unknown",
 
         // Templates
         "template.ebooks.title": "E-books",
@@ -465,6 +466,7 @@ public enum L10n {
         "error.missingPath": "relative_path fehlt bei action=move",
         "error.sourceVanished": "Quelldatei verschwand, bevor sie einsortiert werden konnte",
         "error.verifyFailed": "Volumen-übergreifende Kopie nicht verifizierbar; Original behalten",
+        "component.unknown": "Unbekannt",
 
         "template.ebooks.title": "E-Books",
         "template.ebooks.summary": "EPUBs nach Genre / Autor / Titel sortieren.",

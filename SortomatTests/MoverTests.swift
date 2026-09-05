@@ -77,6 +77,20 @@ final class MoverTests: XCTestCase {
         XCTAssertEqual(placedURL(outcome)?.lastPathComponent, "there (2).txt")
     }
 
+    func testDanglingSymlinkAtDestinationGetsSuffixed() throws {
+        // fileExists follows symlinks, so a dangling link used to answer
+        // "free" — and the move then threw on every scan, forever. The link
+        // must count as an occupant and the file land beside it.
+        let dest = root.appendingPathComponent("out/there.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: dest, withDestinationURL: root.appendingPathComponent("gone.txt"))
+
+        let source = try makeFile("in.txt", "content")
+        let outcome = try Mover.place(source: source, destination: dest, copy: false)
+        XCTAssertEqual(placedURL(outcome)?.lastPathComponent, "there (2).txt")
+        XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("out/there (2).txt").path))
+    }
+
     func testVanishedSourceThrows() {
         let source = root.appendingPathComponent("missing.txt")
         let dest = root.appendingPathComponent("out/there.txt")
