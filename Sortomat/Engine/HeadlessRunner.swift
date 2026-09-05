@@ -20,11 +20,11 @@ enum HeadlessRunner {
 
     private static func scanOnce(apply: Bool) async -> Never {
         let config = ConfigStore.load()
-        let needsKey = config.providerRequiresKey
         let apiKey = Keychain.apiKey() ?? ""
-        if needsKey && apiKey.isEmpty {
+        if config.providerRequiresKey && apiKey.isEmpty {
+            // Not fatal anymore: deterministic pre-rules still run without a
+            // key; files that need the model are deferred and reported per rule.
             print(L10n.t("error.noKey"))
-            exit(2)
         }
 
         let pipeline = Pipeline()

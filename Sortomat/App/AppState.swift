@@ -206,8 +206,9 @@ final class AppState: ObservableObject {
         while scanRequested {
             scanRequested = false
             guard !paused else { return }
+            // No early bail on a missing key: the pipeline runs deterministic
+            // pre-rules regardless and defers only the files that need the model.
             let apiKey = Keychain.apiKey() ?? ""
-            if config.providerRequiresKey && apiKey.isEmpty { return }
 
             let snapshot = config
             let batchID = UUID() // one pass = one undoable batch
@@ -267,7 +268,6 @@ final class AppState: ObservableObject {
     /// Recompute the pending list for every enabled rule (preview button).
     func refreshPreview() async {
         let apiKey = Keychain.apiKey() ?? ""
-        if config.providerRequiresKey && apiKey.isEmpty { return }
         let snapshot = config
         for rule in snapshot.rules.inExecutionOrder() {
             let result = await pipeline.scan(
