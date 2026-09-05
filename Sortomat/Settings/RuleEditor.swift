@@ -115,6 +115,7 @@ struct RuleEditor: View {
                 ForEach(rule.steps.indices, id: \.self) { index in
                     StepCard(
                         step: $rule.steps[index],
+                        rule: rule,
                         position: index + 1,
                         canMoveUp: index > 0,
                         canMoveDown: index < rule.steps.count - 1,

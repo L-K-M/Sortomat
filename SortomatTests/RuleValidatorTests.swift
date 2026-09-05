@@ -192,4 +192,24 @@ final class RuleValidatorTests: XCTestCase {
             XCTAssertEqual(finding.stepID, broken.id, finding.code)
         }
     }
+
+    // MARK: - Counting one step
+
+    func testCountingAStepAsksAboutThatStepAlone() {
+        let first = step(ConditionGroup(mode: .all, items: [when(.ext, .equals, .text("pdf"))]),
+                         [RuleAction(type: .move, template: "PDFs/{name}")], name: "PDFs")
+        let second = step(ConditionGroup(mode: .all, items: [when(.ext, .equals, .text("png"))]),
+                          [RuleAction(type: .move, template: "Images/{name}")], name: "Images")
+        var rule = healthyRule(steps: [first, second])
+        rule.fallback = .askModel
+        rule.prompt = "sort them"
+
+        let probe = AppState.probe(rule, step: second)
+        XCTAssertEqual(probe.steps, [second], "a step is counted on its own, not after the ones before it")
+        // With the rule's own `askModel` fallback left in place, every file the
+        // step did not claim would have counted as a match.
+        XCTAssertEqual(probe.fallback, .skip)
+        XCTAssertEqual(probe.watchPath, rule.watchPath, "counted against the same folder")
+        XCTAssertEqual(probe.extensions, rule.extensions)
+    }
 }

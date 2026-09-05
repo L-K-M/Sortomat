@@ -3,7 +3,11 @@ import SwiftUI
 /// One "if … then …" of a rule. Replaces the old pre-rule card, which could
 /// express exactly one test and one action.
 struct StepCard: View {
+    @EnvironmentObject private var state: AppState
     @Binding var step: RuleStep
+    /// The rule this step belongs to — its watched folder and its extension
+    /// filter are what "how many files match" is counted against.
+    let rule: Rule
     let position: Int
     let canMoveUp: Bool
     let canMoveDown: Bool
@@ -12,11 +16,16 @@ struct StepCard: View {
     let onMoveDown: () -> Void
     let onDelete: () -> Void
 
+    @State private var matched: Int?
+    @State private var scanned = 0
+    @State private var counting = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             conditions
             actions
+            if !rule.watchPath.isEmpty { matchPill }
             Text(StepSentence.text(for: step))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -24,6 +33,68 @@ struct StepCard: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+        // Automatically only when the answer is cheap, and never on a
+        // keystroke. A step that asks about a name, a kind or a date costs a
+        // stat per file; one that asks about *contents* can cost a PDF text
+        // extraction — or an OCR pass — per file, and running that on the way
+        // into the editor would be indistinguishable from the app hanging.
+        // Those count when the user asks for it, which is what the pill is.
+        .task { if countsCheaply { await recount() } }
+    }
+
+    /// "12 of 200 files match this step" — the one question every rule editor
+    /// in the world dodges, and the engine can answer it for nothing: the
+    /// evaluator is pure, so this is a walk over facts, with no model and no
+    /// ledger, memo or journal written.
+    private var matchPill: some View {
+        Button {
+            Task { await recount() }
+        } label: {
+            HStack(spacing: 5) {
+                if counting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Circle()
+                        .fill((matched ?? 0) > 0 ? Color.accentColor : Color.secondary)
+                        .frame(width: 6, height: 6)
+                }
+                Text(pillText)
+            }
+        }
+        .buttonStyle(.borderless)
+        .font(.caption)
+        .help(L10n.t("step.match.help"))
+        .disabled(counting)
+    }
+
+    private var pillText: String {
+        if counting { return L10n.t("step.match.counting") }
+        guard let matched else { return L10n.t("step.match.idle") }
+        return L10n.t("step.match.result", "\(matched)", "\(scanned)")
+    }
+
+    /// Whether every condition in this step is answered by the file's name or
+    /// one `stat`. `FileFacts.cost(of:)` is the same table the evaluator uses
+    /// to order conditions, so this cannot drift from what the walk will
+    /// actually pay.
+    private var countsCheaply: Bool {
+        func cheap(_ condition: Condition) -> Bool {
+            switch condition {
+            case .test(let test): return FileFacts.cost(of: test.attribute) <= .stat
+            case .group(let group): return group.items.allSatisfy(cheap)
+            }
+        }
+        return step.when.items.allSatisfy(cheap)
+    }
+
+    @MainActor
+    private func recount() async {
+        guard !rule.watchPath.isEmpty, !counting else { return }
+        counting = true
+        let counts = await state.matchCount(for: rule, step: step)
+        matched = counts.matched
+        scanned = counts.scanned
+        counting = false
     }
 
     private var header: some View {
