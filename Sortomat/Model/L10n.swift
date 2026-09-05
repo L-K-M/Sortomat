@@ -257,6 +257,8 @@ public enum L10n {
         "error.sourceVanished": "Source file vanished before it could be filed",
         "error.verifyFailed": "Cross-volume copy could not be verified; original kept",
         "component.unknown": "Unknown",
+        "process.locked": "Another Sortomat process is using this configuration — not running, to avoid clobbering its records.",
+        "process.lockWarning": "Warning: another Sortomat process holds this configuration; concurrent runs may conflict.",
 
         // Templates
         "template.ebooks.title": "E-books",
@@ -522,6 +524,8 @@ public enum L10n {
         "error.sourceVanished": "Quelldatei verschwand, bevor sie einsortiert werden konnte",
         "error.verifyFailed": "Volumen-übergreifende Kopie nicht verifizierbar; Original behalten",
         "component.unknown": "Unbekannt",
+        "process.locked": "Ein anderer Sortomat-Prozess verwendet diese Konfiguration – Abbruch, um dessen Aufzeichnungen nicht zu überschreiben.",
+        "process.lockWarning": "Warnung: Ein anderer Sortomat-Prozess hält diese Konfiguration; gleichzeitige Läufe können kollidieren.",
 
         "template.ebooks.title": "E-Books",
         "template.ebooks.summary": "EPUBs nach Genre / Autor / Titel sortieren.",

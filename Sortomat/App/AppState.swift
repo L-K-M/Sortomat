@@ -33,11 +33,19 @@ final class AppState: ObservableObject {
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
     private var followUpScheduled = false
+    /// Exclusive claim on the config directory for this process's lifetime.
+    /// nil means another Sortomat process (usually a headless run) holds it;
+    /// the GUI keeps working — the window is brief and the CLI side refuses
+    /// to start while the GUI holds the lock — but the overlap is logged.
+    private let processLock = ProcessLock.acquire()
 
     init() {
         let loaded = ConfigStore.load()
         config = loaded
         apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && loaded.providerRequiresKey
+        if processLock == nil {
+            ConfigStore.appendLog(L10n.t("process.lockWarning"))
+        }
         Notifier.requestAuthorization()
         rebuildWatchers()
         startTimer()
