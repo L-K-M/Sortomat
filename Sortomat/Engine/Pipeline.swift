@@ -345,6 +345,55 @@ actor Pipeline {
         return decided
     }
 
+    /// What a rule *would* do with a file, with nothing written down: no
+    /// ledger entry, no memo, no journal, no in-flight marking, and — unless
+    /// asked — no model call and therefore no cost.
+    ///
+    /// This is the whole reason the evaluator is pure. Until now the only way
+    /// to find out whether a rule matched anything was to enable it and watch.
+    struct DryRun: Equatable, Sendable {
+        var operation: Placement.Operation
+        /// Relative to the rule's target folder, already rendered.
+        var destination: String?
+        var summary: String
+        var needsModel: Bool
+    }
+
+    func dryDecide(file: URL, rule: Rule, allowModel: Bool = false) -> DryRun {
+        let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
+        let context = evaluationContext(file: file, rule: rule, target: target,
+                                        allowModel: allowModel)
+        switch RuleEvaluator.evaluate(context) {
+        case .decided(let placement, let trace):
+            return DryRun(
+                operation: placement.operation,
+                destination: placement.relativePath?.string(),
+                summary: trace.summary,
+                needsModel: false
+            )
+        case .needsModel(_, _, let trace), .deferred(let trace):
+            return DryRun(operation: .skip, destination: nil,
+                          summary: trace.summary, needsModel: true)
+        }
+    }
+
+    /// How many of a rule's own watched files its steps claim right now,
+    /// deterministically and without spending anything. Capped, because the
+    /// answer is a reassurance, not a report.
+    func matchCount(rule: Rule, limit: Int = 500) -> (matched: Int, scanned: Int, needsModel: Int) {
+        let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
+        let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
+        let candidates = candidateFiles(in: watch, target: target, rule: rule).prefix(limit)
+        var matched = 0
+        var needsModel = 0
+        for file in candidates {
+            let run = dryDecide(file: file, rule: rule)
+            if run.needsModel { needsModel += 1 }
+            else if run.operation != .skip { matched += 1 }
+        }
+        return (matched, candidates.count, needsModel)
+    }
+
     /// The evaluation context for one file: the rule, the facts, and whether
     /// the model may be consulted at all right now.
     private func evaluationContext(file: URL, rule: Rule, target: URL,

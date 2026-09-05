@@ -173,6 +173,18 @@ final class AppState: ObservableObject {
 
     /// Add an imported rule (already normalized to disabled + preview by the
     /// pack) under a unique name; returns its id so the UI can select it.
+    /// What this rule would do with one file — no ledger, no memo, no journal,
+    /// no model call, no cost. The answer to "does this rule match anything?",
+    /// which until now required enabling the rule and watching.
+    func tryRule(_ rule: Rule, on file: URL) async -> Pipeline.DryRun {
+        await pipeline.dryDecide(file: file, rule: rule)
+    }
+
+    /// How many files in the watched folder this rule's steps claim right now.
+    func matchCount(for rule: Rule) async -> (matched: Int, scanned: Int, needsModel: Int) {
+        await pipeline.matchCount(rule: rule)
+    }
+
     @discardableResult
     func importRule(_ rule: Rule) -> UUID {
         var imported = rule

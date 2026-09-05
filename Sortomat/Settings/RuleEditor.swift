@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RuleEditor: View {
@@ -8,6 +9,9 @@ struct RuleEditor: View {
     // newline in the taxonomy field and keeps the extensions text stable.
     @State private var extensionsText = ""
     @State private var taxonomyText = ""
+    @State private var tryResult: String?
+    @State private var matchResult: String?
+    @State private var counting = false
 
     var body: some View {
         Form {
@@ -129,6 +133,27 @@ struct RuleEditor: View {
                 }
                 .buttonStyle(.borderless)
 
+                Divider()
+
+                HStack(spacing: 10) {
+                    Button(L10n.t("rule.tryIt.pick")) { tryOneFile() }
+                    Button(L10n.t("rule.tryIt.count")) { countMatches() }
+                        .disabled(counting || rule.watchPath.isEmpty)
+                    if counting { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                if let tryResult {
+                    Text(tryResult)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let matchResult {
+                    Text(matchResult).font(.callout)
+                }
+                Text(L10n.t("rule.tryIt.help"))
+                    .font(.caption).foregroundStyle(.secondary)
+
                 Picker(L10n.t("rule.fallback"), selection: $rule.fallback) {
                     Text(L10n.t("rule.fallback.askModel")).tag(Rule.Fallback.askModel)
                     Text(L10n.t("rule.fallback.skip")).tag(Rule.Fallback.skip)
@@ -145,6 +170,57 @@ struct RuleEditor: View {
             taxonomyText = rule.taxonomy.joined(separator: "\n")
         }
         .onChange(of: rule) { _ in state.persistAndApply() }
+    }
+
+    /// Run the rule against one chosen file without enabling it, writing
+    /// anything down, or calling the model.
+    private func tryOneFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        if !rule.watchPath.isEmpty {
+            panel.directoryURL = URL(
+                fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath
+            )
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let rule = rule
+        Task { @MainActor in
+            let run = await state.tryRule(rule, on: url)
+            let name = url.lastPathComponent
+            if run.needsModel {
+                tryResult = L10n.t("rule.tryIt.needsModel", name, run.summary)
+            } else if let destination = run.destination, run.operation != .skip {
+                tryResult = L10n.t("rule.tryIt.would", name,
+                                   RuleCatalog.label(for: operationType(run.operation)),
+                                   destination, run.summary)
+            } else {
+                tryResult = L10n.t("rule.tryIt.skip", name, run.summary)
+            }
+        }
+    }
+
+    private func countMatches() {
+        counting = true
+        let rule = rule
+        Task { @MainActor in
+            let counts = await state.matchCount(for: rule)
+            counting = false
+            matchResult = L10n.t("rule.tryIt.matches", "\(counts.matched)",
+                                 "\(counts.scanned)", "\(counts.needsModel)")
+        }
+    }
+
+    private func operationType(_ operation: Placement.Operation) -> ActionType {
+        switch operation {
+        case .move: return .move
+        case .copy: return .copy
+        case .rename: return .rename
+        case .trash: return .trash
+        case .quarantine: return .quarantine
+        case .skip: return .skip
+        }
     }
 
     private func move(_ index: Int, by offset: Int) {
