@@ -1,9 +1,16 @@
 name: CI
 
+# A `claude/**` branch with an open pull request used to build *twice* per
+# push — once for `push`, once for `pull_request` — on macOS runners, which
+# bill at ten times the Linux rate. That doubled the bill for no extra
+# information: both runs compile the same code and disagree only about whether
+# the merge commit is included, which is precisely what the pull-request run
+# checks. Open the pull request when you push the branch (this repo's
+# convention anyway) and the pull-request run *is* the build.
 on:
   pull_request:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
 
 # Cancel an in-progress run when a branch is pushed again.
 concurrency:
@@ -42,17 +49,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             clean test | xcbeautify
 
-      - name: Upload test results on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: TestResults
-          path: TestResults.xcresult
-          if-no-files-found: ignore
-          # An .xcresult bundle is tens of megabytes. Without a retention limit
-          # these piled up under the account-wide storage quota until *new*
-          # uploads started failing — turning "upload the evidence" into a
-          # second red step. A week is long enough that a Friday-evening
-          # failure is still inspectable after a weekend, and still 13x less
-          # storage than the 90-day default.
-          retention-days: 7
+      # No artifact upload. An .xcresult bundle is tens of megabytes, they piled
+      # up under the account-wide storage quota until *new* uploads started
+      # failing — so the step meant to preserve the evidence became a second
+      # red step on every red run, and the quota it was filling counts against
+      # the same spending limit that pays for the runners. The failure text
+      # `xcbeautify` prints in the log has been enough to diagnose every
+      # failure this project has had; the bundle was never opened once.
