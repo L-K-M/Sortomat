@@ -314,9 +314,16 @@ actor Pipeline {
         // Extraction can be real work now (OCR, office documents): run it off
         // the actor so other files keep flowing while one is being read.
         let privacyMode = rule.privacyMode
-        let description = await Task.detached(priority: .utility) {
+        // Detached so other files keep flowing — and cancellable, so a stopped
+        // pass does not keep OCR-ing pages for a decision nobody wants.
+        let extraction = Task.detached(priority: .utility) {
             FileContext.describe(url: file, privacyMode: privacyMode)
-        }.value
+        }
+        let description = await withTaskCancellationHandler {
+            await extraction.value
+        } onCancel: {
+            extraction.cancel()
+        }
         let result = try await client.classify(
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )

@@ -2,10 +2,11 @@ import AppKit
 import Foundation
 
 /// Text out of office documents without any network or third-party code:
-/// Word/RTF/OpenDocument through AppKit's attributed-string reader, and
-/// spreadsheets/presentations (which are zips of XML) through the in-process
-/// zip reader. Previously every one of these reached the model as name +
-/// metadata only, so "file this invoice" had nothing to go on.
+/// Word and RTF through AppKit's attributed-string reader, and the zip-of-XML
+/// formats — OOXML spreadsheets and decks, and every OpenDocument file —
+/// through the in-process zip reader. Previously every one of these reached
+/// the model as name + metadata only, so "file this invoice" had nothing to
+/// go on.
 enum DocumentText {
     /// Documents larger than this aren't parsed — the reader would load them
     /// whole, and a classification sample is a few thousand characters.
@@ -16,18 +17,29 @@ enum DocumentText {
 
     /// Extensions `text(url:)` knows how to read.
     static let richTextExtensions: Set<String> = ["rtf", "rtfd", "doc", "docx", "odt"]
-    static let spreadsheetExtensions: Set<String> = ["xlsx"]
+    /// `xlsm` is byte-for-byte an `xlsx` with macros — same zip layout, same
+    /// shared-string table.
+    static let spreadsheetExtensions: Set<String> = ["xlsx", "xlsm"]
     static let presentationExtensions: Set<String> = ["pptx"]
+    /// Every OpenDocument format keeps its body in one `content.xml`, so text,
+    /// spreadsheet and presentation all read the same way.
+    static let openDocumentExtensions: Set<String> = ["odt", "ods", "odp", "odg"]
 
     static func text(url: URL, limit: Int) -> String {
         let ext = url.pathExtension.lowercased()
         if spreadsheetExtensions.contains(ext) { return spreadsheetText(url: url, limit: limit) }
         if presentationExtensions.contains(ext) { return presentationText(url: url, limit: limit) }
-        guard richTextExtensions.contains(ext) else { return "" }
+        guard richTextExtensions.contains(ext) || openDocumentExtensions.contains(ext) else {
+            return ""
+        }
         if let text = attributedStringText(url: url, limit: limit), !text.isEmpty { return text }
-        // A .docx AppKit can't read (or one it rejects) still has its body
-        // in word/document.xml.
+        // What AppKit cannot read (or rejects) is still a zip with the body in
+        // a known entry. Whether the reader handles OpenDocument at all varies;
+        // going through the zip makes the answer the same either way.
         if ext == "docx" { return zipXMLText(url: url, entries: ["word/document.xml"], limit: limit) }
+        if openDocumentExtensions.contains(ext) {
+            return zipXMLText(url: url, entries: ["content.xml", "meta.xml"], limit: limit)
+        }
         return ""
     }
 
@@ -81,10 +93,17 @@ enum DocumentText {
         var pieces: [String] = []
         var collected = 0
         for entry in entries {
+            if Task.isCancelled { break }
             guard let data = zip.data(for: entry) else { continue }
             // Tags become spaces, so adjacent cells/runs don't glue together;
             // XML entities decode the same way HTML ones do.
-            let markup = String(TextDecoding.decode(data).prefix(maxMarkupCharacters))
+            // Cap the *bytes* decoded, not just the characters kept: a
+            // 50 MB shared-string table would otherwise be materialized whole
+            // before being cut down to a few hundred thousand characters.
+            let bounded = TextDecoding.trimmingPartialUTF8Tail(
+                Data(data.prefix(maxMarkupCharacters * 4))
+            )
+            let markup = String(TextDecoding.decode(bounded).prefix(maxMarkupCharacters))
             let text = HTMLText.strip(markup)
             guard !text.isEmpty else { continue }
             pieces.append(text)

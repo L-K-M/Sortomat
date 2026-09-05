@@ -108,13 +108,17 @@ enum FileContext {
             return (readPlainText(url: url), .text)
         }
         if markupExtensions.contains(ext) {
-            // A saved web page's first 64 KiB is mostly <head>, CSS and
-            // scripts; the model should see the visible text, not the markup.
-            return (normalize(HTMLText.strip(readPlainText(url: url, normalized: false))), .text)
+            // A saved web page's first 64 KiB is routinely *all* <head>, CSS,
+            // scripts and base64 images — strip that and nothing visible is
+            // left. Markup gets a wider read, because what survives stripping
+            // is a fraction of what goes in.
+            let markup = readPlainText(url: url, normalized: false, maxBytes: 512 * 1024)
+            return (normalize(HTMLText.strip(markup)), .text)
         }
         if DocumentText.richTextExtensions.contains(ext)
             || DocumentText.spreadsheetExtensions.contains(ext)
-            || DocumentText.presentationExtensions.contains(ext) {
+            || DocumentText.presentationExtensions.contains(ext)
+            || DocumentText.openDocumentExtensions.contains(ext) {
             return (normalize(DocumentText.text(url: url, limit: sampleLimit * 2)), .text)
         }
         if ext == "pdf" { return readPDF(url: url) }
@@ -125,9 +129,10 @@ enum FileContext {
         return ("", .none)
     }
 
-    private static func readPlainText(url: URL, normalized: Bool = true) -> String {
+    private static func readPlainText(url: URL, normalized: Bool = true,
+                                      maxBytes: Int = 64 * 1024) -> String {
         guard let handle = try? FileHandle(forReadingFrom: url),
-              let data = try? handle.read(upToCount: 64 * 1024)
+              let data = try? handle.read(upToCount: maxBytes)
         else { return "" }
         try? handle.close()
         // The fixed-size read may have split a multi-byte UTF-8 character at

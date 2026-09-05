@@ -83,7 +83,7 @@ final class TextExtractionTests: XCTestCase {
     }
 
     func testImageFactsAndOCR() throws {
-        let png = try renderedPNG(text: "INVOICE 4711", width: 900, height: 300)
+        let png = try renderedPNG(text: "INVOICE QX7 4711", width: 900, height: 300)
         let url = dir.appendingPathComponent("receipt.png")
         try png.write(to: url)
 
@@ -91,13 +91,67 @@ final class TextExtractionTests: XCTestCase {
         XCTAssertTrue(facts.contains { $0.0 == "Dimensions" && $0.1 == "900×300" }, "facts: \(facts)")
 
         let recognized = ImageText.recognize(imageAt: url)
-        XCTAssertTrue(recognized.contains("4711"), "OCR produced: \(recognized)")
+        XCTAssertTrue(recognized.contains("QX7"), "OCR produced: \(recognized)")
 
         let description = FileContext.describe(url: url)
         XCTAssertTrue(description.contains("recognized on-device"), "the model must know it's reading OCR")
-        XCTAssertTrue(description.contains("4711"))
-        XCTAssertFalse(FileContext.describe(url: url, privacyMode: .metadataOnly).contains("4711"),
+        XCTAssertTrue(description.contains("QX7"))
+        // A token no metadata field can contain by accident: a bare number
+        // would match a byte count like "14711 bytes" and fail for nothing.
+        XCTAssertFalse(FileContext.describe(url: url, privacyMode: .metadataOnly).contains("QX7"),
                        "metadata-only rules must not read contents, OCR included")
+    }
+
+    func testOpenDocumentBodyIsRead() throws {
+        // Whether AppKit's reader handles OpenDocument varies; the zip path
+        // makes the answer the same either way.
+        var zip = ZipWriter()
+        zip.add("content.xml",
+                #"<office:document-content><office:body><office:text><text:p>Kündigung Mietvertrag</text:p></office:text></office:body></office:document-content>"#)
+        let url = dir.appendingPathComponent("letter.odt")
+        try zip.data().write(to: url, options: .atomic)
+
+        XCTAssertTrue(DocumentText.text(url: url, limit: 4000).contains("Kündigung Mietvertrag"))
+    }
+
+    func testMacroWorkbooksReadLikeOrdinaryOnes() throws {
+        var zip = ZipWriter()
+        zip.add("xl/sharedStrings.xml", "<sst><si><t>Umsatz Q3</t></si></sst>")
+        let url = dir.appendingPathComponent("budget.xlsm")
+        try zip.data().write(to: url, options: .atomic)
+
+        XCTAssertTrue(DocumentText.text(url: url, limit: 4000).contains("Umsatz Q3"))
+    }
+
+    func testExtractionRespectsTheLimit() throws {
+        var zip = ZipWriter()
+        zip.add("word/document.xml",
+                "<w:document><w:t>" + String(repeating: "lorem ipsum ", count: 2000) + "</w:t></w:document>")
+        let url = dir.appendingPathComponent("long.docx")
+        try zip.data().write(to: url, options: .atomic)
+
+        let text = DocumentText.text(url: url, limit: 500)
+        XCTAssertFalse(text.isEmpty)
+        XCTAssertLessThanOrEqual(text.count, 500 * 4,
+                                 "the limit has to bound what reaches the model")
+    }
+
+    func testMalformedOfficeFilesReturnNothingRatherThanTrapping() throws {
+        // The zip fallback is where a force-unwrap would hide, and these are
+        // the inputs a real Downloads folder produces.
+        let notAZip = dir.appendingPathComponent("broken.docx")
+        try Data("definitely not a zip".utf8).write(to: notAZip, options: .atomic)
+        XCTAssertEqual(DocumentText.text(url: notAZip, limit: 4000), "")
+
+        let empty = dir.appendingPathComponent("empty.xlsx")
+        try Data().write(to: empty, options: .atomic)
+        XCTAssertEqual(DocumentText.text(url: empty, limit: 4000), "")
+
+        var truncated = ZipWriter()
+        truncated.add("content.xml", "<office:text><text:p>unclosed")
+        let partial = dir.appendingPathComponent("partial.odt")
+        try truncated.data().write(to: partial, options: .atomic)
+        _ = DocumentText.text(url: partial, limit: 4000)   // must not trap
     }
 
     // MARK: - Fixture rendering

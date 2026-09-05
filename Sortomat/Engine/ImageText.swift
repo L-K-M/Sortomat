@@ -40,6 +40,9 @@ enum ImageText {
     static func recognize(scannedPDF document: PDFDocument) -> String {
         var pieces: [String] = []
         for index in 0..<min(document.pageCount, scannedPDFPages) {
+            // Recognition is seconds per page; a stopped scan should not keep
+            // paying for pages nobody is waiting for.
+            if Task.isCancelled { break }
             guard let page = document.page(at: index) else { continue }
             let bounds = page.bounds(for: .mediaBox)
             guard bounds.width > 0, bounds.height > 0 else { continue }
