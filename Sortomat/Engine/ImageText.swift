@@ -105,7 +105,9 @@ enum ImageText {
         return facts
     }
 
-    private static func sizeAllows(_ url: URL) -> Bool {
+    /// Internal so the symlink behaviour can be asserted against the gate
+    /// itself rather than against `FileManager`.
+    static func sizeAllows(_ url: URL) -> Bool {
         // `attributesOfItem` describes the *link*; `CGImageSourceCreateWithURL`
         // follows it. A symlink to a forty-megapixel original weighed a few
         // bytes and passed the cap that exists to stop that decode.

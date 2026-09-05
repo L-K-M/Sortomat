@@ -329,6 +329,12 @@ actor Pipeline {
         // the *next* page, not the one Vision is already inside. No explicit
         // priority: the actor awaits this immediately, so demoting it to
         // `.utility` could only make the pass everyone is waiting on slower.
+        // Cancellation that landed during an earlier suspension point is not
+        // observed by creating a task, so without this the most expensive work
+        // in the pass — OCR, a full document read — could still be started for
+        // a pass that was already stopped, and only noticed at the reader's
+        // next poll.
+        try Task.checkCancellation()
         let extraction = Task.detached {
             FileContext.describe(url: file, privacyMode: privacyMode)
         }

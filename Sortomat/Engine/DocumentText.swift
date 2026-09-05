@@ -16,11 +16,14 @@ enum DocumentText {
     static let maxMarkupCharacters = 512 * 1024
 
     /// Extensions `text(url:)` knows how to read.
-    static let richTextExtensions: Set<String> = ["rtf", "rtfd", "doc", "docx", "odt"]
-    /// `xlsm` is byte-for-byte an `xlsx` with macros — same zip layout, same
-    /// shared-string table.
-    static let spreadsheetExtensions: Set<String> = ["xlsx", "xlsm"]
-    static let presentationExtensions: Set<String> = ["pptx"]
+    static let richTextExtensions: Set<String> = ["rtf", "rtfd", "doc", "docx", "docm", "odt"]
+    /// The macro and template twins are byte-for-byte their plain siblings —
+    /// same OPC zip, same `xl/sharedStrings.xml`, same `xl/worksheets/sheetN.xml`.
+    /// Only the extension differs, and dropping them cost the whole sample.
+    static let spreadsheetExtensions: Set<String> = ["xlsx", "xlsm", "xltx", "xltm"]
+    /// Likewise `pptm` (macros) and `ppsx` (opens as a slideshow): the body is
+    /// `ppt/slides/slideN.xml` in all three.
+    static let presentationExtensions: Set<String> = ["pptx", "pptm", "ppsx"]
     /// Every OpenDocument format keeps its body in one `content.xml`, so text,
     /// spreadsheet and presentation all read the same way.
     static let openDocumentExtensions: Set<String> = ["odt", "ods", "odp", "odg"]
@@ -41,7 +44,9 @@ enum DocumentText {
         // What AppKit cannot read (or rejects) is still a zip with the body in
         // a known entry. Whether the reader handles OpenDocument at all varies;
         // going through the zip makes the answer the same either way.
-        if ext == "docx" { return zipXMLText(url: url, entries: ["word/document.xml"], limit: limit) }
+        if ext == "docx" || ext == "docm" {
+            return zipXMLText(url: url, entries: ["word/document.xml"], limit: limit)
+        }
         if openDocumentExtensions.contains(ext) {
             return zipXMLText(url: url, entries: ["content.xml", "meta.xml"], limit: limit)
         }
@@ -54,7 +59,7 @@ enum DocumentText {
         guard sizeAllows(url) else { return nil }
         var options: [NSAttributedString.DocumentReadingOptionKey: Any] = [:]
         switch url.pathExtension.lowercased() {
-        case "docx": options[.documentType] = NSAttributedString.DocumentType.officeOpenXML
+        case "docx", "docm": options[.documentType] = NSAttributedString.DocumentType.officeOpenXML
         case "doc": options[.documentType] = NSAttributedString.DocumentType.docFormat
         case "rtf": options[.documentType] = NSAttributedString.DocumentType.rtf
         case "rtfd": options[.documentType] = NSAttributedString.DocumentType.rtfd
@@ -177,7 +182,10 @@ enum DocumentText {
         return String(pieces.joined(separator: " ").prefix(limit))
     }
 
-    private static func sizeAllows(_ url: URL) -> Bool {
+    /// Internal rather than private so a test can pin it: this cap has had the
+    /// symlink bug once already, and a test that measures with `FileManager`
+    /// instead of calling this pins Foundation's behaviour, not the reader's.
+    static func sizeAllows(_ url: URL) -> Bool {
         // Resolve first: `attributesOfItem` and `resourceValues` describe the
         // *link*, while every reader below them — `NSAttributedString(url:)`,
         // `ZipArchive`, `FileHandle` — follows it. A symlink to a four-gigabyte

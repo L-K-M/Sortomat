@@ -64,6 +64,12 @@ enum FileContext {
         }
 
         var sample = spotlight.textContent
+        // Spotlight indexes a scanner's own stamp — "Scanned by …", a page
+        // number, a date footer — as the file's text content, and a sample
+        // that short is exactly what `minimumPDFTextLayer` exists to reject.
+        // Taking it here would skip the OCR fallback for precisely the scans
+        // this reader was written for, without ever reaching `readPDF`.
+        if ext == "pdf", sample.count < minimumPDFTextLayer { sample = "" }
         var source: SampleSource = sample.isEmpty ? .none : .text
         if sample.isEmpty {
             let extracted = extractSample(url: url)

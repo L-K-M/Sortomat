@@ -249,21 +249,62 @@ final class TextExtractionTests: XCTestCase {
     }
 
     func testSymlinkedFilesAreMeasuredByWhatTheyPointAt() throws {
-        // `attributesOfItem` describes the link; every reader follows it. A
-        // symlink to something enormous weighed a few bytes and passed the cap
-        // that exists to stop that read.
-        let big = dir.appendingPathComponent("big.rtf")
-        try Data(count: 4096).write(to: big)
-        let link = dir.appendingPathComponent("link.rtf")
-        try fm.createSymbolicLink(at: link, withDestinationURL: big)
+        // `attributesOfItem` describes the link; every reader below the cap —
+        // `NSAttributedString(url:)`, `ZipArchive`, `CGImageSourceCreateWithURL`
+        // — follows it. A symlink to something enormous weighed a few bytes and
+        // sailed through the cap that exists to stop exactly that read.
+        //
+        // Asserted against the gates themselves, not against `FileManager`:
+        // measuring with Foundation here would pin Foundation's semantics,
+        // which are true on every machine whatever this reader does, and the
+        // regression would come back green.
+        let small = dir.appendingPathComponent("small.rtf")
+        try Data(count: 4096).write(to: small)
+        let smallLink = dir.appendingPathComponent("small-link.rtf")
+        try fm.createSymbolicLink(at: smallLink, withDestinationURL: small)
+        XCTAssertTrue(DocumentText.sizeAllows(smallLink),
+                      "a link to a small file must still be read")
 
-        let direct = (try? fm.attributesOfItem(atPath: link.path))?[.size] as? Int64 ?? 0
-        XCTAssertLessThan(direct, 4096, "sanity: the link itself weighs its target's path, not its bytes")
-        XCTAssertEqual(
-            (try? fm.attributesOfItem(atPath: link.resolvingSymlinksInPath().path))?[.size] as? Int64,
-            4096,
-            "resolving is what makes the cap measure the bytes that will actually be read"
+        // Sparse: `truncate` sets the length without writing 64 MB, and the
+        // length is what both caps read.
+        let huge = dir.appendingPathComponent("huge.rtf")
+        XCTAssertTrue(fm.createFile(atPath: huge.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: huge)
+        try handle.truncate(atOffset: UInt64(DocumentText.maxDocumentBytes) + 1)
+        try handle.close()
+        let hugeLink = dir.appendingPathComponent("huge-link.rtf")
+        try fm.createSymbolicLink(at: hugeLink, withDestinationURL: huge)
+
+        XCTAssertFalse(DocumentText.sizeAllows(hugeLink),
+                       "the cap must weigh the bytes the reader will actually read")
+        XCTAssertFalse(ImageText.sizeAllows(hugeLink),
+                       "the image cap had the same bug and needs the same guarantee")
+        XCTAssertLessThan(
+            (try? fm.attributesOfItem(atPath: hugeLink.path))?[.size] as? Int64 ?? 0, 4096,
+            "sanity: the link itself weighs its target's path, which is why this is a bug at all"
         )
+    }
+
+    func testMacroAndTemplateTwinsAreReadLikeTheirSiblings() throws {
+        // Same OPC package, same body part, different extension. Dropping them
+        // cost the entire sample for a file the reader can already read.
+        var workbook = ZipWriter()
+        workbook.add("xl/sharedStrings.xml", "<sst><si><t>Vorlage Umsatz</t></si></sst>")
+        let template = dir.appendingPathComponent("budget.xltx")
+        try workbook.data().write(to: template, options: .atomic)
+        XCTAssertTrue(DocumentText.text(url: template, limit: 4000).contains("Vorlage Umsatz"))
+
+        var deck = ZipWriter()
+        deck.add("ppt/slides/slide1.xml", "<p:sld><a:t>Quartalsbericht</a:t></p:sld>")
+        let show = dir.appendingPathComponent("review.ppsx")
+        try deck.data().write(to: show, options: .atomic)
+        XCTAssertTrue(DocumentText.text(url: show, limit: 4000).contains("Quartalsbericht"))
+
+        var document = ZipWriter()
+        document.add("word/document.xml", "<w:document><w:t>Makro Rechnung</w:t></w:document>")
+        let macro = dir.appendingPathComponent("invoice.docm")
+        try document.data().write(to: macro, options: .atomic)
+        XCTAssertTrue(DocumentText.text(url: macro, limit: 4000).contains("Makro Rechnung"))
     }
 
     func testSharedStringsStillWinWhenBothArePresent() throws {
