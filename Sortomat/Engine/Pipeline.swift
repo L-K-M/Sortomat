@@ -36,6 +36,18 @@ actor Pipeline {
         memo.forget(ruleID: ruleID)
     }
 
+    /// Drop the in-session preview memory for one rule (or for all rules when
+    /// `ruleID` is nil) — a rule whose behavior just changed must re-plan its
+    /// files instead of serving suggestions computed under the old settings.
+    func forgetPreviews(ruleID: UUID? = nil) {
+        guard let ruleID else {
+            previewed.removeAll()
+            return
+        }
+        let prefix = ruleID.uuidString + "|"
+        previewed = previewed.filter { !$0.hasPrefix(prefix) }
+    }
+
     /// After an undo restores a file into a watched folder, remember it as
     /// skipped for the rule that moved it — otherwise the very next scan
     /// re-classifies (re-pays for) the file and moves it right back,
