@@ -14,6 +14,16 @@ final class L10nTests: XCTestCase {
         XCTAssertEqual(L10n.plural("app.status.active", 2), "Active — 2 rules")
     }
 
+    func testPluralWithExtraArgumentsUsesPositionalSpecifiers() {
+        L10n.forcedLanguage = "en"
+        XCTAssertEqual(L10n.plural("activity.keyDeferred", 1, "Books"),
+                       "[Books] 1 file needs the model, but no API key is set — pre-rules still ran.")
+        XCTAssertEqual(L10n.plural("notify.failuresMore", 2, "first"), "first (and 2 more failures)")
+        L10n.forcedLanguage = "de"
+        XCTAssertEqual(L10n.plural("activity.keyDeferred", 3, "Bücher"),
+                       "[Bücher] 3 Dateien benötigen das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.")
+    }
+
     func testPluralGerman() {
         L10n.forcedLanguage = "de"
         XCTAssertEqual(L10n.plural("preview.applied", 1), "1 Änderung angewendet.")
@@ -24,7 +34,9 @@ final class L10nTests: XCTestCase {
     /// form would render as the raw key at runtime.
     func testPluralKeyPairsAreComplete() {
         let pluralBases = ["app.status.active", "menu.pendingReview",
-                           "preview.applied", "preview.dismissed"]
+                           "preview.applied", "preview.dismissed",
+                           "journal.undoBatchDone", "journal.undoBatchFailed",
+                           "notify.filed", "notify.failuresMore", "activity.keyDeferred"]
         for base in pluralBases {
             for suffix in [".one", ".other"] {
                 XCTAssertNotNil(L10n.english[base + suffix], "EN missing \(base + suffix)")

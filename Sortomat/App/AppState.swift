@@ -354,13 +354,13 @@ final class AppState: ObservableObject {
 
         let filed = result.entries.filter { $0.kind == .filed }.count
         if filed > 0 {
-            Notifier.post(title: "Sortomat", body: L10n.t("notify.filed", filed))
+            Notifier.post(title: "Sortomat", body: L10n.plural("notify.filed", filed))
         }
         let failures = result.entries.filter { $0.kind == .failed }
         if let first = failures.first {
             let body = failures.count == 1
                 ? first.message
-                : L10n.t("notify.failuresMore", first.message, failures.count - 1)
+                : L10n.plural("notify.failuresMore", failures.count - 1, first.message)
             Notifier.post(title: "Sortomat", body: body)
         }
     }
@@ -406,6 +406,13 @@ final class AppState: ObservableObject {
     /// paid verdicts from a pass that was still running must not be forgotten
     /// (and re-paid) because the user quit at the wrong moment.
     func flushOnTerminate() {
+        // A quit inside the 800 ms persist debounce used to discard the last
+        // rule edits (toggle a misbehaving rule off, ⌘Q, and it's back on at
+        // next launch). Write the config synchronously here.
+        if let persistTask, !persistTask.isCancelled {
+            persistTask.cancel()
+            ConfigStore.save(config)
+        }
         persistSpend()
         let done = DispatchSemaphore(value: 0)
         Task.detached { [pipeline] in

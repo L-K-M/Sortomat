@@ -41,10 +41,12 @@ UI & localization:
 - Pre-release tags publish as GitHub pre-releases instead of becoming
   "latest".
 
-### Review wave 2 (in progress)
+### Review wave 2 (merged as one integration PR)
 
 - Full findings, the re-verified backlog and the branch plan live in
-  `fable-is-awesome.md`: undo hardening + batch undo, stale-plan
+  `fable-is-awesome.md`; the eighteen branches were composed in the
+  conflict-minimizing order that review computed, with the three silent-loss
+  composition hazards (W30–W32) resolved explicitly: undo hardening + batch undo, stale-plan
   revalidation on apply, keyless deterministic sorting, engine edge cases
   (future mtimes, dangling symlinks, fake zip EOCDs), FSEvents lifetime,
   preview hygiene, honest notifications, monthly spend persistence, ledger

@@ -34,6 +34,13 @@ public enum L10n {
         String(format: t(key + (count == 1 ? ".one" : ".other")), count)
     }
 
+    /// Count-aware lookup with extra format arguments. The count is argument
+    /// 1 and the extras follow, so strings that need both use positional
+    /// specifiers (`%1$d`, `%2$@`).
+    public static func plural(_ key: String, _ count: Int, _ args: CVarArg...) -> String {
+        String(format: t(key + (count == 1 ? ".one" : ".other")), arguments: [count as CVarArg] + args)
+    }
+
     // MARK: - English (base)
 
     static let english: [String: String] = [
@@ -221,8 +228,10 @@ public enum L10n {
         "journal.undo.sourceOccupied": "A file is already at the original location: %@",
         "journal.undo.destinationMissing": "The moved file is no longer at: %@",
         "journal.undo.destinationModified": "The copy at %@ no longer matches the original, so it wasn't deleted.",
-        "journal.undoBatchDone": "Undid %d move(s).",
-        "journal.undoBatchFailed": "%d couldn't be undone.",
+        "journal.undoBatchDone.one": "Undid 1 move.",
+        "journal.undoBatchDone.other": "Undid %d moves.",
+        "journal.undoBatchFailed.one": "1 couldn't be undone.",
+        "journal.undoBatchFailed.other": "%d couldn't be undone.",
         "headless.nothingToUndo": "Nothing to undo.",
         "headless.undone": "Undone: %@ → %@",
         "headless.undoFailed": "Failed: %@: %@",
@@ -240,15 +249,18 @@ public enum L10n {
         "activity.wouldSkip": "[%@] Would skip %@ — %@",
         "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
         "activity.stalePlan": "[%@] Skipped %@: the file changed after this suggestion was made — refresh the preview.",
-        "activity.keyDeferred": "[%@] %d file(s) need the model, but no API key is set — pre-rules still ran.",
+        "activity.keyDeferred.one": "[%2$@] %1$d file needs the model, but no API key is set — pre-rules still ran.",
+        "activity.keyDeferred.other": "[%2$@] %1$d files need the model, but no API key is set — pre-rules still ran.",
 
         // Decision memo
         "memo.remembered": "%@ · remembered from an identical file",
         "memo.rememberedBare": "Remembered from an identical file",
 
         // Notifications
-        "notify.filed": "Filed %d file(s).",
-        "notify.failuresMore": "%@ (and %d more failure(s))",
+        "notify.filed.one": "Filed 1 file.",
+        "notify.filed.other": "Filed %d files.",
+        "notify.failuresMore.one": "%2$@ (and 1 more failure)",
+        "notify.failuresMore.other": "%2$@ (and %1$d more failures)",
 
         // Errors
         "error.unsafePath": "Unsafe destination path: %@",
@@ -495,8 +507,10 @@ public enum L10n {
         "journal.undo.sourceOccupied": "Am ursprünglichen Ort liegt bereits eine Datei: %@",
         "journal.undo.destinationMissing": "Die verschobene Datei ist nicht mehr unter: %@",
         "journal.undo.destinationModified": "Die Kopie unter %@ stimmt nicht mehr mit dem Original überein und wurde deshalb nicht gelöscht.",
-        "journal.undoBatchDone": "%d Bewegung(en) rückgängig gemacht.",
-        "journal.undoBatchFailed": "%d konnte(n) nicht rückgängig gemacht werden.",
+        "journal.undoBatchDone.one": "1 Bewegung rückgängig gemacht.",
+        "journal.undoBatchDone.other": "%d Bewegungen rückgängig gemacht.",
+        "journal.undoBatchFailed.one": "1 konnte nicht rückgängig gemacht werden.",
+        "journal.undoBatchFailed.other": "%d konnten nicht rückgängig gemacht werden.",
         "headless.nothingToUndo": "Nichts rückgängig zu machen.",
         "headless.undone": "Rückgängig: %@ → %@",
         "headless.undoFailed": "Fehlgeschlagen: %@: %@",
@@ -513,13 +527,16 @@ public enum L10n {
         "activity.wouldSkip": "[%@] Würde überspringen %@ – %@",
         "activity.budgetReached": "[%@] Modell-Aufruf-Budget pro Prüfung erreicht (%d).",
         "activity.stalePlan": "[%@] Übersprungen: %@ wurde seit dem Vorschlag geändert – Vorschau aktualisieren.",
-        "activity.keyDeferred": "[%@] %d Datei(en) benötigen das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
+        "activity.keyDeferred.one": "[%2$@] %1$d Datei benötigt das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
+        "activity.keyDeferred.other": "[%2$@] %1$d Dateien benötigen das Modell, aber kein API-Key ist hinterlegt – Vorregeln liefen trotzdem.",
 
         "memo.remembered": "%@ · von einer identischen Datei übernommen",
         "memo.rememberedBare": "Von einer identischen Datei übernommen",
 
-        "notify.filed": "%d Datei(en) einsortiert.",
-        "notify.failuresMore": "%@ (und %d weitere Fehler)",
+        "notify.filed.one": "1 Datei einsortiert.",
+        "notify.filed.other": "%d Dateien einsortiert.",
+        "notify.failuresMore.one": "%2$@ (und 1 weiterer Fehler)",
+        "notify.failuresMore.other": "%2$@ (und %1$d weitere Fehler)",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",
         "error.tooManyCollisions": "Zu viele Namenskollisionen: %@",

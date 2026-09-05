@@ -19,6 +19,21 @@ final class DecisionMemo {
     /// Bounded: past this, the oldest tenth is evicted in one sweep.
     static let maxEntries = 2000
 
+    /// Files above this size are never memoized: a full-content digest of a
+    /// multi-gigabyte video just to look up a verdict would cost more than
+    /// the classification it might save. Everything a model can usefully
+    /// classify (documents, e-books, images) is far below it.
+    static let maxHashedBytes: Int64 = 256 * 1024 * 1024
+
+    /// The memo key digest for a file — full content, so two large files that
+    /// share a prefix can never share a verdict — or nil when the file is too
+    /// large to be worth hashing (or can't be read).
+    static func digest(of url: URL) -> String? {
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+        guard size <= maxHashedBytes else { return nil }
+        return ContentHash.digest(of: url, limit: .max)
+    }
+
     private var entries: [String: Entry]
     private let url: URL
     private var dirty = false

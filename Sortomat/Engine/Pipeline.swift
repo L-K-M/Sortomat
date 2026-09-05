@@ -146,7 +146,7 @@ actor Pipeline {
         if keyDeferred > 0 {
             result.entries.append(ActivityEntry(
                 ok: true,
-                message: L10n.t("activity.keyDeferred", rule.name, keyDeferred)
+                message: L10n.plural("activity.keyDeferred", keyDeferred, rule.name)
             ))
         }
         return result
@@ -262,7 +262,7 @@ actor Pipeline {
         //    identical decision — no network, no cost, no budget, no key.
         var digest: String?
         if !memo.isEmpty {
-            digest = ContentHash.digest(of: file, limit: .max)
+            digest = DecisionMemo.digest(of: file)
             if let digest, let hit = memo.lookup(ruleID: rule.id, digest: digest) {
                 let remembered = Classification(
                     action: hit.action,
@@ -293,7 +293,7 @@ actor Pipeline {
         // Remember the verdict for these exact bytes — a re-download or a
         // renamed copy never pays again. Only answers that routed cleanly are
         // memoized: a malformed answer should get a fresh model call on retry.
-        if digest == nil { digest = ContentHash.digest(of: file, limit: .max) }
+        if digest == nil { digest = DecisionMemo.digest(of: file) }
         if let digest {
             memo.record(ruleID: rule.id, digest: digest, action: c.action,
                         relativePath: c.resolvedRelativePath(),

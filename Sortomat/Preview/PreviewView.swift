@@ -263,9 +263,9 @@ private struct HistoryTab: View {
             defer { busy = false }
             let result = await state.undoLastBatch()
             reload()
-            status = L10n.t("journal.undoBatchDone", result.undone)
+            status = L10n.plural("journal.undoBatchDone", result.undone)
             if result.failed > 0 {
-                error = L10n.t("journal.undoBatchFailed", result.failed)
+                error = L10n.plural("journal.undoBatchFailed", result.failed)
             }
         }
     }
