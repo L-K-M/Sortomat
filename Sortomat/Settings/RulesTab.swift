@@ -121,7 +121,7 @@ struct RulesTab: View {
         panel.nameFieldStringValue = "\(rule.name).\(RulePack.fileExtension)"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try RulePack(exporting: rule).encoded().write(to: url)
+            try RulePack(exporting: rule).encoded().write(to: url, options: .atomic)
             packStatus = L10n.t("rules.export.done", rule.name)
         } catch {
             packStatus = L10n.t("rules.pack.failed", error.localizedDescription)

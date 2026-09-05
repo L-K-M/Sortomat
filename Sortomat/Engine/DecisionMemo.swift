@@ -29,8 +29,11 @@ final class DecisionMemo {
     /// share a prefix can never share a verdict — or nil when the file is too
     /// large to be worth hashing (or can't be read).
     static func digest(of url: URL) -> String? {
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-        guard size <= maxHashedBytes else { return nil }
+        // Resource values follow symlinks; `attributesOfItem` has lstat
+        // semantics and would report the *link's* few bytes, letting a link to
+        // a huge file sail past the cap and get hashed in full.
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        guard Int64(size) <= maxHashedBytes else { return nil }
         return ContentHash.digest(of: url, limit: .max)
     }
 
@@ -51,17 +54,23 @@ final class DecisionMemo {
     var isEmpty: Bool { entries.isEmpty }
     var count: Int { entries.count }
 
-    static func key(ruleID: UUID, digest: String) -> String {
-        "\(ruleID.uuidString)|\(digest)"
+    /// A verdict belongs to one rule, one model and one file extension. The
+    /// model matters because a decision recorded by a cheap local model must
+    /// not be replayed after the user switches to a stronger one; the
+    /// extension because the stored path was routed for it, and identical
+    /// bytes can arrive under a different one.
+    static func key(ruleID: UUID, model: String, ext: String, digest: String) -> String {
+        "\(ruleID.uuidString)|\(model)|\(ext.lowercased())|\(digest)"
     }
 
-    func lookup(ruleID: UUID, digest: String) -> Entry? {
-        entries[Self.key(ruleID: ruleID, digest: digest)]
+    func lookup(ruleID: UUID, model: String, ext: String, digest: String) -> Entry? {
+        entries[Self.key(ruleID: ruleID, model: model, ext: ext, digest: digest)]
     }
 
-    func record(ruleID: UUID, digest: String, action: String, relativePath: String?,
+    func record(ruleID: UUID, model: String, ext: String, digest: String,
+                action: String, relativePath: String?,
                 reason: String?, confidence: Double?, now: Date = Date()) {
-        entries[Self.key(ruleID: ruleID, digest: digest)] = Entry(
+        entries[Self.key(ruleID: ruleID, model: model, ext: ext, digest: digest)] = Entry(
             action: action, relativePath: relativePath, reason: reason,
             confidence: confidence, date: now
         )
@@ -76,6 +85,14 @@ final class DecisionMemo {
         let before = entries.count
         entries = entries.filter { !$0.key.hasPrefix(prefix) }
         if entries.count != before { dirty = true }
+    }
+
+    /// Drop every remembered verdict (a global change — a new model, a new
+    /// provider — invalidates all of them at once).
+    func removeAll() {
+        guard !entries.isEmpty else { return }
+        entries.removeAll()
+        dirty = true
     }
 
     private func evictIfNeeded() {

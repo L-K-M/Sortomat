@@ -21,9 +21,21 @@ final class ProcessLock {
     static func acquire(directory: URL = ConfigStore.directory) -> ProcessLock? {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let path = directory.appendingPathComponent(".lock").path
-        let fd = open(path, O_CREAT | O_RDWR, 0o644)
-        guard fd >= 0 else { return nil }
+        // O_CLOEXEC: without it any child process inherits the descriptor, and
+        // because a flock belongs to the open file description the child would
+        // keep the lock alive after this process died — exactly what the
+        // "the kernel releases it when the process dies" promise rules out.
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        guard fd >= 0 else {
+            Log.app.error("process lock: cannot open \(path, privacy: .public) (errno \(errno))")
+            return nil
+        }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            // EWOULDBLOCK is the expected "someone else has it"; anything else
+            // means the mechanism itself is broken and shouldn't look the same.
+            if errno != EWOULDBLOCK {
+                Log.app.error("process lock: flock failed (errno \(errno))")
+            }
             close(fd)
             return nil
         }

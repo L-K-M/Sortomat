@@ -60,7 +60,10 @@ enum HeadlessRunner {
     }
 
     private static func undoLast() -> Never {
-        let entries = Journal.recent(limit: 500)
+        // The whole journal: a pass over a big folder can journal more than a
+        // few hundred moves, and a truncated window makes `lastBatch` reverse
+        // only part of the batch while still printing success.
+        let entries = Journal.recent(limit: .max)
         let batch = Journal.lastBatch(in: entries)
         guard !batch.isEmpty else {
             print(L10n.t("headless.nothingToUndo"))

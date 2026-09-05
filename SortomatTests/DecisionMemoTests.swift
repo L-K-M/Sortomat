@@ -27,26 +27,36 @@ final class DecisionMemoTests: XCTestCase {
         let rule = UUID()
         do {
             let memo = DecisionMemo(url: memoFile)
-            memo.record(ruleID: rule, digest: "abc", action: "move",
+            memo.record(ruleID: rule, model: "m", ext: "epub", digest: "abc", action: "move",
                         relativePath: "Books/x.epub", reason: "novel", confidence: 0.9)
             memo.save()
         }
         let reloaded = DecisionMemo(url: memoFile)
-        let hit = reloaded.lookup(ruleID: rule, digest: "abc")
+        let hit = reloaded.lookup(ruleID: rule, model: "m", ext: "epub", digest: "abc")
         XCTAssertEqual(hit?.relativePath, "Books/x.epub")
         XCTAssertEqual(hit?.action, "move")
-        XCTAssertNil(reloaded.lookup(ruleID: UUID(), digest: "abc"),
+        XCTAssertNil(reloaded.lookup(ruleID: UUID(), model: "m", ext: "epub", digest: "abc"),
                      "the memo is per-rule: another rule may decide differently")
+        XCTAssertNil(reloaded.lookup(ruleID: rule, model: "stronger", ext: "epub", digest: "abc"),
+                     "a verdict from one model must not be replayed under another")
+        XCTAssertNil(reloaded.lookup(ruleID: rule, model: "m", ext: "pdf", digest: "abc"),
+                     "identical bytes under a different extension were routed differently")
     }
 
     func testForgetDropsOnlyThatRule() {
         let memo = DecisionMemo(url: memoFile)
         let a = UUID(), b = UUID()
-        memo.record(ruleID: a, digest: "d", action: "move", relativePath: "X", reason: nil, confidence: nil)
-        memo.record(ruleID: b, digest: "d", action: "skip", relativePath: nil, reason: nil, confidence: nil)
+        memo.record(ruleID: a, model: "m", ext: "txt", digest: "d", action: "move",
+                    relativePath: "X", reason: nil, confidence: nil)
+        memo.record(ruleID: b, model: "m", ext: "txt", digest: "d", action: "skip",
+                    relativePath: nil, reason: nil, confidence: nil)
         memo.forget(ruleID: a)
-        XCTAssertNil(memo.lookup(ruleID: a, digest: "d"))
-        XCTAssertNotNil(memo.lookup(ruleID: b, digest: "d"))
+        XCTAssertNil(memo.lookup(ruleID: a, model: "m", ext: "txt", digest: "d"))
+        XCTAssertNotNil(memo.lookup(ruleID: b, model: "m", ext: "txt", digest: "d"))
+
+        memo.removeAll()
+        XCTAssertNil(memo.lookup(ruleID: b, model: "m", ext: "txt", digest: "d"),
+                     "removeAll drops every rule's verdicts")
     }
 
     func testEvictionDropsTheOldest() {
@@ -54,13 +64,15 @@ final class DecisionMemoTests: XCTestCase {
         let rule = UUID()
         let base = Date(timeIntervalSinceNow: -Double(DecisionMemo.maxEntries + 10))
         for index in 0...(DecisionMemo.maxEntries) {
-            memo.record(ruleID: rule, digest: "d\(index)", action: "move",
+            memo.record(ruleID: rule, model: "m", ext: "txt", digest: "d\(index)", action: "move",
                         relativePath: "X", reason: nil, confidence: nil,
                         now: base.addingTimeInterval(Double(index)))
         }
         XCTAssertLessThanOrEqual(memo.count, DecisionMemo.maxEntries)
-        XCTAssertNil(memo.lookup(ruleID: rule, digest: "d0"), "the oldest entry must be evicted")
-        XCTAssertNotNil(memo.lookup(ruleID: rule, digest: "d\(DecisionMemo.maxEntries)"),
+        XCTAssertNil(memo.lookup(ruleID: rule, model: "m", ext: "txt", digest: "d0"),
+                     "the oldest entry must be evicted")
+        XCTAssertNotNil(memo.lookup(ruleID: rule, model: "m", ext: "txt",
+                                    digest: "d\(DecisionMemo.maxEntries)"),
                         "the newest entry must survive")
     }
 
@@ -84,7 +96,7 @@ final class DecisionMemoTests: XCTestCase {
 
         let memo = DecisionMemo(url: memoFile)
         let digest = try XCTUnwrap(ContentHash.digest(of: file, limit: .max))
-        memo.record(ruleID: rule.id, digest: digest, action: "move",
+        memo.record(ruleID: rule.id, model: config.model, ext: "epub", digest: digest, action: "move",
                     relativePath: "Books/book.epub", reason: "seen before", confidence: 0.95)
 
         let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
@@ -110,11 +122,48 @@ final class DecisionMemoTests: XCTestCase {
                                 memo: DecisionMemo(url: memoFile))
         let rule = UUID()
         await pipeline.markUndone(ruleID: rule, sourcePath: dir.appendingPathComponent("watch/x.txt").path)
-        await pipeline.rememberForTesting(ruleID: rule, digest: "d", action: "move", relativePath: "A/x.txt")
+        await pipeline.rememberForTesting(ruleID: rule, model: "m", ext: "txt", digest: "d",
+                                          action: "move", relativePath: "A/x.txt")
 
         await pipeline.persist()
 
         XCTAssertTrue(fm.fileExists(atPath: ledgerURL.path), "the ledger must be written")
         XCTAssertTrue(fm.fileExists(atPath: memoFile.path), "the decision memo must be written")
+    }
+
+    /// A symlink reports its own few bytes to `attributesOfItem`, so the size
+    /// cap used to let a link to a huge file through and hash the target whole.
+    func testDigestCapFollowsSymlinks() throws {
+        let big = dir.appendingPathComponent("big.bin")
+        try Data(count: 1024).write(to: big)
+        let link = dir.appendingPathComponent("link.bin")
+        try fm.createSymbolicLink(at: link, withDestinationURL: big)
+
+        // Under the real cap both resolve; the point is that the link is sized
+        // like its target rather than like a link.
+        XCTAssertEqual(DecisionMemo.digest(of: link), DecisionMemo.digest(of: big))
+        let size = try XCTUnwrap((try? link.resourceValues(forKeys: [.fileSizeKey]))?.fileSize)
+        XCTAssertEqual(size, 1024, "resource values must report the target's size, not the link's")
+    }
+
+    /// Editing a rule drops its previews so it re-plans — which only works if
+    /// the memo forgets too, since `decide` consults the memo before the model.
+    func testForgettingPreviewsAlsoForgetsMemoizedVerdicts() async throws {
+        let file = dir.appendingPathComponent("watch/doc.txt")
+        try "bytes".write(to: file, atomically: true, encoding: .utf8)
+        let rule = Rule(name: "R",
+                        watchPath: dir.appendingPathComponent("watch").path,
+                        targetPath: dir.appendingPathComponent("target").path)
+        let memo = DecisionMemo(url: memoFile)
+        let digest = try XCTUnwrap(DecisionMemo.digest(of: file))
+        memo.record(ruleID: rule.id, model: "m", ext: "txt", digest: digest, action: "move",
+                    relativePath: "A/doc.txt", reason: nil, confidence: nil)
+
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: memo)
+        await pipeline.forgetPreviews(ruleID: rule.id)
+
+        XCTAssertNil(memo.lookup(ruleID: rule.id, model: "m", ext: "txt", digest: digest),
+                     "a rewritten rule must not keep serving its old verdict for free")
     }
 }
