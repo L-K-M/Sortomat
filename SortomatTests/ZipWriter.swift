@@ -1,37 +1,43 @@
+import Compression
 import Foundation
 
-/// A minimal *stored* (uncompressed) ZIP writer, used only by tests to build
-/// fixture EPUBs/archives so the reader can be exercised without shelling out.
-/// CRC fields are left zero — `ZipArchive` doesn't verify them.
+/// A minimal ZIP writer (stored or deflated entries), used only by tests to
+/// build fixture EPUBs/archives so the reader can be exercised without
+/// shelling out. CRC fields are left zero — `ZipArchive` doesn't verify them.
 struct ZipWriter {
     private struct Item {
         let name: String
-        let data: Data
+        let method: UInt16
+        let compressedSize: Int
+        let uncompressedSize: Int
         let offset: Int
     }
 
     private var items: [Item] = []
     private var buffer = Data()
 
-    mutating func add(_ name: String, _ contents: Data) {
+    mutating func add(_ name: String, _ contents: Data, deflate: Bool = false) {
+        let payload = deflate ? Self.deflate(contents) : contents
+        let method: UInt16 = deflate ? 8 : 0
         let offset = buffer.count
         var header = Data()
         header.le32(0x0403_4b50)   // local file header signature
         header.le16(20)            // version needed
         header.le16(0)             // flags
-        header.le16(0)             // method: stored
+        header.le16(method)        // method: stored or deflate
         header.le16(0)             // mod time
         header.le16(0)             // mod date
         header.le32(0)             // crc-32 (unchecked)
-        header.le32(UInt32(contents.count)) // compressed size
+        header.le32(UInt32(payload.count))  // compressed size
         header.le32(UInt32(contents.count)) // uncompressed size
         let nameBytes = Array(name.utf8)
         header.le16(UInt16(nameBytes.count))
         header.le16(0)             // extra length
         header.append(contentsOf: nameBytes)
         buffer.append(header)
-        buffer.append(contents)
-        items.append(Item(name: name, data: contents, offset: offset))
+        buffer.append(payload)
+        items.append(Item(name: name, method: method, compressedSize: payload.count,
+                          uncompressedSize: contents.count, offset: offset))
     }
 
     mutating func add(_ name: String, _ text: String) {
@@ -47,12 +53,12 @@ struct ZipWriter {
             entry.le16(20)          // version made by
             entry.le16(20)          // version needed
             entry.le16(0)           // flags
-            entry.le16(0)           // method: stored
+            entry.le16(item.method)
             entry.le16(0)           // mod time
             entry.le16(0)           // mod date
             entry.le32(0)           // crc-32
-            entry.le32(UInt32(item.data.count))
-            entry.le32(UInt32(item.data.count))
+            entry.le32(UInt32(item.compressedSize))
+            entry.le32(UInt32(item.uncompressedSize))
             let nameBytes = Array(item.name.utf8)
             entry.le16(UInt16(nameBytes.count))
             entry.le16(0)           // extra
@@ -77,6 +83,23 @@ struct ZipWriter {
         eocd.le16(0)                // comment length
         out.append(eocd)
         return out
+    }
+
+    /// Raw deflate (what zip method 8 stores) via the Compression framework —
+    /// `COMPRESSION_ZLIB` there means deflate without the zlib header, the
+    /// same format `ZipArchive.inflate` decodes.
+    static func deflate(_ data: Data) -> Data {
+        guard !data.isEmpty else { return data }
+        let capacity = data.count + 1024
+        var dst = Data(count: capacity)
+        let written = dst.withUnsafeMutableBytes { dstRaw -> Int in
+            guard let dstBase = dstRaw.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+            return data.withUnsafeBytes { srcRaw -> Int in
+                guard let srcBase = srcRaw.bindMemory(to: UInt8.self).baseAddress else { return 0 }
+                return compression_encode_buffer(dstBase, capacity, srcBase, data.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        return dst.prefix(written)
     }
 }
 

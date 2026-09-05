@@ -41,4 +41,22 @@ final class HTMLTextTests: XCTestCase {
     func testCollapsesWhitespace() {
         XCTAssertEqual(HTMLText.strip("<p>a\n\n   b\t c</p>"), "a b c")
     }
+
+
+    func testBareAmpersandsCostLinearTime() {
+        // Every `&` used to scan the whole remainder for a `;` — a chapter of
+        // ampersands with no semicolons was quadratic and stalled the scan.
+        let input = String(repeating: "&", count: 50_000) + " end"
+        XCTAssertEqual(HTMLText.decodeEntities(input), input)
+    }
+
+    func testDistantSemicolonDoesNotMakeAnEntity() {
+        XCTAssertEqual(HTMLText.decodeEntities("Tom & Jerry; friends"), "Tom & Jerry; friends")
+        XCTAssertEqual(HTMLText.decodeEntities("&amp; and &unknownentity; stay"), "& and &unknownentity; stay")
+    }
+
+    func testStripBoundsHugeInput() {
+        let html = "<p>" + String(repeating: "x", count: HTMLText.maxInputCharacters + 5_000) + "</p>"
+        XCTAssertLessThanOrEqual(HTMLText.strip(html).count, HTMLText.maxInputCharacters)
+    }
 }

@@ -157,4 +157,34 @@ final class JournalTests: XCTestCase {
         let batch = Journal.lastBatch(in: entries)
         XCTAssertEqual(batch.map(\.sourcePath), ["/a1", "/a2"])
     }
+
+
+    func testUndoMoveRefusesWhenTheDestinationWasReplaced() throws {
+        let source = dir.appendingPathComponent("original/x.txt")
+        let dest = dir.appendingPathComponent("sorted/x.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "moved".write(to: dest, atomically: true, encoding: .utf8)
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: false, reason: "r",
+                                 destinationStamp: Journal.stamp(of: dest))
+
+        // Something else replaced the file at the destination since.
+        try "a much longer replacement written later".write(to: dest, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try Journal.undo(entry))
+        XCTAssertTrue(fm.fileExists(atPath: dest.path), "the impostor must be left where it is")
+        XCTAssertFalse(fm.fileExists(atPath: source.path))
+    }
+
+    func testUndoMoveWithMatchingStampRestores() throws {
+        let source = dir.appendingPathComponent("original/x.txt")
+        let dest = dir.appendingPathComponent("sorted/x.txt")
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "moved".write(to: dest, atomically: true, encoding: .utf8)
+        let entry = JournalEntry(ruleID: UUID(), ruleName: "R", sourcePath: source.path,
+                                 destinationPath: dest.path, wasCopy: false, reason: "r",
+                                 destinationStamp: Journal.stamp(of: dest))
+        try Journal.undo(entry)
+        XCTAssertTrue(fm.fileExists(atPath: source.path))
+    }
 }

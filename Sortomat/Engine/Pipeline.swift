@@ -214,6 +214,11 @@ actor Pipeline {
             return outcome
         } catch {
             ledger.record(ruleID: rule.id, fingerprint: fingerprint, status: .failed)
+            // A request that reached the model and failed (HTTP error, bad
+            // body, network) still counts against the per-check budget —
+            // otherwise a backlog against a rate-limited endpoint fires one
+            // paid request per file with no cap at all.
+            if error is LLMError || error is URLError { outcome.usedLLM = true }
             outcome.entry = ActivityEntry(
                 ok: false,
                 message: L10n.t("activity.error", rule.name, file.lastPathComponent, error.localizedDescription)
@@ -251,7 +256,7 @@ actor Pipeline {
                 ruleID: rule.id, ruleName: rule.name, source: file,
                 kind: rule.copyInsteadOfMove ? .copy : .move,
                 destination: dest, origin: .preRule,
-                reason: "pre-rule «\(name)»", confidence: nil,
+                reason: L10n.t("reason.preRule", name), confidence: nil,
                 copyInsteadOfMove: rule.copyInsteadOfMove
             ))
         case .useLLM:
@@ -311,56 +316,87 @@ actor Pipeline {
         _ c: Classification, file: URL, rule: Rule, target: URL, ext: String,
         usage: TokenUsage, usedLLM: Bool
     ) throws -> DecideResult {
-        guard c.isMove else {
+        let routing = try Self.routing(for: c, rule: rule, fileName: file.lastPathComponent)
+        guard let relativePath = routing.relativePath else {
             return DecideResult(plan: PlannedAction(
                 ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
                 destination: nil, origin: .model,
-                reason: L10n.t("activity.skipped", rule.name, file.lastPathComponent,
-                               c.reason ?? "rule does not apply"),
+                reason: L10n.t("activity.skipped", rule.name, file.lastPathComponent, routing.reason),
                 confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
             ), usage: usage, usedLLM: usedLLM)
+        }
+        let dest = try Sanitizer.destination(target: target, relativePath: relativePath, originalExtension: ext)
+        return DecideResult(plan: PlannedAction(
+            ruleID: rule.id, ruleName: rule.name, source: file, kind: routing.kind,
+            destination: dest, origin: routing.origin, reason: routing.reason,
+            confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
+        ), usage: usage, usedLLM: usedLLM)
+    }
+
+    /// The safety valves applied to a model answer, as pure data so they can
+    /// be unit-tested without a pipeline: skip handling, taxonomy enforcement
+    /// and the confidence quarantine.
+    struct Routing: Equatable {
+        /// nil means skip.
+        var relativePath: String?
+        var kind: PlannedAction.Kind
+        var origin: PlannedAction.Origin
+        var reason: String
+    }
+
+    static func routing(for c: Classification, rule: Rule, fileName: String) throws -> Routing {
+        guard c.isMove else {
+            return Routing(relativePath: nil, kind: .skip, origin: .model,
+                           reason: c.reason ?? L10n.t("reason.ruleDoesNotApply"))
         }
         guard let relative = c.resolvedRelativePath() else {
             throw LLMError.badResponse(L10n.t("error.missingPath"))
         }
 
-        // Taxonomy enforcement → quarantine out-of-set folders.
         var origin: PlannedAction.Origin = .model
         var quarantine = false
-        var reasonSuffix = c.reason ?? ""
+        var reason = c.reason ?? ""
+
+        // Taxonomy is checked against the path that will actually be applied
+        // — not the `folder` field on its own, which a contradictory (or
+        // prompt-injected) answer could set to an allowed name while
+        // `relative_path` points elsewhere.
         if !rule.taxonomy.isEmpty {
-            let top = c.topFolder() ?? ""
+            let top = Classification.topFolder(ofRelativePath: relative) ?? ""
             let allowed = rule.taxonomy.contains { $0.caseInsensitiveCompare(top) == .orderedSame }
             if !allowed {
                 quarantine = true
                 origin = .taxonomy
-                reasonSuffix = "folder «\(top)» not in taxonomy"
+                reason = L10n.t("reason.notInTaxonomy", top)
             }
         }
 
-        // Confidence threshold → quarantine low-confidence decisions.
-        if !quarantine, rule.confidenceThreshold > 0,
-           let confidence = c.confidence, confidence < rule.confidenceThreshold {
-            quarantine = true
-            origin = .confidence
-            reasonSuffix = String(format: "confidence %.0f%% below threshold", confidence * 100)
+        // Confidence threshold → quarantine low-confidence decisions. A
+        // missing or unparseable confidence is *low*, not trusted: the
+        // off-schema answers deserve the most suspicion, not the least.
+        if !quarantine, rule.confidenceThreshold > 0 {
+            if let confidence = c.confidence {
+                if confidence < rule.confidenceThreshold {
+                    quarantine = true
+                    origin = .confidence
+                    reason = L10n.t("reason.lowConfidence", Int((confidence * 100).rounded()))
+                }
+            } else {
+                quarantine = true
+                origin = .confidence
+                reason = L10n.t("reason.noConfidence")
+            }
         }
 
-        let relativePath: String
-        let kind: PlannedAction.Kind
         if quarantine {
-            relativePath = "\(rule.quarantineSubfolder)/\(file.lastPathComponent)"
-            kind = .quarantine
-        } else {
-            relativePath = relative
-            kind = rule.copyInsteadOfMove ? .copy : .move
+            // An emptied quarantine folder means "the target itself", not the
+            // absolute "/name" the old string interpolation produced.
+            let folder = rule.quarantineSubfolder.trimmingCharacters(in: .whitespaces)
+            let path = folder.isEmpty ? fileName : "\(folder)/\(fileName)"
+            return Routing(relativePath: path, kind: .quarantine, origin: origin, reason: reason)
         }
-        let dest = try Sanitizer.destination(target: target, relativePath: relativePath, originalExtension: ext)
-        return DecideResult(plan: PlannedAction(
-            ruleID: rule.id, ruleName: rule.name, source: file, kind: kind,
-            destination: dest, origin: origin, reason: reasonSuffix,
-            confidence: c.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
-        ), usage: usage, usedLLM: usedLLM)
+        return Routing(relativePath: relative, kind: rule.copyInsteadOfMove ? .copy : .move,
+                       origin: origin, reason: reason)
     }
 
     // MARK: - Apply
@@ -403,7 +439,7 @@ actor Pipeline {
                         ruleID: plan.ruleID, ruleName: plan.ruleName,
                         sourcePath: plan.source.path, destinationPath: url.path,
                         wasCopy: plan.copyInsteadOfMove, reason: plan.reason,
-                        batchID: batchID
+                        batchID: batchID, destinationStamp: Journal.stamp(of: url)
                     ))
                     return ActivityEntry(ok: true,
                                          message: filedMessage(plan, finalURL: url, target: target, name: name),

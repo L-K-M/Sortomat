@@ -107,7 +107,11 @@ struct EpubReader {
             guard let entry = zip.entry(named: docPath),
                   let data = zip.data(for: entry) else { continue }
 
-            let text = HTMLText.strip(TextDecoding.decode(data))
+            // Bounded: only a few thousand characters are kept, so a
+            // multi-megabyte (or hostile) chapter must not be fully decoded
+            // and regex-stripped just to be truncated.
+            let markup = String(TextDecoding.decode(data).prefix(HTMLText.maxInputCharacters))
+            let text = HTMLText.strip(markup)
             if text.count < 200 { continue } // skip cover/title/TOC pages
             chunks.append(text)
             collected += text.count
@@ -129,11 +133,15 @@ struct EpubReader {
 
     // MARK: - Lenient XML
 
+    /// container.xml and the OPF are attacker-controlled (any downloaded
+    /// EPUB); external entities are never resolved, so a
+    /// `<!ENTITY x SYSTEM "file:///…">` can't pull local file contents into
+    /// the metadata that is sent to the model and used in folder names.
     private static func parseXML(_ data: Data) -> XMLElement? {
-        if let doc = try? XMLDocument(data: data, options: [.nodePreserveWhitespace]) {
+        if let doc = try? XMLDocument(data: data, options: [.nodePreserveWhitespace, .nodeLoadExternalEntitiesNever]) {
             return doc.rootElement()
         }
-        if let doc = try? XMLDocument(data: data, options: [.documentTidyXML]) {
+        if let doc = try? XMLDocument(data: data, options: [.documentTidyXML, .nodeLoadExternalEntitiesNever]) {
             return doc.rootElement()
         }
         return nil

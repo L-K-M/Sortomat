@@ -51,4 +51,21 @@ final class ZipArchiveTests: XCTestCase {
         let archive = ZipArchive(url: url)
         XCTAssertEqual(archive?.entries.count, 1)
     }
+
+
+    func testDeflatedEntryIsInflated() throws {
+        // Every real EPUB uses deflate; the stored-only fixtures never
+        // exercised `ZipArchive.inflate`.
+        let text = String(repeating: "In a hole in the ground there lived a hobbit. ", count: 200)
+        var writer = ZipWriter()
+        writer.add("chapter.xhtml", Data(text.utf8), deflate: true)
+        let url = dir.appendingPathComponent("deflated.zip")
+        try writer.data().write(to: url)
+
+        let archive = try XCTUnwrap(ZipArchive(url: url))
+        let entry = try XCTUnwrap(archive.entry(named: "chapter.xhtml"))
+        XCTAssertEqual(entry.method, 8)
+        XCTAssertLessThan(entry.compressedSize, entry.uncompressedSize)
+        XCTAssertEqual(archive.data(for: entry), Data(text.utf8))
+    }
 }

@@ -3,30 +3,62 @@ import Foundation
 /// Command-line entry points used by tests, scripts and launchd jobs. Runs the
 /// same Pipeline the GUI uses, then exits.
 enum HeadlessRunner {
+    enum Command: String, CaseIterable {
+        case scanOnce = "scan-once"
+        case preview
+        case undo
+        case help
+        case version
+    }
+
     /// Held for the whole run (a static so ARC can't release it early); the
     /// process exit releases it.
     private static var lock: ProcessLock?
 
+    /// The command an argument names, accepting the usual spellings of the two
+    /// informational ones. Unknown words yield nil.
+    static func command(for argument: String) -> Command? {
+        switch argument {
+        case "--help", "-h", "-help": return .help
+        case "--version", "-v", "-version": return .version
+        default: return Command(rawValue: argument)
+        }
+    }
+
+    static var usage: String { L10n.t("headless.usage") }
+
     static func run(_ arguments: [String]) async -> Never {
-        let command = arguments.first ?? "scan-once"
-        // Every subcommand writes the ledger and/or journal. Running beside a
-        // live GUI (or a second headless run) clobbers records — refuse
-        // politely instead.
+        guard let first = arguments.first, let command = command(for: first) else {
+            FileHandle.standardError.write(Data((L10n.t("headless.unknownCommand", arguments.first ?? "") + "\n\n" + usage + "\n").utf8))
+            exit(64)
+        }
+        switch command {
+        case .help:
+            print(usage)
+            exit(0)
+        case .version:
+            print(L10n.t("headless.version", AppInfo.shortVersion, AppInfo.buildVersion))
+            exit(0)
+        case .scanOnce, .preview, .undo:
+            break
+        }
+        // Every remaining subcommand writes the ledger and/or journal. Running
+        // beside a live GUI (or a second headless run) clobbers records —
+        // refuse politely instead.
         lock = ProcessLock.acquire()
         if lock == nil {
             FileHandle.standardError.write(Data((L10n.t("process.locked") + "\n").utf8))
             exit(3)
         }
         switch command {
-        case "scan-once":
+        case .scanOnce:
             await scanOnce(apply: true)
-        case "preview":
+        case .preview:
             await scanOnce(apply: false)
-        case "undo":
+        case .undo:
             undoLast()
-        default:
-            FileHandle.standardError.write(Data((L10n.t("headless.unknownCommand", command) + "\n").utf8))
-            exit(64)
+        case .help, .version:
+            exit(0) // handled above
         }
     }
 

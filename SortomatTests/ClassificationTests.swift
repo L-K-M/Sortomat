@@ -75,4 +75,36 @@ final class ClassificationTests: XCTestCase {
         let c = try decode(#"{"action":"move"}"#)
         XCTAssertNil(c.resolvedRelativePath())
     }
+
+
+    // MARK: - Off-schema answers
+
+    func testBooleanFalseActionIsASkip() throws {
+        let c = try decode(#"{"action":false,"folder":"A","filename":"x.pdf"}"#)
+        XCTAssertFalse(c.isMove, "an explicit refusal must not move the file")
+    }
+
+    func testBooleanTrueActionIsAMove() throws {
+        XCTAssertTrue(try decode(#"{"action":true,"folder":"A","filename":"x.pdf"}"#).isMove)
+    }
+
+    func testNullActionIsASkip() throws {
+        XCTAssertFalse(try decode(#"{"action":null,"folder":"A","filename":"x.pdf"}"#).isMove)
+    }
+
+    func testConfidenceInEveryShape() throws {
+        XCTAssertEqual(Classification.parseConfidence("0,85") ?? 0, 0.85, accuracy: 0.0001)
+        XCTAssertEqual(Classification.parseConfidence(" 85 % ") ?? 0, 0.85, accuracy: 0.0001)
+        XCTAssertEqual(Classification.parseConfidence("high") ?? 0, 0.9, accuracy: 0.0001)
+        XCTAssertNil(Classification.parseConfidence("maybe"))
+        let c = try decode(#"{"action":"move","folder":"A","filename":"x.pdf","confidence":"0,42"}"#)
+        XCTAssertEqual(c.confidence ?? 0, 0.42, accuracy: 0.0001)
+    }
+
+    func testTopFolderIgnoresLeadingDotSegment() throws {
+        XCTAssertEqual(try decode(#"{"action":"move","relative_path":"./Fantasy/x.epub"}"#).topFolder(), "Fantasy")
+        XCTAssertEqual(try decode(#"{"action":"move","folder":"./Krimi","filename":"x.epub"}"#).topFolder(), "Krimi")
+        XCTAssertEqual(Classification.topFolder(ofRelativePath: "./A/B/x.pdf"), "A")
+        XCTAssertNil(Classification.topFolder(ofRelativePath: "x.pdf"))
+    }
 }
