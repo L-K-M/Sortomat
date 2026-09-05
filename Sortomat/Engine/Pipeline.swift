@@ -269,26 +269,21 @@ actor Pipeline {
     ) async throws -> DecideResult {
         let ext = file.pathExtension
 
-        // 1. Deterministic pre-rules.
-        switch DeterministicEngine.evaluate(rule: rule, file: file) {
-        case .skip(let name):
-            return DecideResult(plan: PlannedAction(
-                ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
-                destination: nil, origin: .preRule,
-                reason: L10n.t("activity.preRuleSkip", rule.name, file.lastPathComponent, name),
-                confidence: nil, copyInsteadOfMove: rule.copyInsteadOfMove
-            ))
-        case .route(let relativePath, let name):
-            let dest = try Sanitizer.destination(target: target, relativePath: relativePath, originalExtension: ext)
-            return DecideResult(plan: PlannedAction(
-                ruleID: rule.id, ruleName: rule.name, source: file,
-                kind: rule.copyInsteadOfMove ? .copy : .move,
-                destination: dest, origin: .preRule,
-                reason: L10n.t("reason.preRule", name), confidence: nil,
-                copyInsteadOfMove: rule.copyInsteadOfMove
-            ))
-        case .useLLM:
-            break
+        // 1. The rule's steps. Evaluation is pure: everything it can know
+        //    arrives through `FileFacts`, which loads each cost tier at most
+        //    once and only when a condition actually asks.
+        let context = evaluationContext(file: file, rule: rule, target: target, allowModel: allowLLM)
+        var resumeToken: ResumeToken?
+        switch RuleEvaluator.evaluate(context) {
+        case .decided(let placement, let trace):
+            return try Self.plan(from: placement, trace: trace, file: file,
+                                 rule: rule, target: target, ext: ext)
+        case .deferred:
+            // The model is needed and unavailable (no key, no budget). The
+            // caller reports the deferral; nothing is decided.
+            return DecideResult(plan: nil)
+        case .needsModel(_, let token, _):
+            resumeToken = token
         }
 
         // 2. Content-addressed memo: identical bytes under this rule get the
@@ -326,8 +321,17 @@ actor Pipeline {
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )
         let c = result.classification
-        let decided = try route(c, file: file, rule: rule, target: target,
+        var decided = try route(c, file: file, rule: rule, target: target,
                                 ext: ext, usage: result.usage, usedLLM: true)
+        // The model is a *binding* action: its answer fills {model.*} and the
+        // actions after it decide what to do with them. A rule whose askModel
+        // is the last action behaves exactly as before.
+        if let resumeToken, let resumed = try resumedPlan(
+            resumeToken, classification: c, decided: decided, file: file,
+            rule: rule, target: target, ext: ext, usage: result.usage, allowModel: allowLLM
+        ) {
+            decided = resumed
+        }
 
         // Remember the verdict for these exact bytes — a re-download or a
         // renamed copy never pays again. Only answers that routed cleanly are
@@ -339,6 +343,101 @@ actor Pipeline {
                         reason: c.reason, confidence: c.confidence)
         }
         return decided
+    }
+
+    /// The evaluation context for one file: the rule, the facts, and whether
+    /// the model may be consulted at all right now.
+    private func evaluationContext(file: URL, rule: Rule, target: URL,
+                                   allowModel: Bool) -> RuleEvaluator.Context {
+        let watchRoot = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
+        // The target index is only built for a rule that actually asks "is
+        // this already filed?" — otherwise every scan would enumerate the
+        // target folder for nothing.
+        let index = Self.mentions(.duplicateInTarget, in: rule) ? TargetIndex(root: target) : nil
+        let source = LiveFactSource(url: file, targetPath: target.path, targetIndex: index)
+        let facts = FileFacts(
+            url: file, watchRoot: watchRoot, source: source,
+            contentPolicy: rule.privacyMode == .metadataOnly ? .blocked : .allowed
+        )
+        return RuleEvaluator.Context(rule: rule, facts: facts, allowModel: allowModel)
+    }
+
+    static func mentions(_ attribute: Attribute, in rule: Rule) -> Bool {
+        func walk(_ group: ConditionGroup) -> Bool {
+            group.items.contains { item in
+                switch item {
+                case .test(let test): return test.attribute == attribute
+                case .group(let nested): return walk(nested)
+                }
+            }
+        }
+        return rule.steps.contains { walk($0.when) }
+    }
+
+    /// A `Placement` becomes a `PlannedAction`. `Sanitizer` still builds and
+    /// confines every path; the engine only ever says what and where.
+    private static func plan(from placement: Placement, trace: RuleTrace, file: URL,
+                             rule: Rule, target: URL, ext: String,
+                             usage: TokenUsage = TokenUsage(),
+                             usedLLM: Bool = false) throws -> DecideResult {
+        let reason = placement.reason.isEmpty ? trace.summary : placement.reason
+        func skipPlan() -> DecideResult {
+            DecideResult(plan: PlannedAction(
+                ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
+                destination: nil, origin: placement.origin, reason: reason,
+                confidence: placement.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
+            ), usage: usage, usedLLM: usedLLM)
+        }
+        guard placement.operation != .skip, let rendered = placement.relativePath else {
+            return skipPlan()
+        }
+        let relative = rendered.string()
+        guard !relative.trimmingCharacters(in: .whitespaces).isEmpty else { return skipPlan() }
+
+        let root = placement.rootPath.map { URL(fileURLWithPath: $0) } ?? target
+        let destination = try Sanitizer.destination(
+            target: root, relativePath: relative, originalExtension: ext
+        )
+        let kind: PlannedAction.Kind
+        switch placement.operation {
+        case .copy: kind = .copy
+        case .quarantine: kind = .quarantine
+        case .move, .rename, .trash: kind = .move
+        case .skip: kind = .skip
+        }
+        return DecideResult(plan: PlannedAction(
+            ruleID: rule.id, ruleName: rule.name, source: file, kind: kind,
+            destination: destination, origin: placement.origin, reason: reason,
+            confidence: placement.confidence,
+            copyInsteadOfMove: placement.operation == .copy
+        ), usage: usage, usedLLM: usedLLM)
+    }
+
+    /// Hand the model's answer back to the engine so the actions after
+    /// `askModel` can use it. Returns nil when the answer produced no
+    /// placement (a skip, or a valve that already decided), in which case the
+    /// existing routing result stands.
+    private func resumedPlan(_ token: ResumeToken, classification: Classification,
+                             decided: DecideResult, file: URL, rule: Rule, target: URL,
+                             ext: String, usage: TokenUsage,
+                             allowModel: Bool) throws -> DecideResult? {
+        guard let plan = decided.plan, plan.kind != .skip, !rule.steps.isEmpty else { return nil }
+        let routing = try Self.routing(for: classification, rule: rule,
+                                       fileName: file.lastPathComponent)
+        guard let relativePath = routing.relativePath else { return nil }
+        let answer = ModelAnswer(
+            relativePath: relativePath,
+            reason: routing.reason,
+            confidence: classification.confidence,
+            quarantined: routing.origin == .confidence || routing.origin == .taxonomy
+        )
+        let context = evaluationContext(file: file, rule: rule, target: target,
+                                        allowModel: allowModel)
+        guard case .decided(let placement, let trace) = RuleEvaluator.resume(
+            token, answer: answer, context: context
+        ) else { return nil }
+        return try Self.plan(from: placement, trace: trace, file: file, rule: rule,
+                             target: target, ext: ext, usage: usage, usedLLM: true)
     }
 
     /// The routing shared by a fresh model answer and a memo hit: skip
