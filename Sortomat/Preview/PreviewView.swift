@@ -155,6 +155,8 @@ private struct PlanRow: View {
         case .taxonomy: return L10n.t("preview.origin.taxonomy")
         case .confidence: return L10n.t("preview.origin.confidence")
         case .system: return L10n.t("preview.origin.system")
+        case .step: return L10n.t("preview.origin.step")
+        case .fallback: return L10n.t("preview.origin.fallback")
         }
     }
 

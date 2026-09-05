@@ -486,3 +486,134 @@ final class KindResolverTests: XCTestCase {
         XCTAssertEqual(MagicBytes.kind(sniffing: Data("#!/bin/sh\n".utf8)), .text)
     }
 }
+
+final class LegacyMigrationTests: XCTestCase {
+    private func legacyRule(_ preRules: [PreRule], copy: Bool = false) throws -> Rule {
+        // Round-tripped through JSON so the migration hook in init(from:) runs,
+        // exactly as it will on a real config.
+        var rule = Rule(name: "R", copyInsteadOfMove: copy, preRules: preRules)
+        rule.schemaVersion = 1
+        rule.steps = []
+        var object = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(rule)) as! [String: Any]
+        object["schemaVersion"] = 1
+        object["steps"] = []
+        object["preRules"] = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(preRules))
+        let data = try JSONSerialization.data(withJSONObject: object)
+        return try JSONDecoder().decode(Rule.self, from: data)
+    }
+
+    func testEveryPreRuleBecomesOneStepWithTheSameIdentity() throws {
+        let preRules = [
+            PreRule(name: "Screenshots", match: .glob, pattern: "*creenshot*",
+                    action: .route, routePath: "Bilder/{year}"),
+            PreRule(name: "Old", match: .olderThanDays, pattern: "30", action: .skip)
+        ]
+        let rule = try legacyRule(preRules)
+        XCTAssertEqual(rule.schemaVersion, Rule.currentSchema)
+        XCTAssertEqual(rule.steps.count, 2)
+        XCTAssertEqual(rule.steps.map(\.id), preRules.map(\.id),
+                       "identity has to survive: the ledger and the journal key on it")
+        XCTAssertEqual(rule.fallback, .askModel, "unclaimed files still go to the model")
+    }
+
+    func testGlobPatternsKeepTheirLiteralMeaning() throws {
+        // The new glob language gave [ ] { } \ meaning; an old pattern that
+        // contains them must keep matching what it used to match.
+        let rule = try legacyRule([PreRule(match: .glob, pattern: "Rechnung [2024]*.pdf",
+                                           action: .skip)])
+        guard case .test(let test) = rule.steps[0].when.items[0] else {
+            return XCTFail("expected one test")
+        }
+        XCTAssertEqual(test.value, .text("Rechnung \\[2024\\]*.pdf"))
+        let glob = Glob(pattern: "Rechnung \\[2024\\]*.pdf")
+        XCTAssertTrue(glob.matches("Rechnung [2024] ACME.pdf"))
+        XCTAssertFalse(glob.matches("Rechnung 2024 ACME.pdf"))
+    }
+
+    func testAgeConditionsStayOnTheModificationDate() throws {
+        let rule = try legacyRule([PreRule(match: .olderThanDays, pattern: "30", action: .skip)])
+        guard case .test(let test) = rule.steps[0].when.items[0] else {
+            return XCTFail("expected one test")
+        }
+        // Deliberately not "fixed" to dateAdded: changing what a rule does
+        // behind the user's back is worse than the wrong default.
+        XCTAssertEqual(test.attribute, .dateModified)
+        XCTAssertEqual(test.op, .olderThan)
+        XCTAssertEqual(test.value, .text("30d"))
+    }
+
+    func testKindConditionsPinTheOldResolver() throws {
+        let rule = try legacyRule([PreRule(match: .kind, pattern: "image", action: .skip)])
+        guard case .test(let test) = rule.steps[0].when.items[0] else {
+            return XCTFail("expected one test")
+        }
+        XCTAssertEqual(test.kindSource, .extensionTable)
+    }
+
+    func testAnUnparsableDayCountStillNeverMatches() throws {
+        let rule = try legacyRule([PreRule(match: .olderThanDays, pattern: "soon", action: .skip)])
+        XCTAssertEqual(rule.steps[0].when.mode, .any)
+        XCTAssertTrue(rule.steps[0].when.items.isEmpty, "an empty any group never matches")
+    }
+
+    func testRouteTemplatesAreRewritten() {
+        XCTAssertEqual(LegacyMigration.route("Bilder/{year}/{month}"),
+                       "Bilder/{modified|date:'yyyy'}/{modified|date:'MM'}/{stem}")
+        // The legacy {name} token was the stem, not the full name.
+        XCTAssertEqual(LegacyMigration.route("Archiv/{name}"), "Archiv/{stem}")
+        // An empty route means the target folder itself.
+        XCTAssertEqual(LegacyMigration.route(""), "{stem}")
+        // Literal braces survive into a language where braces are placeholders.
+        XCTAssertEqual(LegacyMigration.route("Sorted {stuff}/{name}"),
+                       "Sorted {{stuff}}/{stem}")
+    }
+
+    func testAMigratedRuleProjectsBackToTheSamePreRules() throws {
+        let preRules = [
+            PreRule(name: "Screens", match: .glob, pattern: "*creenshot*",
+                    action: .route, routePath: "Bilder/{year}"),
+            PreRule(name: "Old", match: .olderThanDays, pattern: "30", action: .skip),
+            PreRule(name: "Rest", match: .glob, pattern: "*", action: .useLLM)
+        ]
+        let rule = try legacyRule(preRules)
+        let encoded = try JSONEncoder().encode(rule)
+        let object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        let projected = try JSONDecoder().decode(
+            [PreRule].self,
+            from: try JSONSerialization.data(withJSONObject: object["preRules"] as Any)
+        )
+        XCTAssertEqual(projected.map(\.pattern), preRules.map(\.pattern))
+        XCTAssertEqual(projected.map(\.action), preRules.map(\.action))
+        XCTAssertEqual(projected.map(\.id), preRules.map(\.id),
+                       "an old build must recognize these as the same rules")
+        // The round trip makes the implicit file name explicit — the old
+        // engine appended it too, so the two routes place identically.
+        XCTAssertEqual(projected[0].routePath, "Bilder/{year}/{name}")
+    }
+
+    func testAStepAnOldBuildCannotRunProjectsToACatchAllSkip() throws {
+        // A rule an old build cannot represent must make it do *nothing*,
+        // never something the author did not ask for.
+        var rule = Rule(name: "R", targetPath: "/target")
+        rule.steps = [RuleStep(
+            name: "Big images",
+            when: ConditionGroup(mode: .all, items: [
+                .test(ConditionTest(attribute: .kind, op: .equals, value: .text("image"))),
+                .test(ConditionTest(attribute: .size, op: .gt, value: .text("5MB")))
+            ]),
+            then: [RuleAction(type: .move, template: "Gross/{name}")]
+        )]
+        let object = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(rule)) as! [String: Any]
+        let projected = try JSONDecoder().decode(
+            [PreRule].self,
+            from: try JSONSerialization.data(withJSONObject: object["preRules"] as Any)
+        )
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].match, .glob)
+        XCTAssertEqual(projected[0].pattern, "*")
+        XCTAssertEqual(projected[0].action, .skip)
+    }
+}

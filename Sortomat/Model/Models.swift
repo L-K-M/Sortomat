@@ -204,6 +204,47 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         let fallbackRaw = try c.decodeIfPresent(String.self, forKey: .fallback) ?? ""
         fallback = Fallback(rawValue: fallbackRaw) ?? .askModel
         destinationRoots = try c.decodeIfPresent([DestinationRoot].self, forKey: .destinationRoots) ?? []
+
+        // A rule written before steps existed is upgraded on the way in, so
+        // the rest of the app only ever sees one shape. `preRules` is *not*
+        // cleared: it is re-derived on encode as a downgrade projection.
+        if schemaVersion < Rule.currentSchema, steps.isEmpty, !preRules.isEmpty {
+            let upgraded = LegacyMigration.upgrade(preRules: preRules,
+                                                   copyInsteadOfMove: copyInsteadOfMove)
+            steps = upgraded.steps
+            fallback = upgraded.fallback
+        }
+        if schemaVersion < Rule.currentSchema { schemaVersion = Rule.currentSchema }
+    }
+
+    /// Written by hand rather than synthesized for one reason: `preRules` is a
+    /// *projection* of `steps`, so a build without the engine still runs
+    /// something sane — and does nothing at all for a rule it cannot express.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(priority, forKey: .priority)
+        try c.encode(watchPath, forKey: .watchPath)
+        try c.encode(targetPath, forKey: .targetPath)
+        try c.encode(recursive, forKey: .recursive)
+        try c.encode(prompt, forKey: .prompt)
+        try c.encode(extensions, forKey: .extensions)
+        try c.encode(copyInsteadOfMove, forKey: .copyInsteadOfMove)
+        try c.encode(privacyMode, forKey: .privacyMode)
+        try c.encode(taxonomy, forKey: .taxonomy)
+        try c.encode(quarantineSubfolder, forKey: .quarantineSubfolder)
+        try c.encode(confidenceThreshold, forKey: .confidenceThreshold)
+        try c.encode(dryRun, forKey: .dryRun)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(steps, forKey: .steps)
+        try c.encode(fallback, forKey: .fallback)
+        try c.encode(destinationRoots, forKey: .destinationRoots)
+        let projected = steps.isEmpty
+            ? preRules
+            : LegacyMigration.project(steps: steps, copyInsteadOfMove: copyInsteadOfMove)
+        try c.encode(projected, forKey: .preRules)
     }
 }
 

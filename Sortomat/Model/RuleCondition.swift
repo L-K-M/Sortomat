@@ -18,7 +18,7 @@ public enum ConditionValue: Equatable, Sendable, Codable {
         if let container = try? decoder.singleValueContainer() {
             // Bool before String/Double, and String before Double, so that
             // "30d" stays text and "5" stays text rather than becoming 5.0.
-            if (try? container.decodeNil()) == true { self = .none; return }
+            if container.decodeNil() { self = .none; return }
             if let value = try? container.decode(Bool.self) { self = .bool(value); return }
             if let value = try? container.decode(String.self) { self = .text(value); return }
             if let value = try? container.decode(Double.self) { self = .number(value); return }
