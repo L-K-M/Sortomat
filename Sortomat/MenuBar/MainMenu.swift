@@ -6,7 +6,10 @@ import AppKit
 /// fields in the Settings window can't cut/copy/paste/select-all/undo. Installing
 /// a real main menu (shown only while one of our windows is active) fixes that.
 enum MainMenu {
-    static func build(onOpenMain: @escaping () -> Void = {}) -> NSMenu {
+    /// No default for `onOpenMain`: a call site that omitted it would install
+    /// ⌘0 as a menu item that does nothing — the same "a surface that isn't
+    /// there" failure the item exists to fix.
+    static func build(onOpenMain: @escaping () -> Void) -> NSMenu {
         let mainMenu = NSMenu()
 
         // App menu. (Localized like everything else — these were the last

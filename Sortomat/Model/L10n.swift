@@ -8,6 +8,11 @@ public enum L10n {
     /// Overridden in tests to force a language; otherwise follows the system.
     public static var forcedLanguage: String?
 
+    /// Every language the tables actually hold. One place, so a test that
+    /// sweeps "does this string exist in every language" keeps sweeping all of
+    /// them when a third is added.
+    public static let supportedLanguages = ["en", "de"]
+
     public static var language: String {
         if let forced = forcedLanguage { return forced }
         let pref = Locale.preferredLanguages.first ?? "en"
@@ -81,7 +86,7 @@ public enum L10n {
 
         // How a rule runs — one choice instead of two toggles
         "mode.automatic": "Automatic",
-        "mode.automatic.help": "Files matching files by itself. You can undo anything it does from History.",
+        "mode.automatic.help": "It files matching files by itself. You can undo anything it does from History.",
         "mode.askFirst": "Ask first",
         "mode.askFirst.help": "Works out what it would do and puts it in the Inbox for you to approve.",
         "mode.off": "Off",

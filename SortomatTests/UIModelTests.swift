@@ -44,11 +44,15 @@ final class UIModelTests: XCTestCase {
     }
 
     func testEveryModeHasALabelAndAnExplanation() {
-        for language in ["en", "de"] {
+        for language in L10n.supportedLanguages {
             L10n.forcedLanguage = language
             for mode in RuleMode.allCases {
                 XCTAssertFalse(mode.label.isEmpty)
                 XCTAssertNotEqual(mode.label, "mode.\(mode.rawValue)", "\(language) label missing")
+                // Empty is its own failure: a key that exists but holds "" is
+                // a blank explanation next to the mode that acts without
+                // asking, and the key-fallback check alone passes it.
+                XCTAssertFalse(mode.help.isEmpty, "\(language): \(mode.rawValue) help is empty")
                 XCTAssertNotEqual(mode.help, "mode.\(mode.rawValue).help", "\(language) help missing")
             }
         }
@@ -74,9 +78,11 @@ final class UIModelTests: XCTestCase {
     }
 
     func testEveryHeatHasAWord() {
-        for language in ["en", "de"] {
+        for language in L10n.supportedLanguages {
             L10n.forcedLanguage = language
-            for heat in [Heat.certain, .sure, .probably, .unsure, .exact] {
+            // `allCases`, not a hand-written list: a new tier with no German
+            // label would otherwise ship with this test still green.
+            for heat in Heat.allCases {
                 XCTAssertFalse(heat.label.isEmpty)
                 XCTAssertFalse(heat.label.hasPrefix("heat."), "\(language): \(heat) renders its key")
             }
@@ -109,7 +115,7 @@ final class UIModelTests: XCTestCase {
 
     func testEveryOriginSaysWhereTheDecisionCameFrom() {
         L10n.forcedLanguage = "en"
-        let origins: [PlannedAction.Origin] = [.preRule, .model, .taxonomy, .confidence, .system]
+        let origins = PlannedAction.Origin.allCases
         var seen: Set<String> = []
         for origin in origins {
             let item = InboxItem(plan: plan(origin: origin, confidence: 0.5),
@@ -146,6 +152,40 @@ final class UIModelTests: XCTestCase {
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups[0].rules.count, 2)
         XCTAssertEqual(groups[0].title, "~/Downloads")
+    }
+
+    func testATrailingSlashIsNotASecondSection() {
+        // Both name the same folder, and a real config.json contains both.
+        let groups = RuleGroup.group([
+            rule(enabled: true, dryRun: false, watch: "/Users/x/Downloads", name: "one"),
+            rule(enabled: true, dryRun: false, watch: "/Users/x/Downloads/", name: "two"),
+            rule(enabled: true, dryRun: false, watch: "/Users/x/./Downloads", name: "three"),
+        ])
+        XCTAssertEqual(groups.count, 1, "a trailing slash split one folder into two sections")
+        XCTAssertEqual(groups[0].rules.count, 3)
+    }
+
+    func testTheFileSummaryIsReadOnceNotOnEveryRender() throws {
+        // As a computed property this stat-ed the disk on every access, so a
+        // full Inbox turned each list invalidation into one blocking read per
+        // row — and two renders of the same row could disagree.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sortomat-summary-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("x.pdf")
+        try Data(count: 16).write(to: file)
+
+        let item = InboxItem(
+            plan: PlannedAction(ruleID: UUID(), ruleName: "R", source: file, kind: .move,
+                                destination: dir.appendingPathComponent("out/x.pdf"),
+                                origin: .model, reason: "r", confidence: 0.9,
+                                copyInsteadOfMove: false),
+            target: dir, ruleMode: .automatic
+        )
+        let first = item.summary
+        try Data(count: 4096).write(to: file)
+        XCTAssertEqual(item.summary, first, "the snapshot must not change under the row")
     }
 
     func testAFolderlessRuleStillGetsASection() {

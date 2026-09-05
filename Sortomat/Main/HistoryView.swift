@@ -67,9 +67,11 @@ struct HistoryView: View {
     }
 
     private func undo(_ entry: JournalEntry) {
+        // Set before the task, not inside it: a guard that only takes effect
+        // once the first task has started isn't a guard.
         guard !busy else { return }
+        busy = true
         Task { @MainActor in
-            busy = true
             defer { busy = false }
             do {
                 // Via AppState so the ledger learns about the restored file —
@@ -86,8 +88,8 @@ struct HistoryView: View {
 
     private func undoLastBatch() {
         guard !busy else { return }
+        busy = true
         Task { @MainActor in
-            busy = true
             let result = await state.undoLastBatch()
             await reload()
             busy = false

@@ -43,12 +43,21 @@ final class MainWindowController: NSObject, NSWindowDelegate, ObservableObject {
         // Restore last position/size across launches (center() is the fallback
         // for the very first one).
         window.setFrameAutosaveName("SortomatMainWindow")
+        // controller → window → hosting controller → root view → controller is
+        // a strong cycle, deliberate and safe only because this controller
+        // lives as long as the app. Shortening its life means breaking it here.
         self.window = window
         present(window)
     }
 
     private func present(_ window: NSWindow) {
         ActivationPolicy.showRegular()
+        // `makeKeyAndOrderFront` does not restore a window from the Dock, and
+        // flipping an accessory app to regular does not reliably bring it
+        // forward. The window is `.miniaturizable`, so "Open Sortomat" on a
+        // minimized window looked like a menu item that does nothing.
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         state.setEditingRule(selection.ruleID)
     }

@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 struct RuleDetailView: View {
     @EnvironmentObject private var state: AppState
     let ruleID: UUID
-    @Binding var selection: SidebarSelection
 
     var body: some View {
         if let index = state.config.rules.firstIndex(where: { $0.id == ruleID }) {

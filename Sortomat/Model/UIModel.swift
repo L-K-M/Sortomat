@@ -70,7 +70,7 @@ enum RuleMode: String, CaseIterable, Identifiable, Hashable {
 /// How sure the model was, in words. A bare "62%" asks the reader to know what
 /// the threshold is; "Probably" doesn't. The number is still shown next to it —
 /// the word is the part you can act on at a glance.
-enum Heat: Hashable {
+enum Heat: Hashable, CaseIterable {
     case certain
     case sure
     case probably
@@ -148,6 +148,19 @@ struct InboxItem: Identifiable, Equatable {
     /// Target root of the rule that made the plan, for a relative destination.
     let target: URL
     let ruleMode: RuleMode
+    /// Read once, at construction. As a computed property this called
+    /// `attributesOfItem` — a blocking stat — on every access, so a full Inbox
+    /// turned each list invalidation into one disk hit per row on the main
+    /// thread, and the size shown could change between two renders of the same
+    /// row. The type is `Equatable` precisely so rows diff cheaply.
+    let summary: FileSummary
+
+    init(plan: PlannedAction, target: URL, ruleMode: RuleMode) {
+        self.plan = plan
+        self.target = target
+        self.ruleMode = ruleMode
+        self.summary = FileSummary(url: plan.source)
+    }
 
     var id: UUID { plan.id }
     var heat: Heat { plan.origin == .preRule ? .exact : Heat(confidence: plan.confidence) }
@@ -166,7 +179,6 @@ struct InboxItem: Identifiable, Equatable {
         }
     }
 
-    var summary: FileSummary { FileSummary(url: plan.source) }
 }
 
 /// The Inbox's rules, grouped by the folder they watch — because "what happens
@@ -189,7 +201,12 @@ struct RuleGroup: Identifiable, Equatable {
         var order: [String] = []
         var byPath: [String: [Rule]] = [:]
         for rule in rules {
-            let key = (rule.watchPath as NSString).expandingTildeInPath
+            // Standardized, not merely tilde-expanded: a trailing slash, a
+            // `.` segment or a doubled separator all name the same folder, and
+            // a real config.json contains them. Two visually identical sidebar
+            // sections for one folder is a bug the user can do nothing about.
+            let key = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
+                .standardizedFileURL.path
             if byPath[key] == nil { order.append(key) }
             byPath[key, default: []].append(rule)
         }

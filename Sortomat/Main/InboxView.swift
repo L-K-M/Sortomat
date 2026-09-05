@@ -9,7 +9,9 @@ struct InboxView: View {
     @EnvironmentObject private var state: AppState
     @State private var busy = false
     @State private var status: String?
-    @State private var lastApplied: [PlannedAction] = []
+    /// The batch the last Apply journaled, so Undo reverses *it* — a
+    /// background pass can become the newest batch in between.
+    @State private var lastBatch: UUID?
 
     private var items: [InboxItem] {
         state.pendingActions.map { plan in
@@ -74,7 +76,7 @@ struct InboxView: View {
             if let status {
                 Text(status).font(.caption).foregroundStyle(.secondary)
             }
-            if !lastApplied.isEmpty {
+            if lastBatch != nil {
                 Button(L10n.t("inbox.undoLast")) { undoLast() }
                     .buttonStyle(.link)
                     .disabled(busy)
@@ -89,19 +91,24 @@ struct InboxView: View {
             Button(L10n.t("inbox.applyAll")) {
                 apply(state.pendingActions.filter(\.isActionable))
             }
-            .keyboardShortcut(.defaultAction)
+            // ⌘-Return, not plain Return: this moves every file in the list,
+            // and each card has its own button for the one thing the user was
+            // probably looking at.
+            .keyboardShortcut(.return, modifiers: .command)
             .disabled(items.allSatisfy { !$0.plan.isActionable } || busy)
         }
         .padding(12)
     }
 
     private func apply(_ plans: [PlannedAction]) {
-        guard !plans.isEmpty else { return }
+        // `busy` set synchronously, before the task: relying on `.disabled`
+        // to have propagated first leaves key repeat on the default button
+        // able to enqueue a second apply.
+        guard !plans.isEmpty, !busy else { return }
+        busy = true
         Task {
-            busy = true
-            await state.apply(plans)
+            lastBatch = await state.apply(plans)
             busy = false
-            lastApplied = plans
             status = L10n.plural("inbox.applied", plans.count)
         }
     }
@@ -109,11 +116,14 @@ struct InboxView: View {
     /// Undo is the promise that makes "Apply" safe to press. It reverses the
     /// newest journal batch, which is exactly the set that was just applied.
     private func undoLast() {
+        guard let batch = lastBatch, !busy else { return }
+        busy = true
         Task {
-            busy = true
-            let result = await state.undoLastBatch()
+            let result = await state.undo(batch: batch)
             busy = false
-            lastApplied = []
+            // Keep the button when part of it refused: those files can only be
+            // retried one at a time from History otherwise.
+            if result.failed == 0 { lastBatch = nil }
             status = result.failed == 0
                 ? L10n.plural("journal.undoBatchDone", result.undone)
                 : L10n.plural("journal.undoBatchFailed", result.failed)

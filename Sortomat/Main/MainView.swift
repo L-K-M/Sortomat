@@ -30,7 +30,7 @@ struct MainView: View {
         case .history:
             HistoryView()
         case .rule(let id):
-            RuleDetailView(ruleID: id, selection: $selection)
+            RuleDetailView(ruleID: id)
                 // A fresh editor per rule, so its @State edit buffers reset
                 // when the selection moves.
                 .id(id)
@@ -131,8 +131,7 @@ struct Sidebar: View {
             Menu {
                 ForEach(RuleTemplate.allCases) { template in
                     Button(template.title) {
-                        state.addRule(from: template)
-                        if let id = state.config.rules.last?.id { selection = .rule(id) }
+                        selection = .rule(state.addRule(from: template))
                     }
                 }
             } label: {
