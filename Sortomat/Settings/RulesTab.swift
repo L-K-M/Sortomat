@@ -1,9 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RulesTab: View {
     @EnvironmentObject private var state: AppState
     @State private var selection: UUID?
     @State private var confirmingDelete = false
+    @State private var packStatus: String?
 
     var body: some View {
         HSplitView {
@@ -81,9 +83,63 @@ struct RulesTab: View {
                     .help(L10n.t("rules.duplicate"))
 
                 Spacer()
+
+                // A rule — prompt, taxonomy, pre-rules — is exactly the kind
+                // of artifact people want to share. Paths stay machine-local;
+                // imports arrive disabled and in preview mode.
+                Button {
+                    exportSelectedRule()
+                } label: { Image(systemName: "square.and.arrow.up") }
+                    .disabled(selection == nil)
+                    .help(L10n.t("rules.export"))
+
+                Button {
+                    importRulePack()
+                } label: { Image(systemName: "square.and.arrow.down") }
+                    .help(L10n.t("rules.import"))
             }
             .buttonStyle(.borderless)
             .padding(8)
+            if let packStatus {
+                Text(packStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
+            }
+        }
+    }
+
+    private func exportSelectedRule() {
+        guard let rule = state.config.rules.first(where: { $0.id == selection }) else { return }
+        let panel = NSSavePanel()
+        if let type = UTType(filenameExtension: RulePack.fileExtension) {
+            panel.allowedContentTypes = [type, .json]
+        } else {
+            panel.allowedContentTypes = [.json]
+        }
+        panel.nameFieldStringValue = "\(rule.name).\(RulePack.fileExtension)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try RulePack(exporting: rule).encoded().write(to: url)
+            packStatus = L10n.t("rules.export.done", rule.name)
+        } catch {
+            packStatus = L10n.t("rules.pack.failed", error.localizedDescription)
+        }
+    }
+
+    private func importRulePack() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let pack = try RulePack.decode(try Data(contentsOf: url))
+            selection = state.importRule(pack.makeImportedRule())
+            packStatus = L10n.t("rules.import.done")
+        } catch {
+            packStatus = L10n.t("rules.pack.failed", error.localizedDescription)
         }
     }
 
