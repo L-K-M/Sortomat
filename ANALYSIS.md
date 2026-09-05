@@ -66,7 +66,7 @@ Six things that cost real time to learn, in the order they will bite.
 | 5 | Guardrails: a monthly spend ceiling, power holds, a pause that survives a relaunch | [#41](https://github.com/L-K-M/Sortomat/pull/41) | open |
 | 5 | Pass efficiency: one stability pause per pass, undo that prunes its own folders, byte-aware names | [#42](https://github.com/L-K-M/Sortomat/pull/42) | open |
 | 5 | Half the CI bill, and no artifact upload | [#43](https://github.com/L-K-M/Sortomat/pull/43) | open |
-| — | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor | `claude/rule-engine-v2`, stacked on #38 | branch, no pull request yet |
+| — | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor, a dry run, a match count, and a rule validator | `claude/rule-engine-v2`, stacked on #38 | branch, no pull request yet |
 
 **Read this before merging anything.** #38–#43 were each green, then took one
 or more review rounds whose fixes were pushed **after GitHub Actions stopped
@@ -122,29 +122,37 @@ Two notes from the API risk register:
   existing `batchID`; they are not file moves and do not belong in
   `journal.jsonl`, whose shape is frozen.
 
-### 1.2 `RuleValidator`
+### 1.2 `RuleValidator` — done, with one piece left
 
-Pure, and the editor is waiting for it: an empty `any` group (can never match),
-an empty `all` in any step but the last (claims every file, so later steps are
-unreachable), a template whose last component can render empty (the file would
-have no name), an unknown attribute or operator, a regex `isSafeRegex` rejects,
-and a content condition under `metadataOnly` (the step editor already warns
-about that one inline — move the logic here).
+`RuleValidator.findings(for:)` is on the branch: pure, no disk, no cost, safe to
+run on every keystroke, and each finding carries the exact step, condition or
+action it belongs to. It covers the empty `any` group, the step that claims
+every file and strands the ones after it, the step that matches and does
+nothing, two placements in one step, unknown attributes, operators, action types
+and template tokens, a regex the engine refuses to run, a content condition
+under `metadataOnly`, a destination whose last component can render empty, a
+capture with nothing capturing, an action naming a destination root that does
+not exist, and `askModel` with no instruction anywhere. `RuleIssues` draws them
+in the editor under "Before you enable this".
 
-### 1.3 `Pipeline.dryDecide` and `MatchCounter`
+What is left is where they are drawn: a per-step badge on `StepCard` and an
+inline marker on the offending condition row, rather than one list. The finding
+already carries `stepID` and the condition's `UUID`, so this is view work only.
 
-Two async entry points the UI needs and the engine can already answer:
+Two rules kept it useful and are worth keeping: an **error** is a rule that
+cannot do what it says, a **note** is a rule that works but probably surprises
+its author; and no finding may be wrong, because a validator that cries wolf
+gets switched off. The migrated legacy rules are the yardstick — they come
+through silent.
 
-```swift
-func dryDecide(file: URL, rule: Rule, config: Config, allowModel: Bool)
-    -> (PlannedAction, RuleTrace)?     // no ledger, no memo write, no journal
-func count(step: RuleStep, in rule: Rule, limit: Int) -> MatchCount
-```
+### 1.3 `dryDecide` and `matchCount` — already there
 
-`dryDecide` powers "test this rule against a file", the menu-bar file drop and
-the Inbox's Check now. `MatchCounter` powers the "● 12 match now" pill, which is
-the single most requested thing a rule editor can show. Both are cheap: the
-evaluator is already pure and synchronous over injected facts.
+Both exist on the branch (`Pipeline.dryDecide(file:rule:allowModel:)` returning
+a `DryRun`, and `Pipeline.matchCount(rule:limit:)` returning
+`(matched, scanned, needsModel)`), and the rule editor's "Try it" row already
+calls them. What is *not* built on top of them yet: the "● 12 match now" pill
+beside each step, the menu-bar file drop, the Inbox's Check now, and the live
+"your folder right now" pane (§7).
 
 ### 1.4 Nested condition groups in the editor
 
@@ -164,6 +172,12 @@ answer binds only that token. Everything else — the valves, the memo, the
 budget — already applies.
 
 ### 1.6 Attribute gaps
+
+A `modelSays` **condition** is declared and wired to nothing: the fact lookup
+answers `needsModel`, only a `pass` passes, so the test is silently never true.
+The `askModel` *action* is the supported way to ask. Either wire the condition
+through the same resume path the action uses, or delete the attribute — the
+validator flags it as an error in the meantime, which is honest but temporary.
 
 `isQuarantined` is declared and always reports "unavailable": reading it needs
 `getxattr` for `com.apple.quarantine`, deliberately deferred as the riskiest API
@@ -336,6 +350,23 @@ in.
   `perScanBudget` is the hard cap on a burst; this is the cap on the month.
   Moving the check into the per-file loop is a small change with a real
   contention question attached. **S**
+- **`spreadsheetText` opens the same archive up to three times** — shared
+  strings, document properties, and the inline-string fallback each construct
+  their own `ZipArchive`, re-running `sizeAllows` and re-parsing the central
+  directory. The saving is small (the file is already capped at 64 MB) and the
+  cost is restructuring the one function in the extraction branch that has
+  produced two regressions from being restructured, so it waits for a green
+  compiler and a test that pins the current output first. **S**
+- **"Downloaded from", host only.** The query string — where the credentials
+  live — is already stripped, but a path can carry a user id, and the field is
+  sent in metadata-only mode like every other metadata field. `URL(string:)?.host`
+  keeps the classification signal ("a bank's domain files differently") and
+  drops the rest. Pairs with the per-rule switch above. **S**
+- **Vision recognition blocks a cooperative-pool thread.** `handler.perform` is
+  seconds of uninterruptible CPU inside `Task.detached`. Harmless while
+  extraction is one file at a time — which it is — and a real constraint the day
+  extraction runs in parallel. Revisit then, with
+  `withCheckedThrowingContinuation` onto a global queue. **M**
 - **Undo prunes empty folders it did not create.** Nothing records which
   directories a move made, so the cleanup removes any empty chain under the
   target root — including a taxonomy skeleton the user pre-made. Recording the
