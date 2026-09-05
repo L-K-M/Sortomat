@@ -18,13 +18,10 @@ final class AppState: ObservableObject {
     @Published var apiKeyMissing: Bool
     @Published var usage = TokenUsage()
     /// The rule currently open in the editor. It is not executed while being
-    /// edited, so a half-typed rule can't fire mid-edit. Derived from the three
-    /// inputs below rather than set directly, so it's correct however the user
-    /// leaves the editor (switch tab, switch rule, close the window).
+    /// edited, so a half-typed rule can't fire mid-edit. The main window sets
+    /// it from its sidebar selection and clears it when it closes, so there is
+    /// one place that decides rather than three booleans to keep in agreement.
     @Published private(set) var editingRuleID: UUID?
-    private var settingsWindowOpen = false
-    private var rulesTabActive = false
-    private var selectedRuleID: UUID?
 
     private let pipeline = Pipeline()
     private var watchers: [String: FSEventsWatcher] = [:]
@@ -215,29 +212,12 @@ final class AppState: ObservableObject {
 
     // MARK: - Editing lock
 
-    /// A rule is "being edited" only while the Settings window is open AND the
-    /// Rules tab is showing AND that rule is selected. Any of those changing
-    /// recomputes the lock; when a rule is freed we kick a scan so it runs
-    /// promptly rather than waiting for the next timer tick.
-    func setSettingsWindowOpen(_ open: Bool) {
-        settingsWindowOpen = open
-        recomputeEditing()
-    }
-
-    func setRulesTabActive(_ active: Bool) {
-        rulesTabActive = active
-        recomputeEditing()
-    }
-
-    func setSelectedRule(_ id: UUID?) {
-        selectedRuleID = id
-        recomputeEditing()
-    }
-
-    private func recomputeEditing() {
-        let newValue = (settingsWindowOpen && rulesTabActive) ? selectedRuleID : nil
-        guard newValue != editingRuleID else { return }
-        editingRuleID = newValue
+    /// The rule the main window has open, or nil when it shows something else
+    /// or isn't on screen at all. Freeing a rule kicks a check so it runs
+    /// promptly rather than waiting out the timer.
+    func setEditingRule(_ id: UUID?) {
+        guard id != editingRuleID else { return }
+        editingRuleID = id
         requestScan()
     }
 
