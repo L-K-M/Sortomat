@@ -221,11 +221,12 @@ public enum L10n {
         """,
         "template.screenshots.title": "Screenshots",
         "template.screenshots.summary": "Route screenshots to the matching project folder.",
+        "template.screenshots.preSkip": "Everything else",
         "template.screenshots.prompt": """
         File screenshots into the matching project or topic folder, e.g.
-        {Project}/{YYYY-MM}/{filename}. Use the visible text and the image
-        description to recognize the topic. If no project is recognizable,
-        file it under "General/{YYYY-MM}".
+        {Project}/{YYYY-MM}/{filename}. Judge from the file name, its
+        timestamps and any indexed text in the metadata. If no project is
+        recognizable, file it under "General/{YYYY-MM}".
         """,
         "template.invoices.title": "Invoices & receipts",
         "template.invoices.summary": "File PDFs under Year / Sender / Date Subject.",
@@ -441,11 +442,12 @@ public enum L10n {
         """,
         "template.screenshots.title": "Screenshots",
         "template.screenshots.summary": "Screenshots dem passenden Projektordner zuordnen.",
+        "template.screenshots.preSkip": "Alles andere",
         "template.screenshots.prompt": """
         Ordne Screenshots dem passenden Projekt- oder Themenordner zu, z.B.
-        {Projekt}/{JJJJ-MM}/{Dateiname}. Nutze den sichtbaren Text und die Bild-
-        beschreibung, um das Thema zu erkennen. Wenn kein Projekt erkennbar ist,
-        lege die Datei unter "Allgemein/{JJJJ-MM}" ab.
+        {Projekt}/{JJJJ-MM}/{Dateiname}. Beurteile das anhand des Dateinamens,
+        der Zeitstempel und eventuell mitgelieferter indexierter Texte. Wenn
+        kein Projekt erkennbar ist, lege die Datei unter "Allgemein/{JJJJ-MM}" ab.
         """,
         "template.invoices.title": "Rechnungen & Belege",
         "template.invoices.summary": "PDFs nach Jahr / Absender / Datum Betreff ablegen.",
