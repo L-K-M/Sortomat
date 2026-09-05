@@ -37,6 +37,12 @@ public enum L10n {
     /// Count-aware lookup with extra format arguments. The count is argument
     /// 1 and the extras follow, so strings that need both use positional
     /// specifiers (`%1$d`, `%2$@`).
+    ///
+    /// A form that references `%2$` **must** also reference `%1$`: the
+    /// formatter only types the slots a specifier names, and an untyped slot
+    /// doesn't consume its argument — so `%2$@` alone would read the count as
+    /// an object pointer and crash. `L10nTests` enforces this across the
+    /// tables.
     public static func plural(_ key: String, _ count: Int, _ args: CVarArg...) -> String {
         String(format: t(key + (count == 1 ? ".one" : ".other")), arguments: [count as CVarArg] + args)
     }
@@ -259,7 +265,7 @@ public enum L10n {
         // Notifications
         "notify.filed.one": "Filed 1 file.",
         "notify.filed.other": "Filed %d files.",
-        "notify.failuresMore.one": "%2$@ (and 1 more failure)",
+        "notify.failuresMore.one": "%2$@ (and %1$d more failure)",
         "notify.failuresMore.other": "%2$@ (and %1$d more failures)",
 
         // Errors
@@ -535,7 +541,7 @@ public enum L10n {
 
         "notify.filed.one": "1 Datei einsortiert.",
         "notify.filed.other": "%d Dateien einsortiert.",
-        "notify.failuresMore.one": "%2$@ (und 1 weiterer Fehler)",
+        "notify.failuresMore.one": "%2$@ (und %1$d weiterer Fehler)",
         "notify.failuresMore.other": "%2$@ (und %1$d weitere Fehler)",
 
         "error.unsafePath": "Unsicherer Zielpfad: %@",

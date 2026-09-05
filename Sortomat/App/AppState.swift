@@ -112,8 +112,11 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Keyed by rule id, tolerating a hand-edited config that repeats one:
+    /// `uniqueKeysWithValues` would trap, and this runs at launch and after
+    /// every save, so a duplicated JSON block would make the app unlaunchable.
     private static func signatures(of rules: [Rule]) -> [UUID: Rule] {
-        Dictionary(uniqueKeysWithValues: rules.map { ($0.id, signature(of: $0)) })
+        Dictionary(rules.map { ($0.id, signature(of: $0)) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// The rule with everything that does *not* influence its decisions
@@ -311,6 +314,10 @@ final class AppState: ObservableObject {
 
     private func ingest(_ result: ScanResult) {
         accumulate(result.usage)
+        // Re-arm the missing-folder alert as soon as the folder is back, even
+        // on a pass that produced no entries at all — otherwise a second
+        // outage of the same folder would be silent.
+        if !result.watchMissing, let id = result.ruleID { missingWatchNotified.remove(id) }
         if result.unstableCount > 0 { scheduleFollowUpScan() }
         for plan in result.pending where !pendingActions.contains(where: { $0.source == plan.source && $0.ruleID == plan.ruleID }) {
             pendingActions.append(plan)
@@ -348,8 +355,6 @@ final class AppState: ObservableObject {
             let alreadyAnnounced = missingWatchNotified.contains(id)
             missingWatchNotified.insert(id)
             if alreadyAnnounced { return }
-        } else if let id = result.ruleID {
-            missingWatchNotified.remove(id)
         }
 
         let filed = result.entries.filter { $0.kind == .filed }.count
@@ -383,7 +388,7 @@ final class AppState: ObservableObject {
 
 
     func apply(_ plans: [PlannedAction]) async {
-        let rulesByID = Dictionary(uniqueKeysWithValues: config.rules.map { ($0.id, $0) })
+        let rulesByID = Dictionary(config.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let entries = await pipeline.applyApproved(plans, rules: rulesByID)
         let appliedIDs = Set(plans.map(\.id))
         pendingActions.removeAll { appliedIDs.contains($0.id) }

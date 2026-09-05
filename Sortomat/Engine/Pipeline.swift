@@ -48,6 +48,14 @@ actor Pipeline {
         previewed = previewed.filter { !$0.hasPrefix(prefix) }
     }
 
+    /// Record a verdict in the decision memo. Only used by tests: the memo is
+    /// private to `decide`, and a test that has to reach through a real model
+    /// call to fill it would be testing the network, not the persistence.
+    func rememberForTesting(ruleID: UUID, digest: String, action: String, relativePath: String?) {
+        memo.record(ruleID: ruleID, digest: digest, action: action,
+                    relativePath: relativePath, reason: nil, confidence: nil)
+    }
+
     /// After an undo restores a file into a watched folder, remember it as
     /// skipped for the rule that moved it — otherwise the very next scan
     /// re-classifies (re-pays for) the file and moves it right back,

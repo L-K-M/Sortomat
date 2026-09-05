@@ -56,4 +56,29 @@ final class L10nTests: XCTestCase {
         XCTAssertEqual(german.subtracting(english).sorted(), [],
                        "keys missing from the English table")
     }
+
+
+    func testPluralSingularWithExtraArgument() {
+        // The form that skips %1$ is not a style choice: the formatter only
+        // types the slots a specifier names, and an untyped slot doesn't
+        // consume its argument — so "%2$@ (and 1 more failure)" read the Int
+        // count where the message pointer belonged and crashed the app.
+        L10n.forcedLanguage = "en"
+        XCTAssertEqual(L10n.plural("notify.failuresMore", 1, "first"), "first (and 1 more failure)")
+        L10n.forcedLanguage = "de"
+        XCTAssertEqual(L10n.plural("notify.failuresMore", 1, "erster"), "erster (und 1 weiterer Fehler)")
+    }
+
+    /// Any plural form that references a later positional argument must also
+    /// reference the count, in both tables — see the crash above.
+    func testPositionalPluralFormsAlwaysReferenceTheCount() {
+        for (language, table) in [("EN", L10n.english), ("DE", L10n.german)] {
+            for (key, value) in table where key.hasSuffix(".one") || key.hasSuffix(".other") {
+                if value.contains("%2$") {
+                    XCTAssertTrue(value.contains("%1$"),
+                                  "\(language) \(key) references %2$ without %1$: \(value)")
+                }
+            }
+        }
+    }
 }

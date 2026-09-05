@@ -41,9 +41,13 @@ enum HeadlessRunner {
 
         let pipeline = Pipeline()
         var hadError = false
+        // One pass is one undoable batch, exactly as in the GUI — without a
+        // shared id `Sortomat undo` reversed only the last rule's moves.
+        let batchID = UUID()
         for rule in config.rules.inExecutionOrder() {
             let result = await pipeline.scan(
-                rule: rule, config: config, apiKey: apiKey, forcePreview: !apply
+                rule: rule, config: config, apiKey: apiKey, forcePreview: !apply,
+                batchID: batchID
             )
             for entry in result.entries {
                 print((entry.ok ? "OK   " : "ERR  ") + entry.message)

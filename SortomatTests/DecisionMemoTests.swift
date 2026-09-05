@@ -9,9 +9,15 @@ final class DecisionMemoTests: XCTestCase {
         dir = fm.temporaryDirectory.appendingPathComponent("sortomat-memo-\(UUID().uuidString)")
         try fm.createDirectory(at: dir.appendingPathComponent("watch"), withIntermediateDirectories: true)
         try fm.createDirectory(at: dir.appendingPathComponent("target"), withIntermediateDirectories: true)
+        // The Pipeline journals every placement and opens the decision memo
+        // through ConfigStore. Without this the suite appends to the real
+        // ~/Library/Application Support/Sortomat/journal.jsonl, and a
+        // developer's History tab fills up with vanished test files.
+        setenv("SORTOMAT_CONFIG_DIR", dir.path, 1)
     }
 
     override func tearDownWithError() throws {
+        unsetenv("SORTOMAT_CONFIG_DIR")
         try? fm.removeItem(at: dir)
     }
 
@@ -91,5 +97,24 @@ final class DecisionMemoTests: XCTestCase {
         XCTAssertEqual(result.usage.input + result.usage.output, 0, "a memo hit costs nothing")
         XCTAssertTrue(result.entries.allSatisfy(\.ok),
                       "no classify attempt may have failed — the memo answered")
+    }
+
+
+    /// `persist()` composes three jobs from three different review branches —
+    /// pruning the ledger, saving it, and saving the memo. Dropping any one of
+    /// them still compiles and still passes every other test, so assert that
+    /// one call writes both files.
+    func testPersistWritesBothTheLedgerAndTheMemo() async {
+        let ledgerURL = dir.appendingPathComponent("ledger.json")
+        let pipeline = Pipeline(ledger: Ledger(url: ledgerURL),
+                                memo: DecisionMemo(url: memoFile))
+        let rule = UUID()
+        await pipeline.markUndone(ruleID: rule, sourcePath: dir.appendingPathComponent("watch/x.txt").path)
+        await pipeline.rememberForTesting(ruleID: rule, digest: "d", action: "move", relativePath: "A/x.txt")
+
+        await pipeline.persist()
+
+        XCTAssertTrue(fm.fileExists(atPath: ledgerURL.path), "the ledger must be written")
+        XCTAssertTrue(fm.fileExists(atPath: memoFile.path), "the decision memo must be written")
     }
 }

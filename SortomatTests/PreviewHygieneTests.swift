@@ -11,9 +11,15 @@ final class PreviewHygieneTests: XCTestCase {
         dir = fm.temporaryDirectory.appendingPathComponent("sortomat-hygiene-\(UUID().uuidString)")
         try fm.createDirectory(at: dir.appendingPathComponent("watch"), withIntermediateDirectories: true)
         try fm.createDirectory(at: dir.appendingPathComponent("target"), withIntermediateDirectories: true)
+        // The Pipeline journals every placement and opens the decision memo
+        // through ConfigStore. Without this the suite appends to the real
+        // ~/Library/Application Support/Sortomat/journal.jsonl, and a
+        // developer's History tab fills up with vanished test files.
+        setenv("SORTOMAT_CONFIG_DIR", dir.path, 1)
     }
 
     override func tearDownWithError() throws {
+        unsetenv("SORTOMAT_CONFIG_DIR")
         try? fm.removeItem(at: dir)
     }
 
@@ -34,7 +40,8 @@ final class PreviewHygieneTests: XCTestCase {
     func testForgettingPreviewsMakesTheRuleRePlan() async throws {
         let rule = try makeRule()
         let config = Config(rules: [rule], providerRequiresKey: false)
-        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")))
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: DecisionMemo(url: dir.appendingPathComponent("memo.json")))
 
         let first = await pipeline.scan(rule: rule, config: config, apiKey: "")
         XCTAssertEqual(first.pending.count, 1)
@@ -52,7 +59,8 @@ final class PreviewHygieneTests: XCTestCase {
     func testForgettingOneRuleLeavesOthersAlone() async throws {
         let rule = try makeRule()
         let config = Config(rules: [rule], providerRequiresKey: false)
-        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")))
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: DecisionMemo(url: dir.appendingPathComponent("memo.json")))
 
         _ = await pipeline.scan(rule: rule, config: config, apiKey: "")
         await pipeline.forgetPreviews(ruleID: UUID()) // some other rule
