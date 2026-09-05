@@ -69,10 +69,18 @@ final class AppState: ObservableObject {
         }
     }
 
-    func saveAPIKey(_ key: String) {
-        Keychain.set(key.trimmingCharacters(in: .whitespacesAndNewlines), account: Keychain.apiKeyAccount)
+    /// Store the key and report whether the Keychain actually accepted it —
+    /// Keychain.set has returned this since #8, but nothing read it, so the
+    /// UI could still claim "Saved" after a failed write.
+    @discardableResult
+    func saveAPIKey(_ key: String) -> Bool {
+        let accepted = Keychain.set(
+            key.trimmingCharacters(in: .whitespacesAndNewlines),
+            account: Keychain.apiKeyAccount
+        )
         apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && config.providerRequiresKey
-        requestScan()
+        if accepted { requestScan() }
+        return accepted
     }
 
     func addRule(from template: RuleTemplate) {
