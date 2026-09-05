@@ -27,11 +27,12 @@ final class AppState: ObservableObject {
     private var selectedRuleID: UUID?
 
     private let pipeline = Pipeline()
-    private var watchers: [FSEventsWatcher] = []
+    private var watchers: [String: FSEventsWatcher] = [:]
     private var persistTask: Task<Void, Never>?
     private var scanRequested = false
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
+    private var followUpScheduled = false
 
     init() {
         let loaded = ConfigStore.load()
@@ -126,14 +127,23 @@ final class AppState: ObservableObject {
         return "\(base) \(index)"
     }
 
+    /// Diff the wanted set against live watchers: only paths that appeared or
+    /// disappeared change anything. (Previously every debounced config save —
+    /// i.e. every settled keystroke in the rule editor — tore down and
+    /// recreated every FSEvents stream.)
     private func rebuildWatchers() {
-        watchers = config.rules
+        let wanted = Set(config.rules
             .filter { $0.enabled && !$0.watchPath.isEmpty }
-            .compactMap { rule in
-                FSEventsWatcher(path: rule.watchPath) { [weak self] in
-                    Task { @MainActor in self?.requestScan() }
-                }
+            .map(\.watchPath))
+        for (path, watcher) in watchers where !wanted.contains(path) {
+            watcher.stop()
+            watchers[path] = nil
+        }
+        for path in wanted where watchers[path] == nil {
+            watchers[path] = FSEventsWatcher(path: path) { [weak self] in
+                Task { @MainActor in self?.requestScan() }
             }
+        }
     }
 
     // MARK: - Editing lock
@@ -217,6 +227,7 @@ final class AppState: ObservableObject {
 
     private func ingest(_ result: ScanResult) {
         usage = usage + result.usage
+        if result.unstableCount > 0 { scheduleFollowUpScan() }
         for plan in result.pending where !pendingActions.contains(where: { $0.source == plan.source && $0.ruleID == plan.ruleID }) {
             pendingActions.append(plan)
         }
@@ -225,6 +236,21 @@ final class AppState: ObservableObject {
             activity = Array(activity.prefix(80))
             result.entries.forEach { ConfigStore.appendLog($0.message) }
             notify(result.entries)
+        }
+    }
+
+    /// A file the stability probe rejected as too young waits for the *next*
+    /// pass — which used to mean the periodic timer, up to a minute away, even
+    /// though FSEvents had just announced the file. One short follow-up pass
+    /// picks it up as soon as it can possibly qualify (>5 s old).
+    private func scheduleFollowUpScan() {
+        guard !followUpScheduled else { return }
+        followUpScheduled = true
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
+            guard let self else { return }
+            self.followUpScheduled = false
+            self.requestScan()
         }
     }
 
