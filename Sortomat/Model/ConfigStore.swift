@@ -83,7 +83,15 @@ enum ConfigStore {
     /// append-only forever.
     static let maxLogBytes: Int64 = 5 * 1024 * 1024
 
+    /// Serializes the whole append, rotation included: `appendLog` is called
+    /// from the Pipeline actor and the main actor, and a rotation that renames
+    /// the file out from under another thread's open handle sends that line to
+    /// the rotated-away generation.
+    private static let logLock = NSLock()
+
     static func appendLog(_ line: String) {
+        logLock.lock()
+        defer { logLock.unlock() }
         ensureDirectory()
         rotateLogIfNeeded()
         let entry = "\(timestamp())  \(line)\n"
@@ -102,6 +110,12 @@ enum ConfigStore {
               size >= maxLogBytes else { return }
         let previous = logFile.appendingPathExtension("1")
         try? fm.removeItem(at: previous)
-        try? fm.moveItem(at: logFile, to: previous)
+        do {
+            try fm.moveItem(at: logFile, to: previous)
+        } catch {
+            // If the previous generation is held open the move fails, and a
+            // swallowed failure means the cap silently stops applying.
+            Log.app.error("log rotation failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 }

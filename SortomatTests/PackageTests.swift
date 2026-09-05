@@ -68,6 +68,35 @@ final class PackageTests: XCTestCase {
         XCTAssertNotEqual(before, Pipeline.sizeSignature(of: package))
     }
 
+    /// A package has no prefix digest (it is a directory), so duplicate
+    /// detection has to fall through to the whole-tree comparison — otherwise
+    /// re-filing the same bundle piles up "Draft (2).rtfd", "Draft (3).rtfd".
+    func testIdenticalPackagesAreRecognizedAsDuplicates() throws {
+        let source = try plantPackage(named: "Draft.rtfd")
+        let target = dir.appendingPathComponent("target")
+        let existing = target.appendingPathComponent("Draft.rtfd")
+        try fm.createDirectory(at: existing, withIntermediateDirectories: true)
+        try "{\\rtf1 hello}".write(to: existing.appendingPathComponent("TXT.rtf"),
+                                  atomically: true, encoding: .utf8)
+
+        let outcome = try Mover.place(source: source, destination: existing, copy: false)
+        if case .duplicate = outcome {} else { XCTFail("expected duplicate, got \(outcome)") }
+        XCTAssertFalse(fm.fileExists(atPath: target.appendingPathComponent("Draft (2).rtfd").path))
+    }
+
+    func testDifferentPackagesUnderOneNameGetSuffixed() throws {
+        let source = try plantPackage(named: "Draft.rtfd")
+        let target = dir.appendingPathComponent("target")
+        let existing = target.appendingPathComponent("Draft.rtfd")
+        try fm.createDirectory(at: existing, withIntermediateDirectories: true)
+        try "{\\rtf1 different}".write(to: existing.appendingPathComponent("TXT.rtf"),
+                                       atomically: true, encoding: .utf8)
+
+        let outcome = try Mover.place(source: source, destination: existing, copy: false)
+        XCTAssertTrue(fm.fileExists(atPath: target.appendingPathComponent("Draft (2).rtfd").path),
+                      "a different bundle must land beside the existing one, got \(outcome)")
+    }
+
     func testTreeDigestCoversEveryFileInAPackage() throws {
         let a = try plantPackage(named: "A.rtfd")
         let b = try plantPackage(named: "B.rtfd")

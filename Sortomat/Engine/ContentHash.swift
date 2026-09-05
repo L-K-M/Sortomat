@@ -31,8 +31,14 @@ enum ContentHash {
         } catch {
             return nil
         }
-        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64
-        else { return nil }
+        // fstat on the handle we just read from describes exactly the file
+        // whose bytes went into the hasher; `attributesOfItem` describes
+        // whatever the path names — for a symlink, the link itself — so the
+        // digest used to mix one file's content with another file's length.
+        // Fails closed like the read loop above: no size, no digest.
+        var info = stat()
+        guard fstat(handle.fileDescriptor, &info) == 0 else { return nil }
+        let size = Int64(info.st_size)
         var sizeLE = size.littleEndian
         hasher.update(data: Data(bytes: &sizeLE, count: MemoryLayout<Int64>.size))
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()

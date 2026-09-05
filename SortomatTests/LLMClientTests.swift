@@ -95,4 +95,28 @@ final class LLMClientTests: XCTestCase {
         let data = response(content: #""I would put this file in the Invoices folder.""#)
         XCTAssertThrowsError(try LLMClient.parse(data))
     }
+
+
+    func testReasoningModelsGetTheParametersTheyAccept() throws {
+        // o-series and gpt-5* reject "max_tokens" and any set temperature with
+        // a non-retryable 400, so every classification would fail.
+        for model in ["o3-mini", "o1", "gpt-5.1", "openai/o4-mini"] {
+            let payload = LLMClient.payload(model: model, rulePrompt: "sort",
+                                            taxonomy: [], fileDescription: "File: x")
+            XCTAssertEqual(payload["max_completion_tokens"] as? Int, LLMClient.maxCompletionTokens,
+                           "\(model) must use the parameter it accepts")
+            XCTAssertNil(payload["max_tokens"], "\(model) rejects the legacy name")
+            XCTAssertNil(payload["temperature"], "\(model) rejects a set temperature")
+        }
+    }
+
+    func testClassicModelsKeepTheClassicParameters() {
+        for model in ["mistral-small-latest", "gpt-4o-mini", "llama3.2", "qwen2.5:7b"] {
+            let payload = LLMClient.payload(model: model, rulePrompt: "sort",
+                                            taxonomy: [], fileDescription: "File: x")
+            XCTAssertEqual(payload["max_tokens"] as? Int, LLMClient.maxCompletionTokens)
+            XCTAssertEqual(payload["temperature"] as? Int, 0)
+            XCTAssertNil(payload["max_completion_tokens"])
+        }
+    }
 }

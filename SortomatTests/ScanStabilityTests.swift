@@ -12,9 +12,15 @@ final class ScanStabilityTests: XCTestCase {
         dir = fm.temporaryDirectory.appendingPathComponent("sortomat-stability-\(UUID().uuidString)")
         try fm.createDirectory(at: dir.appendingPathComponent("watch"), withIntermediateDirectories: true)
         try fm.createDirectory(at: dir.appendingPathComponent("target"), withIntermediateDirectories: true)
+        // The Pipeline journals every placement and opens the decision memo
+        // through ConfigStore. Without this the suite appends to the real
+        // ~/Library/Application Support/Sortomat/journal.jsonl, and a
+        // developer's History tab fills up with vanished test files.
+        setenv("SORTOMAT_CONFIG_DIR", dir.path, 1)
     }
 
     override func tearDownWithError() throws {
+        unsetenv("SORTOMAT_CONFIG_DIR")
         try? fm.removeItem(at: dir)
     }
 
@@ -24,7 +30,7 @@ final class ScanStabilityTests: XCTestCase {
 
         let old = dir.appendingPathComponent("watch/settled.txt")
         try "settled".write(to: old, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -24 * 60 * 60)],
                              ofItemAtPath: old.path)
 
         let rule = Rule(
@@ -35,7 +41,8 @@ final class ScanStabilityTests: XCTestCase {
         )
         let config = Config(rules: [rule], providerRequiresKey: false)
 
-        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")))
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: DecisionMemo(url: dir.appendingPathComponent("memo.json")))
         let result = await pipeline.scan(rule: rule, config: config, apiKey: "unused")
 
         XCTAssertEqual(result.unstableCount, 1, "the fresh file must be reported, not forgotten")

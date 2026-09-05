@@ -11,9 +11,15 @@ final class KeylessScanTests: XCTestCase {
         dir = fm.temporaryDirectory.appendingPathComponent("sortomat-keyless-\(UUID().uuidString)")
         try fm.createDirectory(at: dir.appendingPathComponent("watch"), withIntermediateDirectories: true)
         try fm.createDirectory(at: dir.appendingPathComponent("target"), withIntermediateDirectories: true)
+        // The Pipeline journals every placement and opens the decision memo
+        // through ConfigStore. Without this the suite appends to the real
+        // ~/Library/Application Support/Sortomat/journal.jsonl, and a
+        // developer's History tab fills up with vanished test files.
+        setenv("SORTOMAT_CONFIG_DIR", dir.path, 1)
     }
 
     override func tearDownWithError() throws {
+        unsetenv("SORTOMAT_CONFIG_DIR")
         try? fm.removeItem(at: dir)
     }
 
@@ -21,7 +27,7 @@ final class KeylessScanTests: XCTestCase {
     private func plantStableFile(named name: String) throws -> URL {
         let url = dir.appendingPathComponent("watch/\(name)")
         try "content".write(to: url, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)],
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -24 * 60 * 60)],
                              ofItemAtPath: url.path)
         return url
     }
@@ -36,7 +42,8 @@ final class KeylessScanTests: XCTestCase {
         )
         let config = Config(rules: [rule], providerRequiresKey: true)
 
-        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")))
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: DecisionMemo(url: dir.appendingPathComponent("memo.json")))
         let result = await pipeline.scan(rule: rule, config: config, apiKey: "")
 
         XCTAssertFalse(fm.fileExists(atPath: file.path), "the pre-rule should have moved it")
@@ -53,7 +60,8 @@ final class KeylessScanTests: XCTestCase {
         )
         let config = Config(rules: [rule], providerRequiresKey: true)
 
-        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")))
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")),
+                                memo: DecisionMemo(url: dir.appendingPathComponent("memo.json")))
         let result = await pipeline.scan(rule: rule, config: config, apiKey: "")
 
         XCTAssertTrue(fm.fileExists(atPath: file.path), "nothing may move without a decision")
@@ -65,5 +73,7 @@ final class KeylessScanTests: XCTestCase {
         // file gets classified. (A second keyless scan defers again.)
         let again = await pipeline.scan(rule: rule, config: config, apiKey: "")
         XCTAssertEqual(again.entries.count, 1)
+        XCTAssertTrue(fm.fileExists(atPath: file.path),
+                      "a deferred file must survive repeated keyless scans untouched")
     }
 }

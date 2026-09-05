@@ -68,14 +68,20 @@ enum HeadlessRunner {
         if config.providerRequiresKey && apiKey.isEmpty {
             // Not fatal anymore: deterministic pre-rules still run without a
             // key; files that need the model are deferred and reported per rule.
-            print(L10n.t("error.noKey"))
+            // stderr: stdout is the machine-readable OK/ERR stream a launchd
+            // job or a shell pipeline reads.
+            FileHandle.standardError.write(Data((L10n.t("error.noKey") + "\n").utf8))
         }
 
         let pipeline = Pipeline()
         var hadError = false
+        // One pass is one undoable batch, exactly as in the GUI — without a
+        // shared id `Sortomat undo` reversed only the last rule's moves.
+        let batchID = UUID()
         for rule in config.rules.inExecutionOrder() {
             let result = await pipeline.scan(
-                rule: rule, config: config, apiKey: apiKey, forcePreview: !apply
+                rule: rule, config: config, apiKey: apiKey, forcePreview: !apply,
+                batchID: batchID
             )
             for entry in result.entries {
                 print((entry.ok ? "OK   " : "ERR  ") + entry.message)
@@ -88,7 +94,10 @@ enum HeadlessRunner {
     }
 
     private static func undoLast() -> Never {
-        let entries = Journal.recent(limit: 500)
+        // The whole journal: a pass over a big folder can journal more than a
+        // few hundred moves, and a truncated window makes `lastBatch` reverse
+        // only part of the batch while still printing success.
+        let entries = Journal.recent(limit: .max)
         let batch = Journal.lastBatch(in: entries)
         guard !batch.isEmpty else {
             print(L10n.t("headless.nothingToUndo"))
