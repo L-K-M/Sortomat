@@ -359,6 +359,80 @@ realize*: `URL.resourceValues(forKeys: [.fileSizeKey])` does not follow a
 symlink on Darwin, which CI proved by failing a test that asserted it does.
 
 
+## 4. The deterministic engine
+
+Three independent engine designs were produced against the same brief, then
+synthesized into one implementation-ready specification
+(`designs/engine-SYNTHESIS.md`, ~2 300 lines). The shape:
+
+**A rule stays a rule.** `Rule` remains "one watched folder + one target folder
++ defaults" and keeps its `id` — the key the ledger, the decision memo, the
+journal, preview memory, rule packs and `AppState.signature(of:)` all depend
+on. Hazel-style rules live *inside* it as `steps: [RuleStep]`, each with a
+`when` (a nestable `all`/`any`/`none` group over ~35 typed attributes) and a
+`then` (an ordered action list). Steps are first-match-wins unless an action
+says `continue`; `rule.fallback` decides what happens to a file no step
+claimed. Nothing splits, nothing is renumbered, and no history is orphaned.
+
+**The model becomes one action among many.** `askModel` fills `{model.folder}`,
+`{model.title}`, `{model.confidence}` and friends, and the *following* actions
+decide what to do with them. So a rule can be fully deterministic, fully
+model-driven, or — the interesting case — hybrid:
+`Bücher/{model.genre}/{author} — {title}.{ext}` is a rule that pays for exactly
+one word. `Pipeline.routing` (taxonomy, confidence threshold, quarantine) still
+runs unchanged before the engine resumes, and a quarantine short-circuits the
+rest of the step so no template can route around a safety valve.
+
+**Each confirmed defect gets a named fix:**
+
+| Wrong today | Engine v2 |
+| --- | --- |
+| age and dates silently mean *mtime* [P0-13] | five distinct date attributes; `dateAdded` (`addedToDirectoryDateKey`) is the default basis for new rules, and migrated rules get `dateModified` pinned **explicitly and visibly**, so nobody's behaviour changes behind their back |
+| five fixed tokens, captures discarded [P0-14] | one template language: `date:` formats, named and indexed captures scoped by `captureAs`, `{parent}`, `{relpath}`, `{counter}`, `{size}`, `{kind}`, `or:`/`default:` fallback chains, `{{`/`}}` escapes |
+| "kind" is free text over a hand-kept table [P0-15] | a closed token set resolved through `UTType` conformance, with a 16-byte sniffer for extensionless files and the legacy table pinned as a compatibility mode |
+| globs anchored while the help implies otherwise; `{a,b}` and `[0-9]` escaped to literals [P0-12, P0-16] | a real glob compiler (`*`, `**`, `?`, `[...]`, `{a,b}`) built as an NFA — no regex translation, so no ReDoS — with anchoring kept *and documented*, plus `contains`/`beginsWith`/`endsWith` operators for what people actually meant |
+| NFC pattern never matches an NFD filename [P0-17] | every comparison folds both sides through NFC + locale-independent case folding |
+| three actions, one per pre-rule | move, copy, rename, sortIntoDatedFolder, addTags, removeTags, setComment, setLabel, trash, reveal, open, notify, runShortcut, askModel, quarantine, skip, stop, continue |
+| no way to test a rule without paying or enabling it [P1-45] | evaluation is a *pure synchronous function* of `(Rule, FileFacts, Date)`, so "test against this file" costs nothing and needs no filesystem |
+
+**Three properties make it safe to ship blind.**
+
+1. *Nothing in the config tree can throw on decode.* Every open vocabulary
+   (`Attribute`, `Operator`, `Kind`, `ActionType`) is a `RawRepresentable`
+   **struct** with hand-written single-value `Codable`, not a `String` enum —
+   because `Decodable` synthesis for a `String` enum throws on an unknown raw
+   value, and one attribute from a newer build would otherwise make the whole
+   `Config` undecodable and throw the user's rules into a `.corrupt-<stamp>`
+   file. An unknown attribute evaluates to false, says so in the trace, and
+   round-trips untouched on re-save.
+2. *Interpolated values can never create folders.* The input design claimed a
+   `/` inside a token value is neutralized by `Sanitizer.sanitizeComponent`. It
+   is not: `Sanitizer.destination` splits the relative path on `/` **before**
+   sanitizing each component, so a title like "AC/DC" would silently create a
+   directory. The renderer escapes separators inside every interpolated value.
+3. *The safety core is not touched.* `Sanitizer`, `Mover`, `Journal` and
+   `Ledger` are unmodified; the engine only ever *reads* attributes. `trash` is
+   journaled as a move whose destination is the file's `~/.Trash` URL, so the
+   existing undo reverses it unchanged.
+
+**Every decision carries a trace.** Per condition: the attribute, the actual
+value found, the operator, and one of eleven verdicts — including which member
+of a `none` group was the culprit and where a short-circuit stopped the walk.
+The one-line summary goes to the activity log and the journal's `reason`; the
+full trace sits behind a disclosure in the preview. "Why did it go there?"
+stops being a question.
+
+**Migration is lossless in both directions.** Pre-rules become steps field by
+field, `step.id == preRule.id`, characters that the new glob and template
+languages gave meaning to are escaped, and `preRules` is *never cleared* in
+memory: it is re-derived on encode as a downgrade projection, so an older build
+opening a newer config does *nothing* rather than something wrong.
+
+It ships in five phases, and the first three are testable end to end through
+`config.json` and rule packs before a single line of the new editor exists —
+which is what keeps the largest SwiftUI change in the app off the critical
+path.
+
 ## 5. The interface
 
 Three independent designs were produced against the same brief and the same
