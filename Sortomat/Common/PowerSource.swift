@@ -13,8 +13,14 @@ enum PowerSource {
     /// can't read, counts as plugged in. Refusing to work because a power query
     /// failed would be a worse bug than the one this prevents.
     static var isOnBattery: Bool {
+        // Core Foundation's naming rule decides the accessor: `Copy` returns
+        // +1 and is taken retained; `Get` does not, and claiming a reference
+        // this code never acquired is an over-release. It happens not to crash
+        // today only because IOKit hands back a constant string whose
+        // retain/release are no-ops — an implementation detail, on a path that
+        // runs on every pass.
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let type = IOPSGetProvidingPowerSourceType(blob)?.takeRetainedValue() as String?
+              let type = IOPSGetProvidingPowerSourceType(blob)?.takeUnretainedValue() as String?
         else { return false }
         // `kIOPSBatteryPowerValue`. Spelled out because the macro's Swift name
         // has moved between SDKs and this file is compiled blind on CI.

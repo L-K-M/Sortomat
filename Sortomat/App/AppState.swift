@@ -8,7 +8,12 @@ import SwiftUI
 /// the Pipeline.
 @MainActor
 final class AppState: ObservableObject {
-    @Published var config: Config
+    @Published var config: Config {
+        // Two writable copies of one switch drift the moment anything writes
+        // the config side — a settings toggle bound straight to it, a config
+        // import, a restore. The guard in `paused.didSet` stops the loop.
+        didSet { if config.paused != paused { paused = config.paused } }
+    }
     /// The emergency brake. Written through to the config so it survives a
     /// relaunch — including the relaunch the update checker offers.
     @Published var paused: Bool {
@@ -91,16 +96,26 @@ final class AppState: ObservableObject {
     /// Four decimals because a single classification costs fractions of a cent,
     /// and a meter that reads "0.00" for the first two hundred files teaches
     /// the user that it doesn't work.
-    nonisolated static func money(_ amount: Double, code: String) -> String {
+    nonisolated static func money(_ amount: Double, code: String,
+                                  locale: Locale = .current) -> String {
+        moneyFormatter(code: code, locale: locale).string(from: NSNumber(value: amount))
+            ?? String(format: "%.4f %@", amount, code)
+    }
+
+    /// Locale placement and separators, not a hardcoded leading "$" and a
+    /// decimal point, for a German user paying a European provider in EUR.
+    /// The locale is a parameter so a test can compare against the same
+    /// formatter instead of against ASCII digits: a machine set to `ar_SA`
+    /// renders `١٫٢٣٤٥`, and asserting on the literal "2345" would fail there
+    /// while the code did exactly the right thing.
+    nonisolated static func moneyFormatter(code: String, locale: Locale) -> NumberFormatter {
         let formatter = NumberFormatter()
+        formatter.locale = locale
         formatter.numberStyle = .currency
         formatter.currencyCode = code
         formatter.minimumFractionDigits = 4
         formatter.maximumFractionDigits = 4
-        // Locale placement and separators, not a hardcoded leading "$" and a
-        // decimal point, for a German user paying a European provider in EUR.
-        return formatter.string(from: NSNumber(value: amount))
-            ?? String(format: "%.4f %@", amount, code)
+        return formatter
     }
 
     /// Whether an estimated spend is still under a ceiling. 0 = no ceiling.
@@ -112,6 +127,15 @@ final class AppState: ObservableObject {
         ceiling <= 0 || spend < ceiling
     }
 
+    /// `usage` is already scoped to the calendar month — `SpendStore.load`
+    /// discards a record from another month and `accumulate` restarts the
+    /// counter when the key rolls over — so `estimatedSpend` *is* this month's
+    /// spend, and the ceiling lifts by itself on the first of the month.
+    ///
+    /// The ceiling is a soft one: it is re-read between rules, not between
+    /// files, so one rule over a very large folder can overshoot before the
+    /// next rule is held. `perScanBudget` is the hard cap on a single burst;
+    /// this is the cap on the month.
     var withinMonthlyBudget: Bool {
         Self.withinBudget(spend: estimatedSpend, ceiling: config.monthlyBudget)
     }

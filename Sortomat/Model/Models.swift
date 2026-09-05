@@ -214,8 +214,17 @@ public struct Config: Codable, Equatable, Sendable {
     /// ISO 4217 code the price fields are quoted in. The meter used to be
     /// `String(format: "$%.4f")` — a dollar sign, in front, with a decimal
     /// point, for a user who may be paying in EUR or running a free local model.
-    public var currencyCode: String
-    /// Don't call the model (or scan at all) while running on battery.
+    public var currencyCode: String {
+        // `NumberFormatter.currencyCode` wants an uppercase ISO 4217 code, and
+        // the settings field is free text: "eur" typed in lower case would
+        // otherwise fall back to the locale's own currency and print a symbol
+        // for money the user isn't paying. (A `didSet` reassignment does not
+        // recurse in Swift.)
+        didSet { currencyCode = currencyCode.uppercased() }
+    }
+    /// Skip automatic passes while running on battery. A preview the user
+    /// asked for still runs: they are standing at the machine, and an explicit
+    /// request that silently does nothing is worse than the battery it saves.
     public var onlyOnPower: Bool
     /// Don't scan while macOS is in Low Power Mode.
     public var pauseInLowPowerMode: Bool
@@ -233,7 +242,9 @@ public struct Config: Codable, Equatable, Sendable {
         notificationsEnabled: Bool = true,
         paused: Bool = false,
         monthlyBudget: Double = 0,
-        currencyCode: String = "USD",
+        // A fresh config guesses from where the machine is; the *decode*
+        // default below stays "USD" so an existing config never shifts.
+        currencyCode: String = Locale.current.currency?.identifier ?? "USD",
         onlyOnPower: Bool = false,
         pauseInLowPowerMode: Bool = true
     ) {

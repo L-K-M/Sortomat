@@ -47,29 +47,52 @@ final class GuardrailTests: XCTestCase {
     // MARK: - The meter reads like money
 
     func testSpendIsFormattedAsTheChosenCurrency() {
-        let dollars = AppState.money(1.2345, code: "USD")
-        XCTAssertTrue(dollars.contains("1"), "got: \(dollars)")
-        XCTAssertTrue(dollars.contains("2345"), "four decimals: a classification costs fractions of a cent")
-        let euros = AppState.money(1.2345, code: "EUR")
-        XCTAssertNotEqual(dollars, euros, "the currency has to reach the string")
-        XCTAssertFalse(euros.contains("$"), "got: \(euros)")
+        // Compared against a formatter built the same way rather than against
+        // ASCII digits: a machine set to ar_SA renders ١٫٢٣٤٥, and asserting on
+        // the literal "2345" would fail there while the code was correct.
+        for locale in [Locale(identifier: "en_US"), Locale(identifier: "de_DE"),
+                       Locale(identifier: "ar_SA")] {
+            let dollars = AppState.money(1.2345, code: "USD", locale: locale)
+            let reference = AppState.moneyFormatter(code: "USD", locale: locale)
+            XCTAssertEqual(dollars, reference.string(from: NSNumber(value: 1.2345)))
+            XCTAssertFalse(dollars.isEmpty, "\(locale.identifier) rendered nothing")
+
+            let euros = AppState.money(1.2345, code: "EUR", locale: locale)
+            XCTAssertNotEqual(dollars, euros,
+                              "\(locale.identifier): the currency has to reach the string")
+        }
+    }
+
+    func testFourDecimalsSurviveTheFormatter() {
+        // A classification costs fractions of a cent; a meter that reads 0.00
+        // for the first two hundred files teaches the user it doesn't work.
+        let formatter = AppState.moneyFormatter(code: "USD", locale: Locale(identifier: "en_US"))
+        XCTAssertEqual(formatter.minimumFractionDigits, 4)
+        XCTAssertEqual(AppState.money(1.2345, code: "USD", locale: Locale(identifier: "en_US")),
+                       "$1.2345")
     }
 
     func testAnUnknownCurrencyCodeStillProducesANumber() {
         // Nothing validates what the user types into the field, and a meter
         // that renders as nothing at all is worse than one that renders oddly.
-        let text = AppState.money(0.5, code: "NOTACODE")
+        let text = AppState.money(0.5, code: "NOTACODE", locale: Locale(identifier: "en_US"))
         XCTAssertFalse(text.isEmpty)
-        XCTAssertTrue(text.contains("0"), "got: \(text)")
+    }
+
+    func testACurrencyCodeIsNormalizedToUpperCase() {
+        // The settings field is free text; `NumberFormatter` wants ISO 4217.
+        var config = Config()
+        config.currencyCode = "eur"
+        XCTAssertEqual(config.currencyCode, "EUR")
     }
 
     // MARK: - Power
 
-    func testEachHoldIsExplainedInBothLanguages() {
+    func testEachHoldIsExplainedInEveryLanguage() {
         var config = Config()
         config.pauseInLowPowerMode = true
         config.onlyOnPower = true
-        for language in ["en", "de"] {
+        for language in L10n.supportedLanguages {
             L10n.forcedLanguage = language
             let lowPower = AppState.hold(for: config, lowPower: true, onBattery: false)
             let battery = AppState.hold(for: config, lowPower: false, onBattery: true)
@@ -79,6 +102,11 @@ final class GuardrailTests: XCTestCase {
                                "\(language) renders its key: \(text ?? "nil")")
             }
             XCTAssertNotEqual(lowPower, battery, "two different reasons, two different sentences")
+            // The most power-constrained case of all was the only untested
+            // one: a branch structure that treated the two as exclusive would
+            // return nil here and hold the pass with no explanation at all.
+            XCTAssertNotNil(AppState.hold(for: config, lowPower: true, onBattery: true),
+                            "\(language): both triggers active must still name a reason")
         }
     }
 
@@ -104,11 +132,13 @@ final class GuardrailTests: XCTestCase {
                      "Low Power Mode on a plugged-in Mac is not battery")
     }
 
-    func testPowerQueriesFailOpen() {
-        // A desktop has no battery and an IOKit answer can be unreadable;
-        // refusing to work because a power query failed would be a worse bug
-        // than the one the setting prevents. Both answers are booleans that
-        // must not trap on any machine, CI included.
+    func testPowerQueriesDoNotTrap() {
+        // Named for what it actually checks. The fail-open *policy* — a
+        // desktop, or an IOKit answer we can't read, counting as plugged in —
+        // isn't observable through a `Bool`; asserting it needs `PowerSource`
+        // behind a protocol so a failing implementation can be injected, which
+        // is a follow-up. What this pins is that neither query traps on any
+        // machine, CI's included.
         _ = PowerSource.isOnBattery
         _ = PowerSource.isInLowPowerMode
     }

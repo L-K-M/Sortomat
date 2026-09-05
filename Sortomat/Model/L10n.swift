@@ -8,6 +8,11 @@ public enum L10n {
     /// Overridden in tests to force a language; otherwise follows the system.
     public static var forcedLanguage: String?
 
+    /// Every language the tables actually hold. One place, so a test that
+    /// sweeps "does this string exist in every language" keeps sweeping all of
+    /// them when a third is added.
+    public static let supportedLanguages = ["en", "de"]
+
     public static var language: String {
         if let forced = forcedLanguage { return forced }
         let pref = Locale.preferredLanguages.first ?? "en"
@@ -281,6 +286,7 @@ public enum L10n {
         // Why nothing is running
         "hold.lowPower": "Paused — Low Power Mode",
         "hold.onBattery": "Paused — on battery",
+        "hold.budget": "Held — monthly limit reached",
 
         // Decision memo
         "memo.remembered": "%@ · remembered from an identical file",
@@ -599,6 +605,7 @@ public enum L10n {
         // Why nothing is running
         "hold.lowPower": "Pausiert – Stromsparmodus",
         "hold.onBattery": "Pausiert – Akkubetrieb",
+        "hold.budget": "Angehalten – Monatslimit erreicht",
 
         "memo.remembered": "%@ · von einer identischen Datei übernommen",
         "memo.rememberedBare": "Von einer identischen Datei übernommen",
