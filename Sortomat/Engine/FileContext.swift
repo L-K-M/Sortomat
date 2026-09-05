@@ -109,12 +109,14 @@ enum FileContext {
     /// knowing — a bank's domain files differently from a camera's — but the
     /// query routinely carries a credential: presigned S3 links, OAuth
     /// redirects and share links all put a token there, and none of it helps
-    /// decide a folder. Spotlight stores a comma-joined list when a file was
-    /// downloaded more than once, so each entry is cut separately.
+    /// decide a folder. Spotlight stores a list when a file was downloaded more
+    /// than once, joined with `", "` above — split on that exact separator, not
+    /// on every comma: a comma is legal in a URL path, and cutting there turns
+    /// one origin into two wrong ones.
     static func withoutQuery(_ value: String) -> String {
-        let parts = value.split(separator: ",", omittingEmptySubsequences: false)
+        let parts = value.components(separatedBy: ", ")
         let trimmed = parts.map { part -> Substring in
-            part.drop(while: { $0 == " " }).prefix(while: { $0 != "?" && $0 != "#" })
+            Substring(part).prefix(while: { $0 != "?" && $0 != "#" })
         }
         return trimmed.filter { !$0.isEmpty }.joined(separator: ", ")
     }

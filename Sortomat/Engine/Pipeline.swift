@@ -314,9 +314,13 @@ actor Pipeline {
         // Extraction can be real work now (OCR, office documents): run it off
         // the actor so other files keep flowing while one is being read.
         let privacyMode = rule.privacyMode
-        // Detached so other files keep flowing — and cancellable, so a stopped
-        // pass does not keep OCR-ing pages for a decision nobody wants.
-        let extraction = Task.detached(priority: .utility) {
+        // Detached so other files keep flowing. Cancellation reaches it through
+        // the handler below, and the readers poll `Task.isCancelled` between
+        // zip entries and between recognized pages — so a stopped pass drops
+        // the *next* page, not the one Vision is already inside. No explicit
+        // priority: the actor awaits this immediately, so demoting it to
+        // `.utility` could only make the pass everyone is waiting on slower.
+        let extraction = Task.detached {
             FileContext.describe(url: file, privacyMode: privacyMode)
         }
         let description = await withTaskCancellationHandler {

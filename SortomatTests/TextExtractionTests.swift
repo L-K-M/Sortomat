@@ -233,6 +233,36 @@ final class TextExtractionTests: XCTestCase {
         XCTAssertFalse(text.contains("0"), "got: \(text)")
     }
 
+    func testACommaInAURLPathIsNotAnOriginBoundary() {
+        // Spotlight joins several origins with ", "; a comma inside one path is
+        // not a separator, and cutting there turned one origin into two wrong
+        // ones.
+        XCTAssertEqual(
+            FileContext.withoutQuery("https://example.com/docs/a,b.pdf"),
+            "https://example.com/docs/a,b.pdf"
+        )
+        XCTAssertEqual(
+            FileContext.withoutQuery("https://a.example/x,y.pdf?t=1, https://b.example/z.pdf"),
+            "https://a.example/x,y.pdf, https://b.example/z.pdf"
+        )
+    }
+
+    func testSpreadsheetsAndDrawingsSkipTheDocumentReader() throws {
+        // An OpenDocument file is a zip; a reader that guesses "plain text"
+        // returns its compressed bytes as mojibake, and that non-empty answer
+        // would win over the content.xml path and be the only sample the file
+        // ever produced.
+        var zip = ZipWriter()
+        zip.add("content.xml",
+                #"<office:document-content><office:body><office:spreadsheet><text:p>Quartalszahlen</text:p></office:spreadsheet></office:body></office:document-content>"#)
+        for (name, ext) in [("sheet", "ods"), ("deck", "odp"), ("plan", "odg")] {
+            let url = dir.appendingPathComponent("\(name).\(ext)")
+            try zip.data().write(to: url, options: .atomic)
+            let text = DocumentText.text(url: url, limit: 4000)
+            XCTAssertTrue(text.contains("Quartalszahlen"), "\(ext) got: \(text)")
+        }
+    }
+
     func testDownloadURLsReachTheModelWithoutTheirQueryString() {
         XCTAssertEqual(
             FileContext.withoutQuery("https://files.example.com/report.pdf?token=SECRET&sig=abc"),

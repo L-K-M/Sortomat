@@ -58,7 +58,16 @@ enum DocumentText {
         case "doc": options[.documentType] = NSAttributedString.DocumentType.docFormat
         case "rtf": options[.documentType] = NSAttributedString.DocumentType.rtf
         case "rtfd": options[.documentType] = NSAttributedString.DocumentType.rtfd
-        default: break // OpenDocument: let the reader sniff it
+        // Name the format instead of letting the reader sniff it: an
+        // OpenDocument file is a zip, and a sniff that guesses "plain text"
+        // returns the compressed bytes as mojibake — which is non-empty, so it
+        // would win over the `content.xml` path below and be the *only* sample
+        // this file ever produces.
+        case "odt": options[.documentType] = NSAttributedString.DocumentType.openDocument
+        // `.openDocument` is the text format; there is no reader for the
+        // spreadsheet, presentation and drawing ones, so go straight to the zip.
+        case "ods", "odp", "odg": return nil
+        default: break
         }
         guard let attributed = try? NSAttributedString(url: url, options: options, documentAttributes: nil) else {
             return nil
@@ -90,6 +99,10 @@ enum DocumentText {
         let sheets = zip.entries
             .filter { $0.name.hasPrefix("xl/worksheets/sheet") && $0.name.hasSuffix(".xml") }
             .sorted { partNumber($0.name) < partNumber($1.name) }
+            // First three sheets only: a workbook can hold hundreds, and a
+            // classification sample is a few thousand characters. Text that
+            // lives only on sheet 4 is lost — deliberately, against reading
+            // every sheet of every workbook that reaches the model.
             .prefix(3)
         return collect(from: Array(sheets), in: zip, limit: limit) { inlineStrings(in: $0) }
     }
