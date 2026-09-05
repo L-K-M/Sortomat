@@ -255,7 +255,7 @@ final class TextExtractionTests: XCTestCase {
         let big = dir.appendingPathComponent("big.rtf")
         try Data(count: 4096).write(to: big)
         let link = dir.appendingPathComponent("link.rtf")
-        try fm.createSymbolicLink(at: link, withDestinationItemAt: big)
+        try fm.createSymbolicLink(at: link, withDestinationURL: big)
 
         let direct = (try? fm.attributesOfItem(atPath: link.path))?[.size] as? Int64 ?? 0
         XCTAssertLessThan(direct, 4096, "sanity: the link itself weighs its target's path, not its bytes")
