@@ -2,13 +2,13 @@ import Foundation
 
 /// What the model was asked, and what it answered. Both are plain values so
 /// the evaluator stays pure — the pipeline does the talking.
-public struct ModelRequest: Equatable, Sendable {
-    public var ruleID: UUID
-    public var stepIndex: Int
-    public var actionIndex: Int
-    public var options: ModelStepOptions
+struct ModelRequest: Equatable, Sendable {
+    var ruleID: UUID
+    var stepIndex: Int
+    var actionIndex: Int
+    var options: ModelStepOptions
 
-    public init(ruleID: UUID, stepIndex: Int, actionIndex: Int,
+    init(ruleID: UUID, stepIndex: Int, actionIndex: Int,
                 options: ModelStepOptions = ModelStepOptions()) {
         self.ruleID = ruleID
         self.stepIndex = stepIndex
@@ -17,17 +17,17 @@ public struct ModelRequest: Equatable, Sendable {
     }
 }
 
-public struct ModelAnswer: Equatable, Sendable {
-    public var folder: String?
-    public var filename: String?
-    public var relativePath: String?
-    public var reason: String?
-    public var confidence: Double?
+struct ModelAnswer: Equatable, Sendable {
+    var folder: String?
+    var filename: String?
+    var relativePath: String?
+    var reason: String?
+    var confidence: Double?
     /// Set when the pipeline's taxonomy or confidence valve redirected the
     /// answer; the engine then places into the unsure folder and stops.
-    public var quarantined: Bool
+    var quarantined: Bool
 
-    public init(folder: String? = nil, filename: String? = nil, relativePath: String? = nil,
+    init(folder: String? = nil, filename: String? = nil, relativePath: String? = nil,
                 reason: String? = nil, confidence: Double? = nil, quarantined: Bool = false) {
         self.folder = folder
         self.filename = filename
@@ -39,12 +39,12 @@ public struct ModelAnswer: Equatable, Sendable {
 }
 
 /// Where evaluation stopped, so it can pick up again once the model answered.
-public struct ResumeToken: Equatable, Sendable {
-    public var stepIndex: Int
-    public var actionIndex: Int
-    public var fromFallback: Bool
+struct ResumeToken: Equatable, Sendable {
+    var stepIndex: Int
+    var actionIndex: Int
+    var fromFallback: Bool
 
-    public init(stepIndex: Int, actionIndex: Int, fromFallback: Bool = false) {
+    init(stepIndex: Int, actionIndex: Int, fromFallback: Bool = false) {
         self.stepIndex = stepIndex
         self.actionIndex = actionIndex
         self.fromFallback = fromFallback
@@ -54,19 +54,19 @@ public struct ResumeToken: Equatable, Sendable {
 /// The engine. A pure, synchronous function of `(Rule, FileFacts, now)` — no
 /// I/O of its own, which is what makes "test this rule against a file" free
 /// and the whole thing unit-testable with no file system at all.
-public enum RuleEvaluator {
-    public struct Context {
-        public var rule: Rule
-        public var facts: FileFacts
-        public var now: Date
-        public var timeZone: TimeZone
-        public var calendar: Calendar
+enum RuleEvaluator {
+    struct Context {
+        var rule: Rule
+        var facts: FileFacts
+        var now: Date
+        var timeZone: TimeZone
+        var calendar: Calendar
         /// False in the editor's "test against a file" and whenever the
         /// pipeline has no budget and no key: `askModel` then defers instead
         /// of asking.
-        public var allowModel: Bool
+        var allowModel: Bool
 
-        public init(rule: Rule, facts: FileFacts, now: Date = Date(),
+        init(rule: Rule, facts: FileFacts, now: Date = Date(),
                     timeZone: TimeZone = .current,
                     calendar: Calendar = Calendar(identifier: .gregorian),
                     allowModel: Bool = true) {
@@ -81,7 +81,7 @@ public enum RuleEvaluator {
         }
     }
 
-    public enum Outcome {
+    enum Outcome {
         case decided(Placement, RuleTrace)
         case needsModel(ModelRequest, ResumeToken, RuleTrace)
         /// The model is needed but not available right now: no key, no budget,
@@ -89,13 +89,13 @@ public enum RuleEvaluator {
         case deferred(RuleTrace)
     }
 
-    public static func evaluate(_ context: Context) -> Outcome {
+    static func evaluate(_ context: Context) -> Outcome {
         var state = State(rule: context.rule, timeZone: context.timeZone)
         return walk(&state, from: 0, context: context)
     }
 
     /// Continue after the pipeline resolved a model request.
-    public static func resume(_ token: ResumeToken, answer: ModelAnswer,
+    static func resume(_ token: ResumeToken, answer: ModelAnswer,
                               context: Context) -> Outcome {
         var state = State(rule: context.rule, timeZone: context.timeZone)
         state.answer = answer

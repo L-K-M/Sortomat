@@ -3,7 +3,7 @@ import Foundation
 /// Accumulates what a step's actions decided. Templates are rendered only at
 /// `build()`, so a terminal that a later `continue` chain overrides never
 /// costs a render.
-public struct PlacementBuilder {
+struct PlacementBuilder {
     let rule: Rule
     /// The first terminal wins: a step that says "move" and then "trash" moves.
     private var operation: Placement.Operation?
@@ -15,18 +15,18 @@ public struct PlacementBuilder {
     private var modelAnswer: ModelAnswer?
     private var stepName: String = ""
 
-    public var stopped = false
-    public var continueMatching = false
+    var stopped = false
+    var continueMatching = false
 
-    public var isTerminal: Bool { operation != nil }
+    var isTerminal: Bool { operation != nil }
 
-    public init(rule: Rule) {
+    init(rule: Rule) {
         self.rule = rule
     }
 
     /// Apply one action. Returns a one-line description for the trace, or nil
     /// for an action that did nothing (already terminal, or unknown).
-    public mutating func apply(_ action: RuleAction) -> String? {
+    mutating func apply(_ action: RuleAction) -> String? {
         switch action.type {
         case .stop:
             stopped = true
@@ -53,7 +53,7 @@ public struct PlacementBuilder {
     /// The model answered. Its values become `{model.*}` tokens; if no later
     /// action places the file, the implicit terminal is a move to the path the
     /// model gave — exactly what the app does today.
-    public mutating func bindModel(_ answer: ModelAnswer, action: RuleAction?) {
+    mutating func bindModel(_ answer: ModelAnswer, action: RuleAction?) {
         modelAnswer = answer
         origin = answer.quarantined ? .confidence : .model
         if answer.quarantined {
@@ -70,7 +70,7 @@ public struct PlacementBuilder {
         reason = answer.reason ?? ""
     }
 
-    public mutating func setTerminal(_ operation: Placement.Operation, reason: String,
+    mutating func setTerminal(_ operation: Placement.Operation, reason: String,
                                      origin: PlannedAction.Origin) {
         guard !isTerminal else { return }
         self.operation = operation
@@ -83,7 +83,7 @@ public struct PlacementBuilder {
         }
     }
 
-    public func build(context: RuleEvaluator.Context, captures: CaptureStore,
+    func build(context: RuleEvaluator.Context, captures: CaptureStore,
                       trace: RuleTrace) -> Placement {
         let operation = self.operation ?? .skip
         var rendered: RenderedTemplate?
@@ -118,8 +118,8 @@ public struct PlacementBuilder {
 
     private func renderedEffects(context: RuleEvaluator.Context,
                                  captures: CaptureStore) -> [SideEffect] {
-        effects.map { type, values in
-            SideEffect(type: type, values: values.map { value in
+        effects.map { effect in
+            SideEffect(type: effect.0, values: effect.1.map { value in
                 TokenTemplate(value).render(timeZone: context.timeZone) { token in
                     TemplateResolver.value(for: token, facts: context.facts, captures: captures,
                                            model: modelAnswer, rule: rule, step: stepName,
