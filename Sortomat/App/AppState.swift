@@ -489,7 +489,18 @@ final class AppState: ObservableObject {
     @discardableResult
     func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
-        return await reverse(entries.filter { $0.batchID == id })
+        let result = await reverse(entries.filter { $0.batchID == id })
+        // The click that started this happened in a banner, with no window in
+        // sight: without a word back, the user pressed a button that moves
+        // files and got no signal at all that it worked — or that half of it
+        // didn't.
+        if config.notificationsEnabled, result.undone + result.failed > 0 {
+            Notifier.post(
+                title: L10n.plural("notify.undone", result.undone),
+                body: result.failed > 0 ? L10n.plural("notify.undoFailed", result.failed) : ""
+            )
+        }
+        return result
     }
 
     private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {

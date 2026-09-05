@@ -22,7 +22,22 @@ enum Notifier {
 
     /// Installed by the app delegate. Set before `requestAuthorization`, since
     /// a notification can be delivered to a click as soon as one is posted.
-    @MainActor static var handler: (@MainActor (Action) -> Void)?
+    @MainActor static var handler: (@MainActor (Action) -> Void)? {
+        didSet { if handler != nil { drainPending() } }
+    }
+
+    /// A click that arrived before the handler existed. The delegate is
+    /// installed in `applicationWillFinishLaunching` and the handler in
+    /// `applicationDidFinishLaunching`, so a cold launch *from* a notification
+    /// can deliver its response into that gap — and dropping it would silently
+    /// cancel a file-moving action the user asked for.
+    @MainActor private static var pending: [Action] = []
+
+    @MainActor private static func drainPending() {
+        let queued = pending
+        pending = []
+        queued.forEach { handler?($0) }
+    }
 
     enum Category {
         static let filed = "sortomat.filed"
@@ -40,14 +55,23 @@ enum Notifier {
         static let reveal = "reveal"
     }
 
-    static func requestAuthorization() {
+    /// Must run before the app finishes launching. macOS delivers the response
+    /// to a click that *launched* the app as soon as launching completes, and
+    /// drops it if no delegate is registered by then — so a click on Undo in a
+    /// banner left over from a previous session would do nothing at all, which
+    /// is precisely the "learn to dismiss without reading" outcome the buttons
+    /// exist to avoid.
+    static func prepareForLaunch() {
         let center = UNUserNotificationCenter.current()
-        // Without a delegate, macOS suppresses banners while the app is
+        // Without a delegate, macOS also suppresses banners while the app is
         // frontmost — exactly when the user has a Sortomat window open and
         // would want to see "filed / failed".
         center.delegate = Responder.shared
         center.setNotificationCategories([filedCategory(), failedCategory()])
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    static func requestAuthorization() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     private static func filedCategory() -> UNNotificationCategory {
@@ -84,9 +108,9 @@ enum Notifier {
         let content = UNMutableNotificationContent()
         content.title = L10n.plural("notify.filed", count)
         content.body = NotificationText.summary(of: urls)
-        content.categoryIdentifier = Category.filed
-        // One thread per pass, so ten passes over an afternoon stack into one
-        // group in Notification Center instead of ten separate cards.
+        // One thread identifier shared by every pass, so ten passes over an
+        // afternoon stack into one group in Notification Center instead of ten
+        // separate cards.
         content.threadIdentifier = "sortomat.pass"
         var info: [String: Any] = [:]
         if let batch { info[InfoKey.batch] = batch.uuidString }
@@ -94,7 +118,18 @@ enum Notifier {
             info[InfoKey.reveal] = folder.path
         }
         content.userInfo = info
+        if let category = filedCategoryIdentifier(batch: batch, urls: urls) {
+            content.categoryIdentifier = category
+        }
         deliver(content)
+    }
+
+    /// The category to attach to a "filed" banner, or nil when neither button
+    /// could do anything. A destructive-looking Undo that silently does nothing
+    /// erodes trust faster than no button at all, and both actions need a
+    /// payload: the batch to reverse, the folder to open.
+    static func filedCategoryIdentifier(batch: UUID?, urls: [URL]) -> String? {
+        (batch != nil && !urls.isEmpty) ? Category.filed : nil
     }
 
     static func postFailed(count: Int, message: String) {
@@ -171,7 +206,13 @@ enum Notifier {
             // handler touches lives on the main actor.
             Task { @MainActor in
                 if let action = Notifier.action(for: identifier, userInfo: info) {
-                    Notifier.handler?(action)
+                    if let handler = Notifier.handler {
+                        handler(action)
+                    } else {
+                        // A cold launch *from* this click: the delegate exists,
+                        // the app delegate hasn't installed the handler yet.
+                        Notifier.pending.append(action)
+                    }
                 }
                 completionHandler()
             }

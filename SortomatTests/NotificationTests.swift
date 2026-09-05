@@ -108,6 +108,15 @@ final class NotificationTests: XCTestCase {
         XCTAssertNil(Notifier.action(for: "sortomat.action.fromAnOlderBuild", userInfo: [:]))
     }
 
+    func testABannerWithNothingToUndoOffersNoButtons() {
+        // A destructive-looking Undo that silently does nothing erodes trust
+        // faster than no button at all, and both actions need a payload.
+        XCTAssertNil(Notifier.filedCategoryIdentifier(batch: nil, urls: [url("/a/x.pdf")]))
+        XCTAssertNil(Notifier.filedCategoryIdentifier(batch: UUID(), urls: []))
+        XCTAssertEqual(Notifier.filedCategoryIdentifier(batch: UUID(), urls: [url("/a/x.pdf")]),
+                       "sortomat.filed")
+    }
+
     // MARK: - The path a notification needs
 
     func testAFiledEntryRemembersWhereTheFileLanded() {

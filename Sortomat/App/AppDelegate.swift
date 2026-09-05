@@ -13,6 +13,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
+    /// macOS delivers the response to a click that *launched* the app as soon
+    /// as launching finishes, and drops it if no notification delegate exists
+    /// by then. Registering it here rather than in `didFinishLaunching` is what
+    /// makes Undo work on a banner left over from a previous session.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard !Self.isRunningTests else { return }
+        Notifier.prepareForLaunch()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Don't boot the full app under XCTest — the test host stays quiet.
         guard !Self.isRunningTests else { return }
