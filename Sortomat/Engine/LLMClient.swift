@@ -37,6 +37,9 @@ struct LLMClient {
     let model: String
     let baseURL: URL
     var session: URLSession = .shared
+    /// Base of the linear back-off between retries (2 s, 4 s, 6 s). Tests set
+    /// it to zero.
+    var retryBaseDelay: TimeInterval = 2
 
     static let systemPrompt = """
     You are a file-sorting assistant. You receive a user-defined sorting rule and \
@@ -151,8 +154,8 @@ struct LLMClient {
                 retryable = true
             }
             guard retryable else { throw lastError }
-            if attempt < 3 {
-                try await Task.sleep(nanoseconds: UInt64(2_000_000_000 * (attempt + 1)))
+            if attempt < 3, retryBaseDelay > 0 {
+                try await Task.sleep(nanoseconds: UInt64(retryBaseDelay * Double(attempt + 1) * 1_000_000_000))
             }
         }
         throw lastError
@@ -172,8 +175,17 @@ struct LLMClient {
     }
 
     static func parse(_ data: Data) throws -> ClassificationResult {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            // Not JSON at all — a captive portal, a proxy's HTML error page, a
+            // wrong base URL answering 200 with a web page. Terminal, with the
+            // body as evidence; the generic retry path must never see it.
+            throw LLMError.badResponse(String(decoding: data.prefix(200), as: UTF8.self))
+        }
         guard
-            let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let root = object as? [String: Any],
             let choices = root["choices"] as? [[String: Any]],
             let message = choices.first?["message"] as? [String: Any],
             var content = message["content"] as? String
