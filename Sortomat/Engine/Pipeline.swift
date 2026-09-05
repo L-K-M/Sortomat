@@ -462,7 +462,8 @@ actor Pipeline {
             ruleID: rule.id, ruleName: rule.name, source: file, kind: kind,
             destination: destination, origin: placement.origin, reason: reason,
             confidence: placement.confidence,
-            copyInsteadOfMove: placement.operation == .copy
+            copyInsteadOfMove: placement.operation == .copy,
+            sideEffects: placement.sideEffects
         ), usage: usage, usedLLM: usedLLM)
     }
 
@@ -627,6 +628,9 @@ actor Pipeline {
                         wasCopy: plan.copyInsteadOfMove, reason: plan.reason,
                         batchID: batchID, destinationStamp: Journal.stamp(of: url)
                     ))
+                    // After the journal, never before: a side effect that
+                    // fails must not be able to cost the user their undo.
+                    ActionExecutor.apply(plan.sideEffects, to: url)
                     return ActivityEntry(ok: true,
                                          message: filedMessage(plan, finalURL: url, target: target, name: name),
                                          kind: .filed)

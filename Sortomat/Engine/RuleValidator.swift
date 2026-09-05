@@ -285,6 +285,19 @@ enum RuleValidator {
                 add("action.noTags", .error, L10n.t("validate.action.noTags"))
             }
         }
+        // Declared, recorded, and not carried out by this build. Said here
+        // rather than left to be discovered from a tag that never appears.
+        if ActionType.sideEffects.contains(action.type),
+           !ActionExecutor.supported.contains(action.type) {
+            add("action.notAppliedYet", .warning,
+                L10n.t("validate.action.notAppliedYet", action.type.rawValue))
+        }
+        // `trash` is accepted by the builder and then planned as a move, so
+        // the file lands in the destination folder instead of the Trash —
+        // safe, undoable, and not what the rule says.
+        if action.type == .trash {
+            add("action.trashMoves", .warning, L10n.t("validate.action.trashMoves"))
+        }
         if action.type == .runShortcut && action.template.isEmpty {
             add("action.noShortcut", .error, L10n.t("validate.action.noShortcut"))
         }

@@ -41,6 +41,10 @@ struct PlannedAction: Identifiable, Equatable {
     /// after the user saw the suggestion. `nil` on plans made before this
     /// field existed — those apply unchecked, as before.
     var fingerprint: String? = nil
+    /// What happens to the file once it has been placed — tags, a banner.
+    /// Carried on the plan rather than re-derived at apply time, so what the
+    /// preview showed is exactly what runs.
+    var sideEffects: [SideEffect] = []
 
     var isActionable: Bool { kind == .move || kind == .copy || kind == .quarantine }
 
