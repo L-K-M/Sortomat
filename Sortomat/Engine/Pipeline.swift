@@ -492,14 +492,32 @@ actor Pipeline {
 
     // MARK: - Candidate discovery & stability
 
+    /// Document packages that Launch Services may not know on a Mac without
+    /// the app that owns them — a Pages document must sort like a file even
+    /// where Pages isn't installed.
+    static let packageExtensions: Set<String> = [
+        "pages", "numbers", "key", "rtfd", "textbundle", "sketch", "band", "bundle", "app",
+    ]
+
+    /// A regular file, or a package: a Pages/Numbers/Keynote document, an
+    /// RTFD, a text bundle. Packages are folders on disk, so they used to be
+    /// invisible to every rule ("document" kind included) — Hazel treats
+    /// them as files, and so does Finder.
+    static func isFileLike(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isPackageKey, .isDirectoryKey])
+        else { return false }
+        if values.isRegularFile == true { return true }
+        guard values.isDirectory == true else { return false }
+        return values.isPackage == true || packageExtensions.contains(url.pathExtension.lowercased())
+    }
+
     private func candidateFiles(in watch: URL, target: URL, rule: Rule) -> [URL] {
         let fm = FileManager.default
         let targetPath = target.standardizedFileURL.path
-        let keys: [URLResourceKey] = [.isRegularFileKey]
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isPackageKey, .isDirectoryKey]
 
         func acceptable(_ url: URL) -> Bool {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
-            else { return false }
+            guard Self.isFileLike(url) else { return false }
             let ext = url.pathExtension.lowercased()
             if Self.partialExtensions.contains(ext) { return false }
             if url.lastPathComponent.hasPrefix(".") { return false }
@@ -522,7 +540,13 @@ actor Pipeline {
                     enumerator.skipDescendants()
                     continue
                 }
-                if acceptable(url) { urls.append(url) }
+                if acceptable(url) {
+                    urls.append(url)
+                    // A package is one item; its innards are never candidates.
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                        enumerator.skipDescendants()
+                    }
+                }
             }
         } else {
             guard let children = try? fm.contentsOfDirectory(
@@ -536,16 +560,35 @@ actor Pipeline {
     private func isStable(_ url: URL) async -> Bool {
         let fm = FileManager.default
         guard let attrs = try? fm.attributesOfItem(atPath: url.path),
-              let modified = attrs[.modificationDate] as? Date,
-              let size = attrs[.size] as? Int64
+              let modified = attrs[.modificationDate] as? Date
         else { return false }
         // abs(): a modification date in the *future* (bad camera clock, sloppy
         // stamping by a downloader) must not park the file forever — the size
         // probe below still catches files that are actively being written.
         guard abs(Date().timeIntervalSince(modified)) > 5 else { return false }
+        let before = Self.sizeSignature(of: url)
         try? await Task.sleep(nanoseconds: 700_000_000)
-        let sizeAfter = (try? fm.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? -1
-        return sizeAfter == size
+        return before != nil && before == Self.sizeSignature(of: url)
+    }
+
+    /// The byte count of a file, or "item count|total bytes" for a package —
+    /// a package still being written grows in either.
+    static func sizeSignature(of url: URL) -> String? {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: url.path) else { return nil }
+        if attrs[.type] as? FileAttributeType != .typeDirectory {
+            return (attrs[.size] as? Int64).map { "\($0)" }
+        }
+        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: []) else {
+            return nil
+        }
+        var count = 0
+        var bytes = 0
+        for case let child as URL in enumerator {
+            count += 1
+            bytes += (try? child.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        }
+        return "\(count)|\(bytes)"
     }
 }
 

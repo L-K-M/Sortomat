@@ -1,0 +1,78 @@
+import XCTest
+@testable import Sortomat
+
+/// Document packages (Pages, Numbers, Keynote, RTFD, text bundles) are
+/// folders on disk and used to be invisible to every rule.
+final class PackageTests: XCTestCase {
+    private var dir: URL!
+    private let fm = FileManager.default
+
+    override func setUpWithError() throws {
+        dir = fm.temporaryDirectory.appendingPathComponent("sortomat-package-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir.appendingPathComponent("watch"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: dir.appendingPathComponent("target"), withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? fm.removeItem(at: dir)
+    }
+
+    private func plantPackage(named name: String, ageSeconds: TimeInterval = 60) throws -> URL {
+        let package = dir.appendingPathComponent("watch/\(name)")
+        try fm.createDirectory(at: package, withIntermediateDirectories: true)
+        let inner = package.appendingPathComponent("TXT.rtf")
+        try "{\\rtf1 hello}".write(to: inner, atomically: true, encoding: .utf8)
+        let old = Date(timeIntervalSinceNow: -ageSeconds)
+        try fm.setAttributes([.modificationDate: old], ofItemAtPath: inner.path)
+        try fm.setAttributes([.modificationDate: old], ofItemAtPath: package.path)
+        return package
+    }
+
+    func testPackageCountsAsFileLikeButPlainFolderDoesNot() throws {
+        let package = try plantPackage(named: "Draft.rtfd")
+        XCTAssertTrue(Pipeline.isFileLike(package))
+        XCTAssertTrue(Pipeline.isFileLike(dir.appendingPathComponent("watch/Letter.pages")) == false,
+                      "a nonexistent path is nothing")
+        let plain = dir.appendingPathComponent("watch/Just a folder")
+        try fm.createDirectory(at: plain, withIntermediateDirectories: true)
+        XCTAssertFalse(Pipeline.isFileLike(plain))
+        let pages = dir.appendingPathComponent("watch/Letter.pages")
+        try fm.createDirectory(at: pages, withIntermediateDirectories: true)
+        XCTAssertTrue(Pipeline.isFileLike(pages), "known document packages count even where their app isn't installed")
+    }
+
+    func testPackageIsSortedAsOneItem() async throws {
+        let package = try plantPackage(named: "Draft.rtfd")
+        let rule = Rule(
+            name: "R",
+            watchPath: dir.appendingPathComponent("watch").path,
+            targetPath: dir.appendingPathComponent("target").path,
+            recursive: true,
+            preRules: [PreRule(match: .glob, pattern: "*.rtfd", action: .route, routePath: "Docs")]
+        )
+        let config = Config(rules: [rule], providerRequiresKey: false)
+        let pipeline = Pipeline(ledger: Ledger(url: dir.appendingPathComponent("ledger.json")))
+        let result = await pipeline.scan(rule: rule, config: config, apiKey: "")
+
+        XCTAssertTrue(result.entries.allSatisfy(\.ok), "\(result.entries.map(\.message))")
+        XCTAssertFalse(fm.fileExists(atPath: package.path))
+        let moved = dir.appendingPathComponent("target/Docs/Draft.rtfd")
+        XCTAssertTrue(fm.fileExists(atPath: moved.appendingPathComponent("TXT.rtf").path),
+                      "the package moves whole, innards included")
+    }
+
+    func testPackageSizeSignatureSeesGrowth() throws {
+        let package = try plantPackage(named: "Growing.rtfd")
+        let before = Pipeline.sizeSignature(of: package)
+        try "more".write(to: package.appendingPathComponent("extra.txt"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(before, Pipeline.sizeSignature(of: package))
+    }
+
+    func testTreeDigestCoversEveryFileInAPackage() throws {
+        let a = try plantPackage(named: "A.rtfd")
+        let b = try plantPackage(named: "B.rtfd")
+        XCTAssertEqual(Mover.treeDigest(of: a), Mover.treeDigest(of: b), "identical bundles digest alike")
+        try "changed".write(to: b.appendingPathComponent("TXT.rtf"), atomically: true, encoding: .utf8)
+        XCTAssertNotEqual(Mover.treeDigest(of: a), Mover.treeDigest(of: b))
+    }
+}

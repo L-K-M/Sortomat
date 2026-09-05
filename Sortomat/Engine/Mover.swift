@@ -90,14 +90,36 @@ enum Mover {
     static func copyVerifyDelete(source: URL, to target: URL) throws {
         let fm = FileManager.default
         try copyCleaningUpOnFailure(source: source, to: target)
-        guard let sourceDigest = ContentHash.digest(of: source, limit: .max),
-              let targetDigest = ContentHash.digest(of: target, limit: .max),
+        guard let sourceDigest = treeDigest(of: source),
+              let targetDigest = treeDigest(of: target),
               sourceDigest == targetDigest
         else {
             try? fm.removeItem(at: target)
             throw MoveError.verifyFailed
         }
         try fm.removeItem(at: source)
+    }
+
+    /// Full-content digest of a file — or, for a package, of every file inside
+    /// it keyed by relative path, so a document bundle is verified as a whole
+    /// before its original is deleted. Nil when anything can't be read.
+    static func treeDigest(of root: URL) -> String? {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else { return nil }
+        if !isDirectory.boolValue { return ContentHash.digest(of: root, limit: .max) }
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: []) else {
+            return nil
+        }
+        let base = root.standardizedFileURL.path
+        var lines: [String] = []
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            guard let digest = ContentHash.digest(of: url, limit: .max) else { return nil }
+            lines.append(String(url.standardizedFileURL.path.dropFirst(base.count)) + "|" + digest)
+        }
+        lines.sort()
+        return ContentHash.digest(ofString: lines.joined(separator: "\n"))
     }
 
     private enum Placement {

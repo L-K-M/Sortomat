@@ -37,4 +37,10 @@ enum ContentHash {
         hasher.update(data: Data(bytes: &sizeLE, count: MemoryLayout<Int64>.size))
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Hex SHA-256 of a string (used to fold per-file digests of a package
+    /// into one).
+    static func digest(ofString string: String) -> String {
+        SHA256.hash(data: Data(string.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 }
