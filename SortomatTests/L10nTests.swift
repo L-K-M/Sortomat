@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import Sortomat
 
@@ -87,6 +88,47 @@ final class L10nTests: XCTestCase {
                                   "\(language) \(key) references %2$ without %1$: \(value)")
                 }
             }
+        }
+    }
+
+    /// Key parity is only half the promise. `String(format:)` reads its
+    /// arguments off the *format string*, so a German translation that grew a
+    /// `%@` its English original never had reads past the arguments the call
+    /// site passed — and that is not a wrong word on screen, it is a crash, on
+    /// German machines only, in whichever build shipped the translation.
+    ///
+    /// Order matters unless the string uses positional markers, which exist
+    /// precisely so a translation may reorder: `%1$@ von %2$@` is a correct
+    /// German rendering of `%2$@ of %1$@`, and comparing those in order would
+    /// forbid the one thing positional arguments are for.
+    func testEveryStringTakesTheSameArgumentsInBothLanguages() {
+        for (key, english) in L10n.english {
+            guard let german = L10n.german[key] else { continue }
+            let left = Self.conversions(in: english)
+            let right = Self.conversions(in: german)
+            if english.contains("$") || german.contains("$") {
+                XCTAssertEqual(left.sorted(), right.sorted(),
+                               "«\(key)» takes different arguments in German: \(german)")
+            } else {
+                XCTAssertEqual(left, right,
+                               "«\(key)» takes different arguments in German: \(german)")
+            }
+        }
+    }
+
+    /// The conversion characters a format string consumes, in order. `%%` is
+    /// an escaped percent sign and consumes nothing.
+    private static func conversions(in format: String) -> [String] {
+        let pattern = "%(?:\\d+\\$)?[-+ #0]*[0-9*]*(?:\\.\\d+)?"
+            + "(?:hh|h|ll|l|q|L|z|j|t)?([@dioxXufFeEgGcsp%])"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        let text = format as NSString
+        let whole = NSRange(location: 0, length: text.length)
+        return regex.matches(in: format, options: [], range: whole).compactMap { match -> String? in
+            let range = match.range(at: 1)
+            guard range.location != NSNotFound else { return nil }
+            let conversion = text.substring(with: range)
+            return conversion == "%" ? nil : conversion
         }
     }
 }
