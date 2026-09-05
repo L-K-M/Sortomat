@@ -204,7 +204,11 @@ struct TokenTemplate {
     private static func unquote(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2, trimmed.hasPrefix("'"), trimmed.hasSuffix("'") else { return trimmed }
-        return String(trimmed.dropFirst().dropLast())
+        let inner = String(trimmed.dropFirst().dropLast())
+        // `replace:'a':'o'` is two quoted arguments, not one: stripping the
+        // outer pair would leave «a':'o». Only a genuinely single-quoted
+        // argument is unwrapped here; the filter splits its own pair.
+        return inner.contains("'") ? trimmed : inner
     }
 
     static let knownFilters: Set<String> = [

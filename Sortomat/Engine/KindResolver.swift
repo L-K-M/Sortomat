@@ -15,8 +15,7 @@ enum KindResolver {
     /// conforming entry wins, which is why `text` sits last — source code and
     /// word-processor documents both conform to `public.text`.
     static let conformance: [(Kind, [String])] = [
-        (.ebook, ["org.idpf.epub-container", "com.amazon.mobi8-ebook",
-                  "com.amazon.mobipocket-ebook", "public.fb2"]),
+        (.ebook, ["org.idpf.epub-container"] + appDeclared),
         (.pdf, ["com.adobe.pdf"]),
         (.spreadsheet, ["public.spreadsheet", "org.openxmlformats.spreadsheetml.sheet",
                         "com.microsoft.excel.xls", "com.apple.iwork.numbers.numbers",
@@ -37,6 +36,12 @@ enum KindResolver {
                      "org.oasis-open.opendocument.text"]),
         (.text, ["public.text"])
     ]
+
+    /// Types no *system* declares: they exist only when an app that reads
+    /// them is installed. `UTType(_:)` returns nil for an unknown identifier,
+    /// so listing them costs nothing and helps the machines that have Kindle
+    /// — and the extension table covers every one of them regardless.
+    static let appDeclared = ["com.amazon.mobi8-ebook", "com.amazon.mobipocket-ebook", "public.fb2"]
 
     /// The legacy table, kept verbatim so a migrated rule behaves exactly as
     /// it did, and used as the fallback whenever Launch Services knows nothing

@@ -434,10 +434,15 @@ final class RuleCodableTests: XCTestCase {
         XCTAssertEqual(round.steps[0].when.items.count, 2)
     }
 
-    func testALegacyConfigIsMarkedAsSchemaOne() throws {
+    func testALegacyConfigIsUpgradedOnLoad() throws {
+        // A config with no schema key *is* a legacy config; it is upgraded on
+        // the way in so the rest of the app only ever sees one shape. With no
+        // pre-rules there is nothing to convert, and the rule simply becomes
+        // one this build owns.
         let rule = try decodeRule(#"{"name":"R","preRules":[]}"#)
-        XCTAssertEqual(rule.schemaVersion, 1, "a config with no schema key is a legacy config")
+        XCTAssertEqual(rule.schemaVersion, Rule.currentSchema)
         XCTAssertTrue(rule.steps.isEmpty)
+        XCTAssertEqual(rule.fallback, .askModel, "an unclaimed file still goes to the model")
     }
 
     func testValuesKeepTheirJSONType() throws {
@@ -465,10 +470,15 @@ final class KindResolverTests: XCTestCase {
         // A misspelled identifier would silently kill a whole kind, so it is a
         // red test rather than a mystery.
         for (kind, identifiers) in KindResolver.conformance {
-            for identifier in identifiers {
+            // App-declared types are absent on a machine without the app that
+            // declares them — including a CI runner — so only the system ones
+            // have to resolve.
+            for identifier in identifiers where !KindResolver.appDeclared.contains(identifier) {
                 XCTAssertNotNil(UTType(identifier),
                                 "\(kind.rawValue): «\(identifier)» does not resolve")
             }
+            XCTAssertTrue(identifiers.contains { UTType($0) != nil },
+                          "\(kind.rawValue) resolves through nothing at all")
         }
     }
 
