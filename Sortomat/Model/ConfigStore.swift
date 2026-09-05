@@ -67,8 +67,13 @@ enum ConfigStore {
         )
     }
 
+    /// Rotate at ~5 MB, keeping one previous generation — the log was
+    /// append-only forever.
+    static let maxLogBytes: Int64 = 5 * 1024 * 1024
+
     static func appendLog(_ line: String) {
         ensureDirectory()
+        rotateLogIfNeeded()
         let stamp = ISO8601DateFormatter().string(from: Date())
         let entry = "\(stamp)  \(line)\n"
         if let handle = try? FileHandle(forWritingTo: logFile) {
@@ -78,5 +83,14 @@ enum ConfigStore {
         } else {
             try? Data(entry.utf8).write(to: logFile)
         }
+    }
+
+    private static func rotateLogIfNeeded() {
+        let fm = FileManager.default
+        guard let size = (try? fm.attributesOfItem(atPath: logFile.path))?[.size] as? Int64,
+              size >= maxLogBytes else { return }
+        let previous = logFile.appendingPathExtension("1")
+        try? fm.removeItem(at: previous)
+        try? fm.moveItem(at: logFile, to: previous)
     }
 }
