@@ -19,6 +19,18 @@ enum ConfigStore {
     static var journalFile: URL { directory.appendingPathComponent("journal.jsonl") }
     static var ledgerFile: URL { directory.appendingPathComponent("ledger.json") }
     static var memoFile: URL { directory.appendingPathComponent("memo.json") }
+    static var spendFile: URL { directory.appendingPathComponent("spend.json") }
+
+    /// One shared, lock-guarded formatter: `ISO8601DateFormatter` is not
+    /// documented thread-safe, and allocating a fresh one per log line was
+    /// pure waste on the main actor's hot path.
+    private static let stampLock = NSLock()
+    private static let stampFormatter = ISO8601DateFormatter()
+    static func timestamp(for date: Date = Date()) -> String {
+        stampLock.lock()
+        defer { stampLock.unlock() }
+        return stampFormatter.string(from: date)
+    }
 
     /// Load the config, seeding a disabled example rule on first launch. Decoding
     /// is tolerant (every field defaults if missing), so upgrading the schema
@@ -44,8 +56,7 @@ enum ConfigStore {
     /// plus a loud line in the activity log. The user's rules may well be
     /// recoverable from the backup by hand.
     private static func backUpCorruptConfig(_ data: Data, of file: URL) {
-        let stamp = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
+        let stamp = timestamp().replacingOccurrences(of: ":", with: "-")
         let backup = file.deletingLastPathComponent()
             .appendingPathComponent("\(file.lastPathComponent).corrupt-\(stamp)")
         try? data.write(to: backup)
@@ -75,8 +86,7 @@ enum ConfigStore {
     static func appendLog(_ line: String) {
         ensureDirectory()
         rotateLogIfNeeded()
-        let stamp = ISO8601DateFormatter().string(from: Date())
-        let entry = "\(stamp)  \(line)\n"
+        let entry = "\(timestamp())  \(line)\n"
         if let handle = try? FileHandle(forWritingTo: logFile) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()

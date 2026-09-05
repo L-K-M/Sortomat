@@ -45,6 +45,10 @@ final class AppState: ObservableObject {
     /// compared on save to invalidate previews of rules whose behavior changed.
     private var decisionSignatures: [UUID: Rule] = [:]
 
+    /// The month `usage` belongs to; when it rolls over mid-run the counter
+    /// restarts instead of billing January's tokens to February.
+    private var spendMonth = SpendStore.monthKey()
+
     init() {
         let loaded = ConfigStore.load()
         config = loaded
@@ -53,6 +57,9 @@ final class AppState: ObservableObject {
             ConfigStore.appendLog(L10n.t("process.lockWarning"))
         }
         decisionSignatures = Self.signatures(of: loaded.rules)
+        let spend = SpendStore.load()
+        spendMonth = spend.month
+        usage = spend.usage
         Notifier.requestAuthorization()
         rebuildWatchers()
         startTimer()
@@ -276,6 +283,7 @@ final class AppState: ObservableObject {
             }
             await pipeline.persist()
             pruneStalePending()
+            persistSpend()
             lastScan = Date()
         }
     }
@@ -287,8 +295,22 @@ final class AppState: ObservableObject {
         pendingActions.removeAll { !FileManager.default.fileExists(atPath: $0.source.path) }
     }
 
+    private func persistSpend() {
+        SpendStore(month: spendMonth, input: usage.input, output: usage.output).save()
+    }
+
+    private func accumulate(_ resultUsage: TokenUsage) {
+        let month = SpendStore.monthKey()
+        if month != spendMonth {
+            spendMonth = month
+            usage = resultUsage
+        } else {
+            usage = usage + resultUsage
+        }
+    }
+
     private func ingest(_ result: ScanResult) {
-        usage = usage + result.usage
+        accumulate(result.usage)
         if result.unstableCount > 0 { scheduleFollowUpScan() }
         for plan in result.pending where !pendingActions.contains(where: { $0.source == plan.source && $0.ruleID == plan.ruleID }) {
             pendingActions.append(plan)
@@ -375,6 +397,22 @@ final class AppState: ObservableObject {
 
     func dismiss(_ plan: PlannedAction) {
         pendingActions.removeAll { $0.id == plan.id }
+    }
+
+    // MARK: - Termination
+
+    /// Called from applicationWillTerminate: write the spend store and give
+    /// the pipeline a bounded moment to persist its in-memory ledger records —
+    /// paid verdicts from a pass that was still running must not be forgotten
+    /// (and re-paid) because the user quit at the wrong moment.
+    func flushOnTerminate() {
+        persistSpend()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached { [pipeline] in
+            await pipeline.persist()
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 2)
     }
 
     // MARK: - Undo
