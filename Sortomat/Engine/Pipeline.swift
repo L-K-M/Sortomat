@@ -62,7 +62,7 @@ actor Pipeline {
               isDir.boolValue else {
             return ScanResult(entries: [
                 ActivityEntry(ok: false, message: L10n.t("activity.missingWatch", rule.name, watch.path))
-            ])
+            ], ruleID: rule.id, watchMissing: true)
         }
 
         let previewing = forcePreview || rule.dryRun
@@ -74,6 +74,7 @@ actor Pipeline {
 
         var budgetRemaining = config.perScanBudget > 0 ? config.perScanBudget : Int.max
         var result = ScanResult()
+        result.ruleID = rule.id
 
         // Bounded concurrency: cap the number of in-flight `process` calls. Each
         // one runs on this actor and only suspends at the network await, so shared
@@ -392,7 +393,9 @@ actor Pipeline {
                         wasCopy: plan.copyInsteadOfMove, reason: plan.reason,
                         batchID: batchID
                     ))
-                    return ActivityEntry(ok: true, message: filedMessage(plan, finalURL: url, target: target, name: name))
+                    return ActivityEntry(ok: true,
+                                         message: filedMessage(plan, finalURL: url, target: target, name: name),
+                                         kind: .filed)
                 case .duplicate(let url):
                     ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .done)
                     return ActivityEntry(ok: true, message: L10n.t("activity.duplicate", rule.name, name, url.lastPathComponent))
