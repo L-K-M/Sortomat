@@ -282,7 +282,12 @@ actor Pipeline {
         // 4. Classify.
         guard let base = URL(string: config.apiBase) else { throw LLMError.badBaseURL }
         let client = LLMClient(apiKey: apiKey, model: config.model, baseURL: base)
-        let description = FileContext.describe(url: file, privacyMode: rule.privacyMode)
+        // Extraction can be real work now (OCR, office documents): run it off
+        // the actor so other files keep flowing while one is being read.
+        let privacyMode = rule.privacyMode
+        let description = await Task.detached(priority: .utility) {
+            FileContext.describe(url: file, privacyMode: privacyMode)
+        }.value
         let result = try await client.classify(
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )
