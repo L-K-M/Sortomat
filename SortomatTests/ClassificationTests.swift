@@ -101,6 +101,14 @@ final class ClassificationTests: XCTestCase {
         XCTAssertEqual(c.confidence ?? 0, 0.42, accuracy: 0.0001)
     }
 
+    func testStringifiedBooleansAreReadAsBooleans() throws {
+        // A JSON `true` already means move; a serializer that stringifies it
+        // meant the same thing, and the whitelist skipped the file instead.
+        XCTAssertTrue(try decode(#"{"action":"true","folder":"A","filename":"x.pdf"}"#).isMove)
+        XCTAssertTrue(try decode(#"{"action":" TRUE ","folder":"A","filename":"x.pdf"}"#).isMove)
+        XCTAssertFalse(try decode(#"{"action":"false","folder":"A","filename":"x.pdf"}"#).isMove)
+    }
+
     func testNonFiniteConfidenceCountsAsUnknown() throws {
         // `Double("nan")` parses, and NaN then survives the clamp — after
         // which every `confidence < threshold` comparison is false and the

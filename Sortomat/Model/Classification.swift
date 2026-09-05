@@ -89,7 +89,14 @@ struct Classification: Decodable, Equatable {
     /// because some models omit it while supplying a path.
     private static func decodeAction(_ c: KeyedDecodingContainer<CodingKeys>) -> String {
         if let s = try? c.decode(String.self, forKey: .action) {
-            return s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let action = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            // A serializer that stringifies its booleans is common enough to
+            // be worth reading: a JSON `true` already means move, and `"true"`
+            // meaning the same thing otherwise fell out of the whitelist and
+            // was skipped — safe, but not what the model said.
+            if action == "true" { return "move" }
+            if action == "false" { return "skip" }
+            return action
         }
         if let b = try? c.decode(Bool.self, forKey: .action) { return b ? "move" : "skip" }
         if let n = try? c.decode(Int.self, forKey: .action) { return n != 0 ? "move" : "skip" }
