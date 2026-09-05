@@ -130,7 +130,14 @@ final class DeterministicEngineTests: XCTestCase {
     func testPathologicalGlobReturnsQuickly() {
         let pattern = String(repeating: "*a", count: 20) + "*b"
         let name = String(repeating: "a", count: 80)
+        let start = Date()
         XCTAssertFalse(DeterministicEngine.globMatches(pattern, name))
+        // The name promises "quickly", so measure it — otherwise a regression
+        // to backtracking (2^20 paths on this shape) only shows up as a suite
+        // that mysteriously takes minutes. The bound is deliberately loose: it
+        // separates a linear walk from an exponential one, nothing finer.
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2,
+                          "glob matching regressed to backtracking")
     }
 
     func testNestedQuantifierRegexesAreRejected() {
@@ -140,5 +147,47 @@ final class DeterministicEngineTests: XCTestCase {
         XCTAssertTrue(DeterministicEngine.isSafeRegex("^Invoice-\\d+"))
         XCTAssertTrue(DeterministicEngine.isSafeRegex("(abc)+"))
         XCTAssertTrue(DeterministicEngine.isSafeRegex("plain text"))
+    }
+
+    func testNestedQuantifiersAreCaughtThroughAnExtraParenLayer() {
+        // A regex can't count its own parentheses, so the one-line screen this
+        // replaces saw only the inner pair and passed `((a+))+` as safe.
+        XCTAssertFalse(DeterministicEngine.isSafeRegex("((a+))+"))
+        XCTAssertFalse(DeterministicEngine.isSafeRegex("((a|b)+)+"))
+        XCTAssertFalse(DeterministicEngine.isSafeRegex("(x(y*)z)*"))
+    }
+
+    func testOpenEndedCountedRepetitionInAQuantifiedGroupIsRejected() {
+        // `{2,}` is a quantifier like any other: `(a{2,})+` backtracks
+        // exponentially exactly the way `(a+)+` does.
+        XCTAssertFalse(DeterministicEngine.isSafeRegex("(a{2,})+"))
+        XCTAssertFalse(DeterministicEngine.isSafeRegex("(a{1,4})+"))
+        XCTAssertFalse(DeterministicEngine.isSafeRegex("(a+){2,}"))
+    }
+
+    func testOrdinaryUserPatternsSurviveTheScreen() {
+        // A screen that rejects too much is its own bug: a rejected pattern
+        // silently never matches, and the rule stops filing anything.
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("(a|b)+"), "alternation alone is not ambiguous")
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("(\\d{4})-(\\d{2})"))
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("(\\d{4})+"), "a fixed length adds no ambiguity")
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("^IMG_\\d{4}\\.(jpg|png)$"))
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("Rechnung[ _-]?(\\d+)"))
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("^(19|20)\\d{2}-\\d{2}-\\d{2}"))
+    }
+
+    func testTheRejectedPatternsActuallyStallABacktracker() {
+        // The screen is only worth having if the shapes it rejects are the
+        // slow ones — so prove it on the real engine, with a subject small
+        // enough that a linear matcher finishes instantly.
+        let subject = String(repeating: "a", count: 30) + "!"
+        for pattern in ["(a+)+$", "((a+))+$", "(a{2,})+$"] {
+            XCTAssertFalse(DeterministicEngine.isSafeRegex(pattern), "\(pattern) must be rejected")
+        }
+        // The accepted counterpart on the same subject is fast.
+        let start = Date()
+        XCTAssertTrue(DeterministicEngine.isSafeRegex("(a|b)+$"))
+        _ = subject.range(of: "(a|b)+$", options: .regularExpression)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2)
     }
 }

@@ -126,7 +126,14 @@ struct Classification: Decodable, Equatable {
     /// Models sometimes answer in percent (`85` or `"85%"`) instead of 0…1.
     /// Without normalizing the *numeric* form too, `85 < threshold` is never
     /// true and the low-confidence quarantine is silently defeated.
-    private static func normalizeConfidence(_ value: Double) -> Double {
+    ///
+    /// Nil for anything that isn't a finite number. `Double("nan")` parses, and
+    /// NaN survives both the scaling and the clamp (`min`/`max` return the
+    /// other operand when a comparison with NaN is false) — after which every
+    /// `confidence < threshold` test is false too, and a garbage answer reads
+    /// as full confidence. Unparseable text already means "low"; so does this.
+    private static func normalizeConfidence(_ value: Double) -> Double? {
+        guard value.isFinite else { return nil }
         let scaled = value > 1 ? value / 100 : value
         return min(max(scaled, 0), 1)
     }

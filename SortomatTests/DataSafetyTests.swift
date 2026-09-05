@@ -12,12 +12,19 @@ final class DataSafetyTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        // Restore anything a test locked down so the directory can be removed.
-        if let items = try? fm.contentsOfDirectory(atPath: root.path) {
-            for item in items {
-                try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: root.appendingPathComponent(item).path)
+        // Restore anything a test locked down so the tree can be removed.
+        // Directories need their execute bit back, not 0o644: without it their
+        // contents are unreachable, `removeItem` fails, and every run leaks a
+        // temp tree that nothing will ever clean up. The chmod happens as the
+        // enumerator reaches each directory, before it descends into it.
+        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: []) {
+            for case let url as URL in enumerator {
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                try? fm.setAttributes([.posixPermissions: isDirectory ? 0o755 : 0o644],
+                                      ofItemAtPath: url.path)
             }
         }
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
         try? fm.removeItem(at: root)
     }
 
@@ -30,6 +37,9 @@ final class DataSafetyTests: XCTestCase {
     }
 
     func testFailedCopyLeavesNoPartialTarget() throws {
+        // Permission bits don't stop root, so the copy would succeed and the
+        // test would fail for a reason unrelated to the code under test.
+        try XCTSkipIf(getuid() == 0, "0o000 does not stop a root reader")
         let source = root.appendingPathComponent("locked.txt")
         try "secret".write(to: source, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: source.path)

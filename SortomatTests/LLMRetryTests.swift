@@ -3,6 +3,12 @@ import XCTest
 
 /// Serves scripted HTTP responses to `LLMClient` so the retry taxonomy can be
 /// pinned without a network.
+///
+/// The scripted queue and the request counter are shared mutable statics, so
+/// only one test may drive this at a time. XCTest runs the methods of a class
+/// serially and `LLMRetryTests` is the only user, which is what keeps that
+/// true — enabling parallel execution across classes would need a per-test
+/// instance instead.
 final class StubURLProtocol: URLProtocol {
     static var queue: [(status: Int, body: String)] = []
     static var requestCount = 0

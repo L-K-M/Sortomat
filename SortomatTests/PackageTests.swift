@@ -31,8 +31,8 @@ final class PackageTests: XCTestCase {
     func testPackageCountsAsFileLikeButPlainFolderDoesNot() throws {
         let package = try plantPackage(named: "Draft.rtfd")
         XCTAssertTrue(Pipeline.isFileLike(package))
-        XCTAssertTrue(Pipeline.isFileLike(dir.appendingPathComponent("watch/Letter.pages")) == false,
-                      "a nonexistent path is nothing")
+        XCTAssertFalse(Pipeline.isFileLike(dir.appendingPathComponent("watch/Letter.pages")),
+                       "a nonexistent path is nothing")
         let plain = dir.appendingPathComponent("watch/Just a folder")
         try fm.createDirectory(at: plain, withIntermediateDirectories: true)
         XCTAssertFalse(Pipeline.isFileLike(plain))
@@ -95,6 +95,36 @@ final class PackageTests: XCTestCase {
         let outcome = try Mover.place(source: source, destination: existing, copy: false)
         XCTAssertTrue(fm.fileExists(atPath: target.appendingPathComponent("Draft (2).rtfd").path),
                       "a different bundle must land beside the existing one, got \(outcome)")
+    }
+
+    /// Two bundles whose only difference is their folder layout used to hash
+    /// the same empty string — and `copyVerifyDelete` then "verified" one
+    /// against the other and deleted the original.
+    func testTreeDigestDistinguishesPackagesThatHoldOnlyFolders() throws {
+        let a = dir.appendingPathComponent("watch/A.rtfd")
+        let b = dir.appendingPathComponent("watch/B.rtfd")
+        try fm.createDirectory(at: a.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: b.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+        let digestA = try XCTUnwrap(Mover.treeDigest(of: a))
+        XCTAssertNotEqual(digestA, Mover.treeDigest(of: b))
+    }
+
+    /// A `.framework` is mostly symlinks; hashing only the regular files made
+    /// two differently linked bundles indistinguishable.
+    func testTreeDigestCoversSymlinkTargets() throws {
+        let a = dir.appendingPathComponent("watch/A.framework")
+        let b = dir.appendingPathComponent("watch/B.framework")
+        for bundle in [a, b] {
+            try fm.createDirectory(at: bundle.appendingPathComponent("Versions/A"),
+                                   withIntermediateDirectories: true)
+            try "x".write(to: bundle.appendingPathComponent("Versions/A/lib"),
+                          atomically: true, encoding: .utf8)
+        }
+        try fm.createSymbolicLink(atPath: a.appendingPathComponent("Versions/Current").path,
+                                  withDestinationPath: "A")
+        try fm.createSymbolicLink(atPath: b.appendingPathComponent("Versions/Current").path,
+                                  withDestinationPath: "B")
+        XCTAssertNotEqual(Mover.treeDigest(of: a), Mover.treeDigest(of: b))
     }
 
     func testTreeDigestCoversEveryFileInAPackage() throws {

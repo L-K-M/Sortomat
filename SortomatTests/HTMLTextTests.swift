@@ -47,7 +47,13 @@ final class HTMLTextTests: XCTestCase {
         // Every `&` used to scan the whole remainder for a `;` — a chapter of
         // ampersands with no semicolons was quadratic and stalled the scan.
         let input = String(repeating: "&", count: 50_000) + " end"
+        let start = Date()
         XCTAssertEqual(HTMLText.decodeEntities(input), input)
+        // 50 000 ampersands is 1.25 billion character comparisons if the scan
+        // goes quadratic again; a linear pass is milliseconds. The bound only
+        // has to tell those two apart.
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5,
+                          "entity decoding regressed to a quadratic scan")
     }
 
     func testDistantSemicolonDoesNotMakeAnEntity() {

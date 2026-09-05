@@ -100,23 +100,42 @@ enum Mover {
         try fm.removeItem(at: source)
     }
 
-    /// Full-content digest of a file — or, for a package, of every file inside
+    /// Full-content digest of a file — or, for a package, of every entry inside
     /// it keyed by relative path, so a document bundle is verified as a whole
     /// before its original is deleted. Nil when anything can't be read.
+    ///
+    /// Every entry, not just the regular files: two bundles that hold nothing
+    /// but folders (or nothing but symlinks — how a `.framework` is built) both
+    /// used to hash the empty string, so the second was "verified" against the
+    /// first and its original deleted. Anything that is neither file, folder
+    /// nor link can't be hashed, and an unhashable side fails closed.
     static func treeDigest(of root: URL) -> String? {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory) else { return nil }
         if !isDirectory.boolValue { return ContentHash.digest(of: root, limit: .max) }
-        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: []) else {
-            return nil
-        }
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
+        guard let enumerator = fm.enumerator(
+            at: root, includingPropertiesForKeys: Array(keys), options: []
+        ) else { return nil }
         let base = root.standardizedFileURL.path
         var lines: [String] = []
         for case let url as URL in enumerator {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-            guard let digest = ContentHash.digest(of: url, limit: .max) else { return nil }
-            lines.append(String(url.standardizedFileURL.path.dropFirst(base.count)) + "|" + digest)
+            let relative = String(url.standardizedFileURL.path.dropFirst(base.count))
+            guard let values = try? url.resourceValues(forKeys: keys) else { return nil }
+            if values.isSymbolicLink == true {
+                // The link itself is the content: resolving it would hash the
+                // target a second time, or follow a link out of the package.
+                guard let target = try? fm.destinationOfSymbolicLink(atPath: url.path) else { return nil }
+                lines.append(relative + "|L|" + target)
+            } else if values.isDirectory == true {
+                lines.append(relative + "|D|")
+            } else if values.isRegularFile == true {
+                guard let digest = ContentHash.digest(of: url, limit: .max) else { return nil }
+                lines.append(relative + "|F|" + digest)
+            } else {
+                return nil
+            }
         }
         lines.sort()
         return ContentHash.digest(ofString: lines.joined(separator: "\n"))
@@ -137,6 +156,16 @@ enum Mover {
         // Nil for a package: a directory has no prefix digest, so the
         // comparison below goes straight to the whole-tree digest.
         let sourcePrefix = ContentHash.digest(of: source)
+        // Hashing a package reads every file inside it, and the loop below runs
+        // up to 99 times — so the source is hashed at most once, on the first
+        // candidate that survives the prefix filter.
+        var cachedSourceTree: String??
+        func sourceTree() -> String? {
+            if let cached = cachedSourceTree { return cached }
+            let digest = treeDigest(of: source)
+            cachedSourceTree = digest
+            return digest
+        }
         let stem = destination.deletingPathExtension().lastPathComponent
         let ext = destination.pathExtension
         let dir = destination.deletingLastPathComponent()
@@ -149,7 +178,7 @@ enum Mover {
             if !occupied(candidate) {
                 return .place(candidate)
             }
-            if isDuplicate(candidate, of: source, prefixDigest: sourcePrefix) {
+            if isDuplicate(candidate, prefixDigest: sourcePrefix, sourceTree: sourceTree) {
                 return .duplicate(candidate)
             }
         }
@@ -166,9 +195,11 @@ enum Mover {
     /// (it is a directory), so it goes straight to the full comparison. Fails
     /// closed: an unreadable side is never a duplicate, so the item gets a
     /// ` (n)` suffix instead of disappearing from the queue.
-    private static func isDuplicate(_ candidate: URL, of source: URL, prefixDigest: String?) -> Bool {
+    private static func isDuplicate(
+        _ candidate: URL, prefixDigest: String?, sourceTree: () -> String?
+    ) -> Bool {
         if let prefixDigest, ContentHash.digest(of: candidate) != prefixDigest { return false }
-        guard let full = treeDigest(of: source), treeDigest(of: candidate) == full else { return false }
+        guard let full = sourceTree(), treeDigest(of: candidate) == full else { return false }
         return true
     }
 

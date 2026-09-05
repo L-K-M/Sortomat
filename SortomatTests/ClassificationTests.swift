@@ -101,6 +101,16 @@ final class ClassificationTests: XCTestCase {
         XCTAssertEqual(c.confidence ?? 0, 0.42, accuracy: 0.0001)
     }
 
+    func testNonFiniteConfidenceCountsAsUnknown() throws {
+        // `Double("nan")` parses, and NaN then survives the clamp — after
+        // which every `confidence < threshold` comparison is false and the
+        // low-confidence quarantine never fires. Unknown is the safe reading.
+        XCTAssertNil(Classification.parseConfidence("nan"))
+        XCTAssertNil(Classification.parseConfidence("NaN"))
+        XCTAssertNil(Classification.parseConfidence("inf"))
+        XCTAssertNil(Classification.parseConfidence("-infinity"))
+    }
+
     func testTopFolderIgnoresLeadingDotSegment() throws {
         XCTAssertEqual(try decode(#"{"action":"move","relative_path":"./Fantasy/x.epub"}"#).topFolder(), "Fantasy")
         XCTAssertEqual(try decode(#"{"action":"move","folder":"./Krimi","filename":"x.epub"}"#).topFolder(), "Krimi")
