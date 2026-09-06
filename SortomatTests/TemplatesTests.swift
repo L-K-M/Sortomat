@@ -74,18 +74,13 @@ final class TemplatesTests: XCTestCase {
 
     // MARK: - The one template that needs no key
 
-    /// A stub fact source, so what the tidy template decides is pinned without
-    /// a file system and without Launch Services.
-    private struct Kinded: FactSource {
-        var resolved: Kind
-        func kind() -> Kind? { resolved }
-    }
-
+    /// What the tidy template decides is pinned through a stub fact source —
+    /// no file system, no Launch Services — with only the kind filled in.
     private func tidyPlacement(_ name: String, kind: Kind) -> Placement? {
         let rule = RuleTemplate.tidy.makeRule()
         let root = URL(fileURLWithPath: "/watch")
         let facts = FileFacts(url: root.appendingPathComponent(name), watchRoot: root,
-                              source: Kinded(resolved: kind))
+                              source: StubFactSource(resolvedKind: kind))
         let context = RuleEvaluator.Context(rule: rule, facts: facts,
                                             timeZone: TimeZone(identifier: "UTC")!,
                                             allowModel: false)
