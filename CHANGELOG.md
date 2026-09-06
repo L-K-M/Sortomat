@@ -41,6 +41,59 @@ UI & localization:
 - Pre-release tags publish as GitHub pre-releases instead of becoming
   "latest".
 
+### Waves 4 and 5 — the deterministic engine, and an app you can see
+
+The rule engine, rewritten. A rule is now an ordered list of *if this, then
+that* steps rather than one prompt with a few pre-rules in front of it:
+
+- **Conditions** on name, stem, extension, relative path and depth; kind
+  (resolved through `UTType`, not an extension table); size; **five dates** —
+  added, created, modified, opened, captured; Finder tags, label and comment;
+  where a file came from; image dimensions, page count, duration; and the
+  file's text. Grouped `all` / `any` / `none`, nestable, and evaluated
+  cheapest-first so a name test rejects a file before anything opens it.
+- **Real globs** (`{a,b}`, `[0-9]`, `**`, negation) and regular expressions
+  whose captures feed the destination; a pattern that could take exponential
+  time is refused rather than run.
+- **Destinations as templates** — `{name}`, `{added|date:'yyyy-MM'}`,
+  `{match.invoice.year}`, `{counter}` — with filters for case, padding,
+  truncation and fallbacks.
+- **A trace per decision**: every condition, the value actually found, and the
+  verdict — six distinct reasons rather than one `false`, because "this photo
+  has no capture date" and "this photo was taken in 2019" are different
+  answers to *why didn't my rule fire*.
+- **Lossless migration in both directions.** Existing rules are upgraded on
+  load, and a config edited by this build still opens in the previous one.
+
+Around it:
+
+- **Text out of real documents**: Word, Excel, PowerPoint, OpenDocument, RTF
+  and HTML, plus on-device **OCR** for screenshots and scanned PDFs — a PDF
+  whose text layer is only a scanner's stamp is recognized instead.
+- **An Inbox-first window** (⌘0) replacing the settings dialog: files waiting
+  for a yes, history with undo, and rules grouped by the folder they watch.
+  Each rule is **Automatic**, **Ask first** or **Off** in place of two
+  booleans, and the words changed to ones people use — *preview* became the
+  Inbox, *dry run* became Ask first, *quarantine* became "park this".
+- **Undo on the notification itself**, so a banner from a pass that happened
+  while you were away is actionable rather than only informative.
+- **Guardrails**: a monthly spend ceiling on top of the per-check budget,
+  holds on battery and in Low Power Mode, and a pause that survives a relaunch.
+- **A rule editor that answers questions**: how many files each step claims
+  right now, what a rule would do with one file you pick, and what is wrong
+  with the rule before you enable it — a condition that can never be true, a
+  step that hides the ones after it, a destination that could leave a file
+  with no name.
+- **A template that needs no API key** — *Tidy up by kind*, four buckets by
+  content kind, and the rule seeded on first launch.
+- **Finder tags applied**, one stability pause per pass instead of one per
+  file, undo that prunes the empty folders it leaves behind, and file names
+  that fit the 255-*byte* limit rather than 255 graphemes.
+- The app icon sits on Apple's icon grid and is antialiased at every size.
+
+Everything still open is in `ANALYSIS.md`, which supersedes the wave-1–3 half
+of `fable-is-awesome.md`.
+
 ### Review wave 2 (merged as one integration PR)
 
 - Full findings, the re-verified backlog and the branch plan live in
