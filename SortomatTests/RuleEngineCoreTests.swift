@@ -347,6 +347,80 @@ final class RuleEvaluatorTests: XCTestCase {
         XCTAssertEqual(placement.confidence, 0.9)
     }
 
+    func testTheModelCanFillOneSlotOfADestinationTheUserWrote() {
+        // The most Sortomat-shaped rule there is: everything about the
+        // destination is deterministic except the one word nobody can write a
+        // pattern for. The step asks for that word and then places the file
+        // itself, so the model decides a folder name and not the filing.
+        let capture = ConditionTest(attribute: .stem, op: .matchesRegex,
+                                    value: .text("^(?<author>[^-]+) - (?<title>.+)$"))
+        let rule = rule([
+            step("Books", capture, [
+                RuleAction(type: .askModel),
+                RuleAction(type: .move,
+                           template: "Bücher/{model.folder}/{match.author} — {match.title}.{ext}")
+            ])
+        ])
+        let file = "Le Guin - The Dispossessed.epub"
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(rule, name: file)) else {
+            return XCTFail("expected a model request")
+        }
+        // One word back, not a path: the rule wrote the rest.
+        let answer = ModelAnswer(folder: "Science-Fiction", confidence: 0.95)
+        guard case .decided(let placement, _) = RuleEvaluator.resume(
+            token, answer: answer, context: context(rule, name: file)
+        ) else {
+            return XCTFail("expected a decision after the model answered")
+        }
+        XCTAssertEqual(placement.relativePath?.string(),
+                       "Bücher/Science-Fiction/Le Guin — The Dispossessed.epub")
+        XCTAssertEqual(placement.origin, .model)
+    }
+
+    func testAModelAnswerStillDecidesWhenTheStepDoesNot() {
+        // The other half of the same rule: with no placement of its own, the
+        // step files where the model said, exactly as it always has.
+        let rule = rule([
+            step("Ask", ConditionTest(attribute: .ext, op: .equals, value: .text("epub")),
+                 [RuleAction(type: .askModel)])
+        ])
+        let file = "whatever.epub"
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(rule, name: file)) else {
+            return XCTFail("expected a model request")
+        }
+        guard case .decided(let placement, _) = RuleEvaluator.resume(
+            token, answer: ModelAnswer(relativePath: "Bücher/Fantasy/x.epub"),
+            context: context(rule, name: file)
+        ) else {
+            return XCTFail("expected a decision")
+        }
+        XCTAssertEqual(placement.relativePath?.string(), "Bücher/Fantasy/x.epub")
+    }
+
+    func testAQuarantinedAnswerIsNotUsedToBuildADestination() {
+        // The taxonomy or the confidence valve refused this answer, so it must
+        // not end up inside a path the user's template builds out of it.
+        let rule = rule([
+            step("Books", ConditionTest(attribute: .ext, op: .equals, value: .text("epub")), [
+                RuleAction(type: .askModel),
+                RuleAction(type: .move, template: "Bücher/{model.folder}/{name}")
+            ])
+        ])
+        let file = "whatever.epub"
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(rule, name: file)) else {
+            return XCTFail("expected a model request")
+        }
+        let refused = ModelAnswer(folder: "Nicht im Set", reason: "out of taxonomy", quarantined: true)
+        guard case .decided(let placement, _) = RuleEvaluator.resume(
+            token, answer: refused, context: context(rule, name: file)
+        ) else {
+            return XCTFail("expected a decision")
+        }
+        XCTAssertEqual(placement.operation, .quarantine)
+        XCTAssertEqual(placement.origin, .confidence)
+        XCTAssertEqual(placement.relativePath?.string().contains("Nicht im Set"), false)
+    }
+
     func testCapturesReachTheDestination() {
         let test = ConditionTest(attribute: .stem, op: .matchesRegex,
                                  value: .text("^Rechnung (?<vendor>[A-Za-z]+)"))

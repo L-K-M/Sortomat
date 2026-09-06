@@ -144,7 +144,14 @@ enum RuleEvaluator {
                 if let token, token.fromFallback == false,
                    index == token.stepIndex, actionIndex <= token.actionIndex {
                     if actionIndex == token.actionIndex, let answer = state.answer {
-                        state.builder.bindModel(answer, action: action)
+                        // If the step places the file itself further down, the
+                        // model answered one *part* of a destination the user
+                        // wrote — so it must not claim the placement here and
+                        // leave that action dead.
+                        let placesItself = step.then.dropFirst(actionIndex + 1)
+                            .contains { ActionType.placements.contains($0.type) }
+                        state.builder.bindModel(answer, action: action,
+                                                claimsPlacement: !placesItself)
                         descriptions.append("askModel → \(answer.relativePath ?? answer.folder ?? "")")
                     }
                     continue

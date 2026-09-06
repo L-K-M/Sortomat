@@ -50,10 +50,23 @@ struct PlacementBuilder {
         }
     }
 
-    /// The model answered. Its values become `{model.*}` tokens; if no later
-    /// action places the file, the implicit terminal is a move to the path the
-    /// model gave — exactly what the app does today.
-    mutating func bindModel(_ answer: ModelAnswer, action: RuleAction?) {
+    /// The model answered. Its values become `{model.*}` tokens, and — when
+    /// nothing later in the step places the file — the implicit terminal is a
+    /// move to the path the model gave, which is what the app has always done.
+    ///
+    /// `claimsPlacement` is what makes the model usable as *part* of a
+    /// destination rather than the whole of it. Ask for one word and put it in
+    /// a template you wrote — `{model.folder}/{match.author} — {match.title}` —
+    /// and the step's own `move` decides where the file goes; the model fills
+    /// in the one slot nobody can write a pattern for. Before this, that move
+    /// was silently dead: the implicit terminal claimed the placement first and
+    /// every later action found the builder already terminal.
+    ///
+    /// A quarantine is the exception and still wins outright: the answer was
+    /// refused by the taxonomy or the confidence valve, so it must not be used
+    /// to build a destination at all.
+    mutating func bindModel(_ answer: ModelAnswer, action: RuleAction?,
+                            claimsPlacement: Bool = true) {
         modelAnswer = answer
         origin = answer.quarantined ? .confidence : .model
         if answer.quarantined {
@@ -64,7 +77,7 @@ struct PlacementBuilder {
             reason = answer.reason ?? ""
             return
         }
-        guard !isTerminal else { return }
+        guard claimsPlacement, !isTerminal else { return }
         operation = rule.copyInsteadOfMove ? .copy : .move
         template = "{model.path}"
         reason = answer.reason ?? ""
