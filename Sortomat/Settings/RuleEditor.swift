@@ -112,19 +112,26 @@ struct RuleEditor: View {
             Section(L10n.t("rule.steps.section")) {
                 Text(L10n.t("rule.steps.help"))
                     .font(.caption).foregroundStyle(.secondary)
-                ForEach(rule.steps.indices, id: \.self) { index in
-                    StepCard(
-                        step: $rule.steps[index],
-                        rule: rule,
-                        position: index + 1,
-                        canMoveUp: index > 0,
-                        canMoveDown: index < rule.steps.count - 1,
-                        metadataOnly: rule.privacyMode == .metadataOnly,
-                        onMoveUp: { move(index, by: -1) },
-                        onMoveDown: { move(index, by: 1) },
-                        onDelete: { rule.steps.remove(at: index) }
-                    )
-                    .padding(.vertical, 4)
+                // By identity, never by index: a row keyed on its position
+                // outlives the element it showed for one render after a
+                // delete, and `$rule.steps[index]` then subscripts past the
+                // end. Looking the index up by id each time returns nil for a
+                // step that is gone, and the row simply isn't drawn.
+                ForEach(rule.steps) { step in
+                    if let index = rule.steps.firstIndex(where: { $0.id == step.id }) {
+                        StepCard(
+                            step: $rule.steps[index],
+                            rule: rule,
+                            position: index + 1,
+                            canMoveUp: index > 0,
+                            canMoveDown: index < rule.steps.count - 1,
+                            metadataOnly: rule.privacyMode == .metadataOnly,
+                            onMoveUp: { move(step.id, by: -1) },
+                            onMoveDown: { move(step.id, by: 1) },
+                            onDelete: { rule.steps.removeAll { $0.id == step.id } }
+                        )
+                        .padding(.vertical, 4)
+                    }
                 }
                 Button {
                     rule.steps.append(RuleStep(
@@ -226,9 +233,10 @@ struct RuleEditor: View {
         }
     }
 
-    private func move(_ index: Int, by offset: Int) {
+    private func move(_ id: UUID, by offset: Int) {
+        guard let index = rule.steps.firstIndex(where: { $0.id == id }) else { return }
         let target = index + offset
-        guard rule.steps.indices.contains(index), rule.steps.indices.contains(target) else { return }
+        guard rule.steps.indices.contains(target) else { return }
         rule.steps.swapAt(index, target)
     }
 

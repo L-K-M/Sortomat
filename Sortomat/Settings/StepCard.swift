@@ -33,13 +33,23 @@ struct StepCard: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
-        // Automatically only when the answer is cheap, and never on a
-        // keystroke. A step that asks about a name, a kind or a date costs a
-        // stat per file; one that asks about *contents* can cost a PDF text
-        // extraction — or an OCR pass — per file, and running that on the way
-        // into the editor would be indistinguishable from the app hanging.
-        // Those count when the user asks for it, which is what the pill is.
-        .task { if countsCheaply { await recount() } }
+        // The count follows the conditions as they are typed — but only when
+        // the answer is cheap, and never on the keystroke itself. A step that
+        // asks about a name, a kind or a date costs a stat per file; one that
+        // asks about *contents* can cost a PDF text extraction — or an OCR
+        // pass — per file, and running that on every edit would be
+        // indistinguishable from the app hanging. Those count when the user
+        // asks for it, which is what the pill is.
+        //
+        // `task(id:)` restarts on every change to the conditions and cancels
+        // the run in flight, so the pause below is a debounce: a burst of
+        // typing counts once, after the last keystroke.
+        .task(id: step.when) {
+            guard countsCheaply else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+            await recount()
+        }
     }
 
     /// "12 of 200 files match this step" — the one question every rule editor
@@ -89,7 +99,7 @@ struct StepCard: View {
 
     @MainActor
     private func recount() async {
-        guard !rule.watchPath.isEmpty, !counting else { return }
+        guard !rule.watchPath.isEmpty else { return }
         counting = true
         let counts = await state.matchCount(for: rule, step: step)
         matched = counts.matched
@@ -134,12 +144,15 @@ struct StepCard: View {
                 Text(L10n.t("step.when.empty"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(step.when.items.indices, id: \.self) { index in
-                ConditionRow(
-                    condition: $step.when.items[index],
-                    metadataOnly: metadataOnly,
-                    onDelete: { step.when.items.remove(at: index) }
-                )
+            // Keyed on identity, not position — see the note in `RuleEditor`.
+            ForEach(step.when.items) { item in
+                if let index = step.when.items.firstIndex(where: { $0.id == item.id }) {
+                    ConditionRow(
+                        condition: $step.when.items[index],
+                        metadataOnly: metadataOnly,
+                        onDelete: { step.when.items.removeAll { $0.id == item.id } }
+                    )
+                }
             }
             Button {
                 step.when.items.append(.test(ConditionTest()))
@@ -157,11 +170,13 @@ struct StepCard: View {
                 Text(L10n.t("step.then.empty"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(step.then.indices, id: \.self) { index in
-                ActionRow(
-                    action: $step.then[index],
-                    onDelete: { step.then.remove(at: index) }
-                )
+            ForEach(step.then) { action in
+                if let index = step.then.firstIndex(where: { $0.id == action.id }) {
+                    ActionRow(
+                        action: $step.then[index],
+                        onDelete: { step.then.removeAll { $0.id == action.id } }
+                    )
+                }
             }
             Button {
                 step.then.append(RuleAction(type: .move, template: "{name}"))
@@ -250,6 +265,16 @@ struct ConditionTestRow: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+        }
+        // Switching the attribute swaps the operator menu underneath the
+        // selection. An operator the new attribute does not offer would be
+        // left selected but invisible — "older than" on a file name — and
+        // the engine would then report it as invalid on every file. Fall
+        // back to the first operator the attribute does offer.
+        .onChange(of: test.attribute) { attribute in
+            let offered = RuleCatalog.operators(for: attribute)
+            guard !offered.contains(test.op), let first = offered.first else { return }
+            test.op = first
         }
     }
 

@@ -139,21 +139,23 @@ enum RuleEvaluator {
 
             var descriptions: [String] = []
             for (actionIndex, action) in step.then.enumerated() {
-                // When resuming, everything up to and including the asking
-                // action was already applied on the first pass.
-                if let token, token.fromFallback == false,
-                   index == token.stepIndex, actionIndex <= token.actionIndex {
-                    if actionIndex == token.actionIndex, let answer = state.answer {
-                        // If the step places the file itself further down, the
-                        // model answered one *part* of a destination the user
-                        // wrote — so it must not claim the placement here and
-                        // leave that action dead.
-                        let placesItself = step.then.dropFirst(actionIndex + 1)
-                            .contains { ActionType.placements.contains($0.type) }
-                        state.builder.bindModel(answer, action: action,
-                                                claimsPlacement: !placesItself)
-                        descriptions.append("askModel → \(answer.relativePath ?? answer.folder ?? "")")
-                    }
+                // When resuming, the asking action is answered rather than
+                // asked again. The actions *before* it run like any other:
+                // the builder is fresh on every walk, so a tag added ahead of
+                // the question would otherwise leave with the pass that asked
+                // it. (They cannot include another `askModel` — the first
+                // pass would have stopped there instead.)
+                if let token, token.fromFallback == false, let answer = state.answer,
+                   index == token.stepIndex, actionIndex == token.actionIndex {
+                    // If the step places the file itself further down, the
+                    // model answered one *part* of a destination the user
+                    // wrote — so it must not claim the placement here and
+                    // leave that action dead.
+                    let placesItself = step.then.dropFirst(actionIndex + 1)
+                        .contains { ActionType.placements.contains($0.type) }
+                    state.builder.bindModel(answer, action: action,
+                                            claimsPlacement: !placesItself)
+                    descriptions.append("askModel → \(answer.relativePath ?? answer.folder ?? "")")
                     continue
                 }
                 if action.type == .askModel {

@@ -128,12 +128,14 @@ enum RuleCatalog {
     /// Actions the editor offers, in menu order.
     static let actionTypes: [ActionType] = [
         .move, .copy, .rename, .sortIntoDatedFolder, .askModel, .skip,
-        .addTags, .setComment, .trash, .stop, .proceed
+        .addTags, .removeTags, .notify, .setComment, .trash, .stop, .proceed
     ]
 
+    /// Actions whose one text field is a template: a destination, a new
+    /// name, a comment, the body of a notification.
     static func takesTemplate(_ type: ActionType) -> Bool {
         type == .move || type == .copy || type == .rename || type == .sortIntoDatedFolder
-            || type == .setComment
+            || type == .setComment || type == .notify
     }
 
     static func takesTags(_ type: ActionType) -> Bool {

@@ -421,6 +421,30 @@ final class RuleEvaluatorTests: XCTestCase {
         XCTAssertEqual(placement.relativePath?.string().contains("Nicht im Set"), false)
     }
 
+    func testActionsBeforeTheQuestionSurviveTheAnswer() {
+        // The builder is fresh on every walk. A tag added *before* the step
+        // asks the model has to be applied again when the answer comes back,
+        // or it leaves with the pass that asked.
+        let rule = rule([
+            step("Books", ConditionTest(attribute: .ext, op: .equals, value: .text("epub")), [
+                RuleAction(type: .addTags, tags: ["Buch"]),
+                RuleAction(type: .askModel)
+            ])
+        ])
+        let file = "whatever.epub"
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(rule, name: file)) else {
+            return XCTFail("expected a model request")
+        }
+        guard case .decided(let placement, _) = RuleEvaluator.resume(
+            token, answer: ModelAnswer(relativePath: "Bücher/x.epub"),
+            context: context(rule, name: file)
+        ) else {
+            return XCTFail("expected a decision")
+        }
+        XCTAssertEqual(placement.relativePath?.string(), "Bücher/x.epub")
+        XCTAssertEqual(placement.sideEffects, [SideEffect(type: .addTags, values: ["Buch"])])
+    }
+
     func testCapturesReachTheDestination() {
         let test = ConditionTest(attribute: .stem, op: .matchesRegex,
                                  value: .text("^Rechnung (?<vendor>[A-Za-z]+)"))

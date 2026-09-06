@@ -276,15 +276,22 @@ actor Pipeline {
         // 1. The rule's steps. Evaluation is pure: everything it can know
         //    arrives through `FileFacts`, which loads each cost tier at most
         //    once and only when a condition actually asks.
-        let context = evaluationContext(file: file, rule: rule, target: target, allowModel: allowLLM)
+        //
+        //    The model is always *allowed* here, whatever the budget says: a
+        //    step that asks for it hands back a resume token, and whether the
+        //    question is actually put is decided below — after the memo, so
+        //    that identical bytes are still filed from memory when the budget
+        //    is spent or there is no key, which is the whole promise of the
+        //    memo. Deferring at this point would have skipped that lookup.
+        let context = evaluationContext(file: file, rule: rule, target: target, allowModel: true)
         var resumeToken: ResumeToken?
         switch RuleEvaluator.evaluate(context) {
         case .decided(let placement, let trace):
             return try Self.plan(from: placement, trace: trace, file: file,
                                  rule: rule, target: target, ext: ext)
         case .deferred:
-            // The model is needed and unavailable (no key, no budget). The
-            // caller reports the deferral; nothing is decided.
+            // Unreachable with `allowModel: true`; kept so the switch stays
+            // exhaustive and honest if that ever changes.
             return DecideResult(plan: nil)
         case .needsModel(_, let token, _):
             resumeToken = token
@@ -304,8 +311,13 @@ actor Pipeline {
                         ?? L10n.t("memo.rememberedBare"),
                     confidence: hit.confidence
                 )
-                return try route(remembered, file: file, rule: rule, target: target,
-                                 ext: ext, usage: TokenUsage(), usedLLM: false)
+                let decided = try route(remembered, file: file, rule: rule, target: target,
+                                        ext: ext, usage: TokenUsage(), usedLLM: false)
+                // A remembered answer goes through the same steps as a fresh
+                // one: the second identical file must be filed by the actions
+                // the rule wrote, not by the raw path the first one was asked.
+                return try resumedPlan(resumeToken, classification: remembered, decided: decided,
+                                       file: file, rule: rule, target: target, ext: ext)
             }
         }
 
@@ -325,17 +337,13 @@ actor Pipeline {
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )
         let c = result.classification
-        var decided = try route(c, file: file, rule: rule, target: target,
-                                ext: ext, usage: result.usage, usedLLM: true)
+        let routed = try route(c, file: file, rule: rule, target: target,
+                               ext: ext, usage: result.usage, usedLLM: true)
         // The model is a *binding* action: its answer fills {model.*} and the
         // actions after it decide what to do with them. A rule whose askModel
         // is the last action behaves exactly as before.
-        if let resumeToken, let resumed = try resumedPlan(
-            resumeToken, classification: c, decided: decided, file: file,
-            rule: rule, target: target, ext: ext, usage: result.usage, allowModel: allowLLM
-        ) {
-            decided = resumed
-        }
+        let decided = try resumedPlan(resumeToken, classification: c, decided: routed,
+                                      file: file, rule: rule, target: target, ext: ext)
 
         // Remember the verdict for these exact bytes — a re-download or a
         // renamed copy never pays again. Only answers that routed cleanly are
@@ -361,6 +369,11 @@ actor Pipeline {
         var destination: String?
         var summary: String
         var needsModel: Bool
+        /// Whether any step's `when` held for this file. This — not the
+        /// operation — is what "does this step match?" asks: a step that
+        /// tags and continues, leaves the file alone, or asks the model has
+        /// matched just as surely as one that moves it.
+        var matched: Bool
     }
 
     func dryDecide(file: URL, rule: Rule, allowModel: Bool = false) -> DryRun {
@@ -373,11 +386,13 @@ actor Pipeline {
                 operation: placement.operation,
                 destination: placement.relativePath?.string(),
                 summary: trace.summary,
-                needsModel: false
+                needsModel: false,
+                matched: trace.steps.contains { $0.matched }
             )
         case .needsModel(_, _, let trace), .deferred(let trace):
             return DryRun(operation: .skip, destination: nil,
-                          summary: trace.summary, needsModel: true)
+                          summary: trace.summary, needsModel: true,
+                          matched: trace.steps.contains { $0.matched })
         }
     }
 
@@ -392,8 +407,8 @@ actor Pipeline {
         var needsModel = 0
         for file in candidates {
             let run = dryDecide(file: file, rule: rule)
+            if run.matched { matched += 1 }
             if run.needsModel { needsModel += 1 }
-            else if run.operation != .skip { matched += 1 }
         }
         return (matched, candidates.count, needsModel)
     }
@@ -468,30 +483,56 @@ actor Pipeline {
     }
 
     /// Hand the model's answer back to the engine so the actions after
-    /// `askModel` can use it. Returns nil when the answer produced no
-    /// placement (a skip, or a valve that already decided), in which case the
-    /// existing routing result stands.
-    private func resumedPlan(_ token: ResumeToken, classification: Classification,
+    /// `askModel` can use it. The routing result stands as it is when there
+    /// is nothing to resume, or when the answer produced no placement (a
+    /// skip) — and it keeps its own `usage` and `usedLLM`, so a remembered
+    /// answer that went through the steps is still not billed as a call.
+    private func resumedPlan(_ token: ResumeToken?, classification: Classification,
                              decided: DecideResult, file: URL, rule: Rule, target: URL,
-                             ext: String, usage: TokenUsage,
-                             allowModel: Bool) throws -> DecideResult? {
-        guard let plan = decided.plan, plan.kind != .skip, !rule.steps.isEmpty else { return nil }
+                             ext: String) throws -> DecideResult {
+        guard let token, let plan = decided.plan, plan.kind != .skip,
+              !rule.steps.isEmpty else { return decided }
         let routing = try Self.routing(for: classification, rule: rule,
                                        fileName: file.lastPathComponent)
-        guard let relativePath = routing.relativePath else { return nil }
-        let answer = ModelAnswer(
-            relativePath: relativePath,
-            reason: routing.reason,
-            confidence: classification.confidence,
-            quarantined: routing.origin == .confidence || routing.origin == .taxonomy
-        )
+        guard let answer = Self.modelAnswer(for: classification, routing: routing) else {
+            return decided
+        }
+        // The answer is in hand, so nothing is asked again; a *second*
+        // `askModel` further down the same step would need a call this build
+        // does not make, and the routing result stands for it.
         let context = evaluationContext(file: file, rule: rule, target: target,
-                                        allowModel: allowModel)
+                                        allowModel: false)
         guard case .decided(let placement, let trace) = RuleEvaluator.resume(
             token, answer: answer, context: context
-        ) else { return nil }
+        ) else { return decided }
         return try Self.plan(from: placement, trace: trace, file: file, rule: rule,
-                             target: target, ext: ext, usage: usage, usedLLM: true)
+                             target: target, ext: ext, usage: decided.usage,
+                             usedLLM: decided.usedLLM)
+    }
+
+    /// The model's answer as the engine sees it. `folder` and `filename` are
+    /// what `{model.folder}` and `{model.filename}` render, and they are read
+    /// off the path that will actually be applied rather than off the model's
+    /// own `folder` field: that field is not what the taxonomy was checked
+    /// against, and a remembered verdict carries no fields at all, only the
+    /// path. A model that answered with one `relative_path` still answered a
+    /// folder and a name.
+    static func modelAnswer(for c: Classification, routing: Routing) -> ModelAnswer? {
+        guard let relativePath = routing.relativePath else { return nil }
+        let components = (c.resolvedRelativePath() ?? relativePath)
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0 != "." }
+        let folder = components.dropLast().joined(separator: "/")
+        return ModelAnswer(
+            folder: folder.isEmpty ? nil : folder,
+            filename: components.last,
+            relativePath: relativePath,
+            reason: routing.reason,
+            confidence: c.confidence,
+            quarantined: routing.origin == .confidence || routing.origin == .taxonomy
+        )
     }
 
     /// The routing shared by a fresh model answer and a memo hit: skip
