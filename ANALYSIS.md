@@ -179,13 +179,26 @@ the answer — never a nested `List`, and never `\.self` as an identity:
 
 ### 1.5 `{ask:…}` — the model as a token
 
-The highest-value idea in the whole set, and the architecture is already there.
-`Bücher/{ask:genre}/{author} — {title}.{ext}` is a rule that is deterministic
-everywhere except one slot, and the slot is the only thing anyone pays for.
-Implementation: a `{ask:…}` token in a destination makes the step imply an
-`askModel` action whose prompt is "answer with one word for: genre", and whose
-answer binds only that token. Everything else — the valves, the memo, the
-budget — already applies.
+**The behaviour exists; only the sugar is missing.** A step can now ask the
+model for one value and place the file itself:
+
+    if   stem matches ^(?<author>[^-]+) - (?<title>.+)$
+    then ask the model for the genre
+         move to Bücher/{model.folder}/{match.author} — {match.title}.{ext}
+
+That did not work before: when the answer arrived, `bindModel` claimed the
+placement immediately, so any later `move` in the step found the builder
+terminal and was silently ignored — `{model.folder}` could never appear inside
+a template a person wrote. The model's answer now yields when the step places
+the file itself, and a *quarantined* answer still wins outright, because a
+guess the taxonomy refused must not end up inside a folder name.
+
+What is left is the spelling. `{ask:genre}` in a destination should imply the
+`askModel` action and bind only that token, so the rule reads as one line
+instead of two actions — and the prompt it implies ("answer with one short
+value for: genre") is better than what most people would write by hand. Nothing
+about the valves, the memo or the budget needs to change: this is a rewrite of
+the step at edit time, not a new path through the engine.
 
 ### 1.6 Attribute gaps
 
