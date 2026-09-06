@@ -66,6 +66,7 @@ Six things that cost real time to learn, in the order they will bite.
 | 5 | Guardrails: a monthly spend ceiling, power holds, a pause that survives a relaunch | [#41](https://github.com/L-K-M/Sortomat/pull/41) | open |
 | 5 | Pass efficiency: one stability pause per pass, undo that prunes its own folders, byte-aware names | [#42](https://github.com/L-K-M/Sortomat/pull/42) | open |
 | 5 | Half the CI bill, and no artifact upload | [#43](https://github.com/L-K-M/Sortomat/pull/43) | open |
+| 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | open |
 | — | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor, a dry run, a match count, and a rule validator | `claude/rule-engine-v2`, stacked on #38 | branch, no pull request yet |
 
 **Read this before merging anything.** #38–#43 were each green, then took one
@@ -323,16 +324,26 @@ branch) so nothing needs re-learning.
 
 **Chrome**
 
+*[H-Z], [P1-52] and [P1-53] are addressed on [#45](https://github.com/L-K-M/Sortomat/pull/45)
+and are kept here until it merges: the app icon sits on Apple's 824-of-1024
+grid (it was full-bleed, so it rendered about a quarter larger than every
+neighbour in the Dock), every size is antialiased through a supersampled master
+— the old generator skipped downsampling for the 1024px icon, which is the one
+on a release page — `AccentColor` is exactly the midpoint of the icon's
+gradient rather than a fourth green, and the menu-bar funnel is inset and is
+now the app icon's own shape rather than a second approximation of it.*
+
 - **[H-X] The log is a file, opened in TextEdit.** "Open log" hands
   `activity.log` to whatever owns `.log`; there is no in-app viewer, no
   filtering by rule or outcome, and no way to get from a line to the file it
   describes. The status popover (§2.3) is where a real one belongs.
-- **[H-Z] The menu-bar funnel reads heavier than its neighbours at 18 pt**, and
-  there is no 16 pt-tuned variant.
-- **[P1-52] The app icon is full-bleed** — no Apple icon-grid margin, so it
-  renders about a quarter larger than every neighbour in the Dock.
-- **[P1-53] The brand has three unrelated greens** (icon gradient, AccentColor,
-  system `.green`) and no codified palette.
+- **[H-Z] No 16 pt-tuned menu-bar variant.** The mark is one filled shape drawn
+  at whatever size it is asked for; a 16 pt version wants slightly different
+  proportions, not the same polygon scaled.
+- **[P1-53] `Color.green` is still used in three views** — the palette is
+  codified in the icon generator and the accent colour now, but two of those
+  three call sites are in files #39 deletes, so changing them would only
+  conflict. Sweep the survivors after #39 merges.
 
 ---
 
