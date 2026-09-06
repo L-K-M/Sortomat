@@ -106,6 +106,64 @@ final class RuleValidatorTests: XCTestCase {
         XCTAssertTrue(codes(rule).contains("condition.blockedByPrivacy"))
     }
 
+    func testAPrivacySafeConditionIsNotCalledImpossible() {
+        // `duplicateInTarget` reads the target folder's index and never opens
+        // a file, so it works exactly as well under metadata-only. Reading the
+        // *cost* tier as "opens the file" put a red error on a rule that
+        // works — the one thing this validator may never do.
+        var rule = healthyRule(steps: [
+            step(ConditionGroup(mode: .all, items: [when(.duplicateInTarget, .isTrue, .none)]),
+                 [RuleAction(type: .skip)])
+        ])
+        rule.privacyMode = .metadataOnly
+        XCTAssertEqual(RuleValidator.findings(for: rule), [], "got: \(codes(rule))")
+    }
+
+    func testAnAttributeSpotlightUsuallyKnowsIsANoteNotAnError() {
+        // `title` asks Spotlight first and only falls back to reading the
+        // file, so under metadata-only it still matches — for indexed files.
+        // That is worth saying and is not "can never match".
+        var rule = healthyRule(steps: [
+            step(ConditionGroup(mode: .all, items: [when(.title, .contains, .text("Hobbit"))]),
+                 [RuleAction(type: .move, template: "{name}")])
+        ])
+        rule.privacyMode = .metadataOnly
+        let findings = RuleValidator.findings(for: rule)
+        XCTAssertEqual(findings.map(\.code), ["condition.metadataOnlyValue"])
+        XCTAssertEqual(findings.first?.severity, .warning)
+    }
+
+    func testTheEditorsContentFlagIsTheValidatorsOwn() {
+        // Two hand-kept lists of "does this read the file" had already
+        // drifted. The catalog derives its flag from the engine now, so the
+        // hint in the row and the finding under it cannot disagree again.
+        for spec in RuleCatalog.attributes {
+            XCTAssertEqual(spec.needsContent,
+                           FileFacts.alwaysNeedsContent.contains(spec.attribute),
+                           spec.attribute.rawValue)
+        }
+        XCTAssertFalse(RuleCatalog.spec(for: .duplicateInTarget)?.needsContent ?? true)
+        XCTAssertTrue(RuleCatalog.spec(for: .text)?.needsContent ?? false)
+    }
+
+    func testEveryFindingIsDrawnSomewhereInTheEditor() {
+        // `RuleIssues` shows the rule-level findings and the step card draws
+        // the rest against the row they name. A finding that is neither — a
+        // step id with no row and no `.step` site — would be invisible.
+        let rule = healthyRule(steps: [
+            step(ConditionGroup(mode: .any, items: []), []),
+            step(ConditionGroup(mode: .all, items: [when(.name, .contains, .none)]),
+                 [RuleAction(type: .move, template: "Invoices/{title}", root: "Nowhere")])
+        ])
+        for finding in RuleValidator.findings(for: rule) {
+            let drawn = finding.stepID == nil          // RuleIssues
+                || finding.isAboutStepItself           // the card
+                || finding.conditionID != nil          // a condition row
+                || finding.actionID != nil             // an action row
+            XCTAssertTrue(drawn, "\(finding.code) has nowhere to be drawn")
+        }
+    }
+
     func testARegexTheEngineRefusesToRunIsFlagged() {
         let rule = healthyRule(steps: [
             step(ConditionGroup(mode: .all, items: [

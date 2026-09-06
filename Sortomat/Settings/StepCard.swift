@@ -11,7 +11,10 @@ struct StepCard: View {
     let position: Int
     let canMoveUp: Bool
     let canMoveDown: Bool
-    let metadataOnly: Bool
+    /// Everything `RuleValidator` found about *this* step, rows included.
+    /// Passed in rather than computed here so the whole editor validates the
+    /// rule once per render instead of once per card.
+    let findings: [RuleValidator.Finding]
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onDelete: () -> Void
@@ -30,6 +33,7 @@ struct StepCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            FindingList(findings: findings.filter(\.isAboutStepItself))
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
@@ -114,6 +118,7 @@ struct StepCard: View {
                 .foregroundStyle(.secondary)
             TextField(L10n.t("step.name"), text: $step.name)
                 .textFieldStyle(.roundedBorder)
+            problemBadge
             Toggle("", isOn: $step.enabled)
                 .labelsHidden()
                 .help(L10n.t("step.enabled.help"))
@@ -124,6 +129,20 @@ struct StepCard: View {
             Button(action: onDelete) { Image(systemName: "trash") }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(L10n.t("step.delete"))
+        }
+    }
+
+    /// One mark in the header saying this step has something wrong with it,
+    /// so a collapsed or scrolled-past card still shows it. The detail is
+    /// drawn against the row it belongs to; this is the summary.
+    @ViewBuilder
+    private var problemBadge: some View {
+        if let headline = RuleValidator.headline(findings) {
+            let failing = findings.contains { $0.severity == .error }
+            Image(systemName: failing ? "exclamationmark.triangle.fill" : "info.circle")
+                .foregroundStyle(failing ? Color.red : Color.secondary)
+                .help(findings.map(\.message).joined(separator: "\n"))
+                .accessibilityLabel(L10n.t("validate.step.problems", headline))
         }
     }
 
@@ -149,7 +168,7 @@ struct StepCard: View {
                 if let index = step.when.items.firstIndex(where: { $0.id == item.id }) {
                     ConditionRow(
                         condition: $step.when.items[index],
-                        metadataOnly: metadataOnly,
+                        findings: findings.filter { $0.conditionID == item.id },
                         onDelete: { step.when.items.removeAll { $0.id == item.id } }
                     )
                 }
@@ -174,6 +193,7 @@ struct StepCard: View {
                 if let index = step.then.firstIndex(where: { $0.id == action.id }) {
                     ActionRow(
                         action: $step.then[index],
+                        findings: findings.filter { $0.actionID == action.id },
                         onDelete: { step.then.removeAll { $0.id == action.id } }
                     )
                 }
@@ -188,12 +208,31 @@ struct StepCard: View {
     }
 }
 
+/// What the validator found, drawn under the row it is about.
+///
+/// A list at the bottom of a long form is a list nobody reads; the whole point
+/// of a finding carrying its condition's identity is that the sentence can sit
+/// against the picker that caused it.
+struct FindingList: View {
+    let findings: [RuleValidator.Finding]
+
+    var body: some View {
+        ForEach(findings) { finding in
+            Label(finding.message, systemImage: finding.severity == .error
+                  ? "exclamationmark.triangle.fill" : "info.circle")
+                .font(.caption)
+                .foregroundStyle(finding.severity == .error ? Color.red : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 /// A group or a test. Nested groups are shown but not edited here: the model
 /// supports any depth, the editor does one level, and a hand-written nested
 /// group must survive being looked at.
 struct ConditionRow: View {
     @Binding var condition: Condition
-    let metadataOnly: Bool
+    let findings: [RuleValidator.Finding]
     let onDelete: () -> Void
 
     var body: some View {
@@ -208,7 +247,7 @@ struct ConditionRow: View {
                     .buttonStyle(.borderless)
             }
         case .test:
-            ConditionTestRow(test: testBinding, metadataOnly: metadataOnly, onDelete: onDelete)
+            ConditionTestRow(test: testBinding, findings: findings, onDelete: onDelete)
         }
     }
 
@@ -225,7 +264,7 @@ struct ConditionRow: View {
 
 struct ConditionTestRow: View {
     @Binding var test: ConditionTest
-    let metadataOnly: Bool
+    let findings: [RuleValidator.Finding]
     let onDelete: () -> Void
 
     /// Operators whose value is a list the user types comma-separated.
@@ -260,11 +299,7 @@ struct ConditionTestRow: View {
                 Button(action: onDelete) { Image(systemName: "minus.circle") }
                     .buttonStyle(.borderless)
             }
-            if blockedByPrivacy {
-                Label(L10n.t("step.condition.needsContent"), systemImage: "eye.slash")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
+            FindingList(findings: findings)
         }
         // Switching the attribute swaps the operator menu underneath the
         // selection. An operator the new attribute does not offer would be
@@ -281,12 +316,6 @@ struct ConditionTestRow: View {
     private var needsValue: Bool {
         test.op != .isEmpty && test.op != .isNotEmpty
             && test.op != .isTrue && test.op != .isFalse
-    }
-
-    /// A condition on file contents can never match while the rule promises
-    /// that contents are never read — say so instead of leaving a dead row.
-    private var blockedByPrivacy: Bool {
-        metadataOnly && RuleCatalog.spec(for: test.attribute)?.needsContent == true
     }
 
     private var placeholder: String {
@@ -321,9 +350,17 @@ struct ConditionTestRow: View {
 
 struct ActionRow: View {
     @Binding var action: RuleAction
+    let findings: [RuleValidator.Finding]
     let onDelete: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            row
+            FindingList(findings: findings)
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 6) {
             Picker("", selection: $action.type) {
                 ForEach(RuleCatalog.actionTypes, id: \.rawValue) { type in

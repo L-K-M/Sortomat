@@ -1,15 +1,23 @@
 import SwiftUI
 
-/// What the validator found, drawn in the editor next to the rule it is about.
+/// What is wrong with the rule *as a whole* — no watched folder, no
+/// destination, a duplicate destination root, the model with no instruction.
 ///
-/// The list is deliberately plain: an icon, the step it belongs to, and one
-/// sentence saying what is wrong in the same words the user typed. Anything a
-/// rule editor can tell you *before* you enable a rule is worth more than the
-/// same sentence in a log afterwards.
+/// Everything that belongs to a step, a condition or an action is drawn
+/// against that row instead, in `StepCard`. Anything a rule editor can tell
+/// you before you enable a rule is worth more than the same sentence in a log
+/// afterwards, and a sentence next to the picker that caused it is worth more
+/// than the same sentence in a list at the bottom.
 struct RuleIssues: View {
     let rule: Rule
 
-    private var findings: [RuleValidator.Finding] { RuleValidator.findings(for: rule) }
+    /// Only what belongs to the rule as a whole. Everything about a step, a
+    /// condition or an action is drawn against that row in the step card, so
+    /// repeating it here would say each thing twice and bury the two findings
+    /// — no watched folder, no destination — that have nowhere else to go.
+    private var findings: [RuleValidator.Finding] {
+        RuleValidator.findings(for: rule).filter { $0.stepID == nil }
+    }
 
     var body: some View {
         let found = findings
@@ -23,32 +31,13 @@ struct RuleIssues: View {
                             .foregroundStyle(finding.severity == .error
                                              ? Color.red : Color.secondary)
                             .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 1) {
-                            if let label = stepLabel(finding) {
-                                Text(label)
-                                    .font(.caption)
-                                    .foregroundStyle(Color.secondary)
-                            }
-                            Text(finding.message)
-                                .font(.callout)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                        Text(finding.message)
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.vertical, 1)
                 }
             }
         }
-    }
-
-    /// "Step 2" or "Step 2 · Invoices", so a finding can be found.
-    private func stepLabel(_ finding: RuleValidator.Finding) -> String? {
-        guard let id = finding.stepID,
-              let index = rule.steps.firstIndex(where: { $0.id == id })
-        else { return nil }
-        let name = rule.steps[index].name.trimmingCharacters(in: .whitespaces)
-        let position = "\(index + 1)"
-        return name.isEmpty
-            ? L10n.t("validate.stepLabel", position)
-            : L10n.t("validate.stepLabelNamed", position, name)
     }
 }

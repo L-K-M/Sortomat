@@ -23,8 +23,16 @@ enum RuleCatalog {
         let shape: ValueShape
         let operators: [Operator]
         let example: String
-        /// True for the facts a metadata-only rule is not allowed to read.
-        let needsContent: Bool
+
+        /// Whether a metadata-only rule is unable to answer this attribute.
+        ///
+        /// Derived, never stored. This flag and `RuleValidator`'s privacy
+        /// check were two hand-kept lists of the same fact, and they had
+        /// already drifted: `duplicateInTarget` was content-free here and
+        /// impossible there, so the editor stayed quiet while the validator
+        /// put a red error on a rule that works. One list now, in the type
+        /// that decides it at run time.
+        var needsContent: Bool { FileFacts.alwaysNeedsContent.contains(attribute) }
     }
 
     // MARK: - Operator sets
@@ -48,73 +56,73 @@ enum RuleCatalog {
 
     static let attributes: [AttributeSpec] = [
         AttributeSpec(attribute: .name, shape: .text, operators: stringOperators,
-                      example: "Rechnung*.pdf", needsContent: false),
+                      example: "Rechnung*.pdf"),
         AttributeSpec(attribute: .stem, shape: .text, operators: stringOperators,
-                      example: "Rechnung ACME", needsContent: false),
+                      example: "Rechnung ACME"),
         AttributeSpec(attribute: .ext, shape: .text, operators: stringOperators,
-                      example: "pdf", needsContent: false),
+                      example: "pdf"),
         AttributeSpec(attribute: .kind, shape: .kind, operators: kindOperators,
-                      example: "image", needsContent: false),
+                      example: "image"),
         AttributeSpec(attribute: .size, shape: .number, operators: numberOperators,
-                      example: "5MB", needsContent: false),
+                      example: "5MB"),
         AttributeSpec(attribute: .dateAdded, shape: .duration, operators: dateOperators,
-                      example: "30d", needsContent: false),
+                      example: "30d"),
         AttributeSpec(attribute: .dateCreated, shape: .duration, operators: dateOperators,
-                      example: "1y", needsContent: false),
+                      example: "1y"),
         AttributeSpec(attribute: .dateModified, shape: .duration, operators: dateOperators,
-                      example: "30d", needsContent: false),
+                      example: "30d"),
         AttributeSpec(attribute: .dateOpened, shape: .duration, operators: dateOperators,
-                      example: "6mo", needsContent: false),
+                      example: "6mo"),
         AttributeSpec(attribute: .dateCaptured, shape: .duration, operators: dateOperators,
-                      example: "2y", needsContent: false),
+                      example: "2y"),
         AttributeSpec(attribute: .relPath, shape: .text, operators: stringOperators,
-                      example: "Invoices/*", needsContent: false),
+                      example: "Invoices/*"),
         AttributeSpec(attribute: .parent, shape: .text, operators: stringOperators,
-                      example: "Downloads", needsContent: false),
+                      example: "Downloads"),
         AttributeSpec(attribute: .subfolder, shape: .text, operators: stringOperators,
-                      example: "2026/Q1", needsContent: false),
+                      example: "2026/Q1"),
         AttributeSpec(attribute: .depth, shape: .number, operators: numberOperators,
-                      example: "2", needsContent: false),
+                      example: "2"),
         AttributeSpec(attribute: .uti, shape: .text, operators: [.equals, .isNot, .conformsTo],
-                      example: "public.image", needsContent: false),
+                      example: "public.image"),
         AttributeSpec(attribute: .isPackage, shape: .none, operators: boolOperators,
-                      example: "", needsContent: false),
+                      example: ""),
         AttributeSpec(attribute: .isHidden, shape: .none, operators: boolOperators,
-                      example: "", needsContent: false),
+                      example: ""),
         AttributeSpec(attribute: .tags, shape: .list, operators: listOperators,
-                      example: "Wichtig", needsContent: false),
+                      example: "Wichtig"),
         AttributeSpec(attribute: .label, shape: .number, operators: numberOperators,
-                      example: "3", needsContent: false),
+                      example: "3"),
         AttributeSpec(attribute: .comment, shape: .text, operators: stringOperators,
-                      example: "Steuer", needsContent: false),
+                      example: "Steuer"),
         AttributeSpec(attribute: .whereFrom, shape: .text, operators: stringOperators,
-                      example: "amazon.de", needsContent: false),
+                      example: "amazon.de"),
         AttributeSpec(attribute: .whereFromHost, shape: .text, operators: stringOperators,
-                      example: "amazon.de", needsContent: false),
+                      example: "amazon.de"),
         AttributeSpec(attribute: .pixelWidth, shape: .number, operators: numberOperators,
-                      example: "1920", needsContent: false),
+                      example: "1920"),
         AttributeSpec(attribute: .pixelHeight, shape: .number, operators: numberOperators,
-                      example: "1080", needsContent: false),
+                      example: "1080"),
         AttributeSpec(attribute: .megapixels, shape: .number, operators: numberOperators,
-                      example: "12", needsContent: false),
+                      example: "12"),
         AttributeSpec(attribute: .duration, shape: .number, operators: numberOperators,
-                      example: "600", needsContent: false),
+                      example: "600"),
         AttributeSpec(attribute: .pageCount, shape: .number, operators: numberOperators,
-                      example: "10", needsContent: false),
+                      example: "10"),
         AttributeSpec(attribute: .title, shape: .text, operators: stringOperators,
-                      example: "Der Hobbit", needsContent: true),
+                      example: "Der Hobbit"),
         AttributeSpec(attribute: .authors, shape: .list, operators: listOperators,
-                      example: "Tolkien", needsContent: true),
+                      example: "Tolkien"),
         AttributeSpec(attribute: .subjects, shape: .list, operators: listOperators,
-                      example: "Fantasy", needsContent: true),
+                      example: "Fantasy"),
         AttributeSpec(attribute: .publisher, shape: .text, operators: stringOperators,
-                      example: "Klett-Cotta", needsContent: true),
+                      example: "Klett-Cotta"),
         AttributeSpec(attribute: .language, shape: .text, operators: stringOperators,
-                      example: "de", needsContent: true),
+                      example: "de"),
         AttributeSpec(attribute: .text, shape: .text, operators: stringOperators,
-                      example: "Rechnungsnummer", needsContent: true),
+                      example: "Rechnungsnummer"),
         AttributeSpec(attribute: .duplicateInTarget, shape: .none, operators: boolOperators,
-                      example: "", needsContent: false)
+                      example: "")
     ]
 
     static func spec(for attribute: Attribute) -> AttributeSpec? {

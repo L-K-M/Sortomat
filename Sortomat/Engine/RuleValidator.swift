@@ -55,6 +55,25 @@ enum RuleValidator {
             }
         }
 
+        /// The condition row this finding belongs to, so the editor can draw
+        /// it against the condition rather than in a list at the bottom.
+        var conditionID: UUID? {
+            if case .condition(_, let test) = site { return test }
+            return nil
+        }
+
+        /// The action row this finding belongs to.
+        var actionID: UUID? {
+            if case .action(_, let action) = site { return action }
+            return nil
+        }
+
+        /// About the step as a whole rather than one of its rows.
+        var isAboutStepItself: Bool {
+            if case .step = site { return true }
+            return false
+        }
+
         private var siteKey: String {
             switch site {
             case .rule: return "rule"
@@ -230,11 +249,22 @@ enum RuleValidator {
         // A rule that never reads contents cannot test them, and the engine
         // says so at run time with `blockedByPrivacy` — one file at a time,
         // in a log. Here it is one line in the editor, before it ever runs.
-        if rule.privacyMode == .metadataOnly,
-           FileFacts.cost(of: test.attribute) >= .content,
-           test.attribute != .modelSays {
-            add("condition.blockedByPrivacy", .error,
-                L10n.t("validate.condition.blockedByPrivacy", test.attribute.rawValue))
+        //
+        // Which attributes those are is asked of `FileFacts`, not of the cost
+        // table. Reading `cost(of:) >= .content` as "opens the file" was wrong
+        // twice over: it made `duplicateInTarget` — a `probe` that reads a
+        // directory index and never opens anything — a red error on a rule
+        // that works, which is exactly the crying wolf this validator was
+        // written to avoid; and it called `title` impossible when Spotlight
+        // answers it for most files without the rule reading a byte.
+        if rule.privacyMode == .metadataOnly {
+            if FileFacts.alwaysNeedsContent.contains(test.attribute) {
+                add("condition.blockedByPrivacy", .error,
+                    L10n.t("validate.condition.blockedByPrivacy", test.attribute.rawValue))
+            } else if FileFacts.prefersMetadata.contains(test.attribute) {
+                add("condition.metadataOnlyValue", .warning,
+                    L10n.t("validate.condition.metadataOnlyValue", test.attribute.rawValue))
+            }
         }
         if Operator.regexes.contains(test.op), case .text(let pattern) = test.value,
            !pattern.isEmpty {

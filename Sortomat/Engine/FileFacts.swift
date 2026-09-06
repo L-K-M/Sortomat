@@ -291,6 +291,23 @@ final class FileFacts {
 
     func cost(of attribute: Attribute) -> FactCost { Self.cost(of: attribute) }
 
+    /// The attributes whose value can *only* come from reading the file's
+    /// contents, so a metadata-only rule answers them `blockedByPrivacy`
+    /// every time.
+    ///
+    /// This is deliberately not derived from `cost(of:)`: "how expensive" and
+    /// "does it open the file" are different questions, and reading the first
+    /// as the second is wrong in both directions. `duplicateInTarget` is a
+    /// `probe` — dearer than a content read — and opens nothing, while `title`
+    /// is a `content` attribute Spotlight usually answers for free.
+    static let alwaysNeedsContent: Set<Attribute> = [.publisher, .text, .contentHash]
+
+    /// Attributes that ask Spotlight first and read the file only if the index
+    /// has nothing. Under a metadata-only rule they still match — but only for
+    /// files the index already knows, which is worth saying and is not the
+    /// same as "can never match".
+    static let prefersMetadata: Set<Attribute> = [.title, .authors, .subjects, .language]
+
     /// Static because the answer is a property of the attribute, not of the
     /// file: the validator has to know what a condition would cost before
     /// there is any file to ask about.

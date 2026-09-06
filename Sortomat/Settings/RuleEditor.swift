@@ -117,6 +117,7 @@ struct RuleEditor: View {
                 // delete, and `$rule.steps[index]` then subscripts past the
                 // end. Looking the index up by id each time returns nil for a
                 // step that is gone, and the row simply isn't drawn.
+                let findings = RuleValidator.findings(for: rule)
                 ForEach(rule.steps) { step in
                     if let index = rule.steps.firstIndex(where: { $0.id == step.id }) {
                         StepCard(
@@ -125,7 +126,7 @@ struct RuleEditor: View {
                             position: index + 1,
                             canMoveUp: index > 0,
                             canMoveDown: index < rule.steps.count - 1,
-                            metadataOnly: rule.privacyMode == .metadataOnly,
+                            findings: findings.filter { $0.stepID == step.id },
                             onMoveUp: { move(step.id, by: -1) },
                             onMoveDown: { move(step.id, by: 1) },
                             onDelete: { rule.steps.removeAll { $0.id == step.id } }
