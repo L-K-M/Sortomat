@@ -60,25 +60,30 @@ Six things that cost real time to learn, in the order they will bite.
 | 2 | 18 review branches (#17–#34), composed into one train | [#35](https://github.com/L-K-M/Sortomat/pull/35) | merged; the originals are closed as integrated |
 | 4 | CI failure artifacts expire, so a red run stops failing twice | [#36](https://github.com/L-K-M/Sortomat/pull/36) | merged |
 | 4 | Engine-core hardening: fail-closed hashing, verified cross-volume moves, document packages as candidates, the classification valves | [#37](https://github.com/L-K-M/Sortomat/pull/37) | merged |
-| 5 | On-device extraction: office documents, spreadsheets, decks, OpenDocument, HTML text, Vision OCR | [#38](https://github.com/L-K-M/Sortomat/pull/38) | open, five review rounds answered |
+| 5 | On-device extraction: office documents, spreadsheets, decks, OpenDocument, HTML text, Vision OCR | [#38](https://github.com/L-K-M/Sortomat/pull/38) | open, six review rounds answered |
 | 5 | The Inbox-first main window | [#39](https://github.com/L-K-M/Sortomat/pull/39) | open |
 | 5 | Undo on the notification itself | [#40](https://github.com/L-K-M/Sortomat/pull/40) | open |
 | 5 | Guardrails: a monthly spend ceiling, power holds, a pause that survives a relaunch | [#41](https://github.com/L-K-M/Sortomat/pull/41) | open |
 | 5 | Pass efficiency: one stability pause per pass, undo that prunes its own folders, byte-aware names | [#42](https://github.com/L-K-M/Sortomat/pull/42) | open |
 | 5 | Half the CI bill, and no artifact upload | [#43](https://github.com/L-K-M/Sortomat/pull/43) | open |
 | 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | open |
-| — | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor, a dry run, a match count, and a rule validator | `claude/rule-engine-v2`, stacked on #38 | branch, no pull request yet |
+| 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46), stacked on #38 | open; had a second reader's pass |
 
 **Read this before merging anything.** #38–#43 were each green, then took one
 or more review rounds whose fixes were pushed **after GitHub Actions stopped
 running jobs on this account** — from about 18:47 UTC on 2026-09-05 every run,
-macOS and Linux alike, fails in under fifteen seconds with no runner, no steps
-and no logs, which is what an Actions spending limit looks like from the inside.
-The last commit on each of those branches has therefore never been compiled.
-When runners come back: re-run CI on each, fix what it finds, and merge in the
-order #38 → #39–#43 (only #38 has a dependent, and `claude/rule-engine-v2`
-gets its pull request once #38 is in). #43 exists partly to halve what a
-green day costs.
+macOS and Linux alike, fails in under thirty seconds with no runner, no steps
+and no logs (`get_job_logs` answers HTTP 404). The last log a runner did write,
+at 18:46, ends with *"Artifact storage quota has been hit"* — the storage
+counts against the same Actions spending limit that pays for the runners,
+which is what this looks like from the inside and why #43 removes the artifact
+upload. The last commit on each of those branches has therefore never been
+compiled; each has since had a second reader's pass for compile errors and
+logic (see §1 for what that found on the engine branch), which is not the same
+thing. When runners come back: re-run CI on each, fix what it finds, and merge
+in the order #38 → #39–#43 → #45 → #46 (only #38 has a dependent; #46 carries
+#38's commits and its diff shrinks to the engine alone once #38 is in — merge
+`origin/main` into it first).
 
 Findings closed by that work and **not** repeated below: the twenty-three
 wave-3 engine items (W1–W38); the hand-read items H-A, H-B, H-C, H-D, H-F,
@@ -91,10 +96,23 @@ P0-12 and P0-16 (globs), P0-13 (dates), P0-14 (tokens and captures), P0-15
 
 ## 1. The rule engine — the largest open piece
 
-`claude/rule-engine-v2` implements phases 1–3 of the five-phase plan: the data
-model, the pure evaluator, the fact source, lossless migration in both
-directions, the pipeline wiring, and a step editor. It is green, and stacked on
-#38 — open its pull request once that merges, when its diff is only its own.
+[#46](https://github.com/L-K-M/Sortomat/pull/46) implements phases 1–3 of the
+five-phase plan: the data model, the pure evaluator, the fact source, lossless
+migration in both directions, the pipeline wiring, a step editor, a validator,
+and the side-effect executor. Green through `26010a4`; everything after that
+was written blind (see the scoreboard) and then read by a second model, which
+found and fixed eight things worth knowing the shape of, because each is a
+class rather than a typo: the model's `folder` was never derived from its
+answer, so `{model.folder}` rendered empty through the pipeline while the unit
+test handed the engine a ready-made answer; a memo hit returned the raw routing
+and skipped the actions after `askModel`; `decide` deferred on a spent budget
+*before* the memo lookup; the resume walk skipped the actions before the
+asking one on a builder that is fresh every walk; the step count counted only
+steps that *place* a file; three `ForEach`es over `indices` crashed on delete;
+a test stub conformed to `FactSource` with one of six requirements; and a
+step's own `ModelStepOptions` were decoded, validated and never read. The
+pattern in all eight: a feature proven by a test that constructs the input the
+real caller never produces. Test through the pipeline, not beside it.
 
 **What a rule is now.** `Rule` gained `schemaVersion`, `steps`, `fallback` and
 `destinationRoots`; `preRules` survives as a downgrade projection written by a
@@ -161,14 +179,23 @@ its author; and no finding may be wrong, because a validator that cries wolf
 gets switched off. The migrated legacy rules are the yardstick — they come
 through silent.
 
-### 1.3 `dryDecide` and `matchCount` — already there
+### 1.3 `dryDecide` and `matchCount` — there, and the step pill is built on them
 
-Both exist on the branch (`Pipeline.dryDecide(file:rule:allowModel:)` returning
-a `DryRun`, and `Pipeline.matchCount(rule:limit:)` returning
-`(matched, scanned, needsModel)`), and the rule editor's "Try it" row already
-calls them. What is *not* built on top of them yet: the "● 12 match now" pill
-beside each step, the menu-bar file drop, the Inbox's Check now, and the live
-"your folder right now" pane (§7).
+Both exist (`Pipeline.dryDecide(file:rule:allowModel:)` returning a `DryRun`
+with a `matched` flag read off the trace, and `Pipeline.matchCount(rule:limit:)`
+returning `(matched, scanned, needsModel)`); the rule editor's "Try it" row
+calls them, and every `StepCard` now carries "12 of 200 files match this step",
+recounted as the conditions are typed — debounced through `task(id:)`, and
+only while every condition is answerable by a `stat`, because a content
+condition would mean one extraction per file per keystroke. What is *not* built
+on them yet: the menu-bar file drop, the Inbox's Check now, and the live "your
+folder right now" pane (§7).
+
+One thing worth doing when there is a compiler: `matchCount` runs *on* the
+`Pipeline` actor — up to five hundred `stat`s that block a pass in flight, and
+that queue behind one. Nothing in `dryDecide`, `matchCount`, `evaluationContext`
+or `candidateFiles` touches actor state, so all four can be `nonisolated`;
+the editor's counts then never wait for the watcher and never delay it. **S**
 
 ### 1.4 Nested condition groups in the editor
 
@@ -193,14 +220,40 @@ a template a person wrote. The model's answer now yields when the step places
 the file itself, and a *quarantined* answer still wins outright, because a
 guess the taxonomy refused must not end up inside a folder name.
 
-What is left is the spelling. `{ask:genre}` in a destination should imply the
-`askModel` action and bind only that token, so the rule reads as one line
-instead of two actions — and the prompt it implies ("answer with one short
-value for: genre") is better than what most people would write by hand. Nothing
-about the valves, the memo or the budget needs to change: this is a rewrite of
-the step at edit time, not a new path through the engine.
+The pipeline half had the same shape of bug and is fixed too: the answer the
+engine was handed carried only `relativePath`, so `{model.folder}` and
+`{model.filename}` rendered empty on every real file. They are now read off
+the path that is actually applied — the same one the taxonomy was checked
+against, and the only thing a remembered verdict carries — so a model that
+answered with one `relative_path`, or a memo hit, still names a folder and a
+name. A step's own prompt is applied as well (§1.6), which is what makes "ask
+for the genre" a different question from the rule's.
 
-### 1.6 Attribute gaps
+What is left is the spelling. `{ask:genre}` in a destination should imply the
+`askModel` action with the prompt "answer with one short value for: genre",
+and bind only that token, so the rule reads as one line instead of two actions.
+Nothing about the valves, the memo or the budget needs to change: this is a
+rewrite of the step at edit time — `StepCard` or a `RuleStep.desugared()` run
+on save — not a new path through the engine. **S**
+
+### 1.6 Per-step model options — applied, half-editable
+
+`ModelStepOptions` — a step's own prompt, taxonomy, privacy mode and confidence
+threshold — now lays over the rule's from the moment a step asks, so the
+question, the valves and the extraction read the same settings. The editor
+offers the prompt as the ask-the-model action's one field; taxonomy, privacy
+mode and threshold per step are still hand-edited JSON. Worth surfacing as a
+disclosure under the action rather than three more fields in the row. **S**
+
+Two smaller things on the same path, both deliberate for now: a *second*
+`askModel` further down the same step is not asked (the resume runs with the
+model disallowed, and the routing result stands), and the decision memo is
+keyed by the rule, so two steps in one rule with different prompts share
+remembered answers — the remembered path is re-routed through each step's own
+valves on every hit, which keeps the taxonomy honest but not the question.
+Neither shape appears in any rule the migration or the templates produce.
+
+### 1.7 Attribute gaps
 
 A `modelSays` **condition** is declared and wired to nothing: the fact lookup
 answers `needsModel`, only a `pass` passes, so the test is silently never true.
