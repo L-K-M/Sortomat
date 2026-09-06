@@ -169,9 +169,22 @@ capture with nothing capturing, an action naming a destination root that does
 not exist, and `askModel` with no instruction anywhere. `RuleIssues` draws them
 in the editor under "Before you enable this".
 
-What is left is where they are drawn: a per-step badge on `StepCard` and an
-inline marker on the offending condition row, rather than one list. The finding
-already carries `stepID` and the condition's `UUID`, so this is view work only.
+**Where they are drawn is now settled.** Each finding is a caption under the
+condition or action it names, with a mark in the step's header as the summary;
+`RuleIssues` keeps only what belongs to the rule as a whole and has nowhere
+else to go. The hand-rolled privacy hint in the condition row went with it.
+
+Doing that turned up the validator's one wrong finding, worth recording
+because the shape recurs: the privacy check read `FileFacts.cost(of:) >=
+.content` as "does this open the file". It is a different question.
+`duplicateInTarget` is a `probe` — dearer than a content read — that asks an
+index and opens nothing, so a working rule got a red error; and `title`,
+`authors`, `subjects` and `language` ask Spotlight first, so "can never match"
+overstated them (they are a note now). `FileFacts` names both sets beside the
+lookups that produce them, and `RuleCatalog`'s `needsContent` is derived from
+them rather than stored, because those two lists had already drifted on
+exactly that attribute — the editor stayed quiet while the validator called
+the rule broken.
 
 Two rules kept it useful and are worth keeping: an **error** is a rule that
 cannot do what it says, a **note** is a rule that works but probably surprises
