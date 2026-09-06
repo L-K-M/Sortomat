@@ -285,6 +285,10 @@ actor Pipeline {
         //    memo. Deferring at this point would have skipped that lookup.
         let context = evaluationContext(file: file, rule: rule, target: target, allowModel: true)
         var resumeToken: ResumeToken?
+        // The rule as the model will see it. A step's own prompt, taxonomy,
+        // privacy mode or threshold lays over the rule's from here on, so the
+        // question, the valves and the extraction all read the same settings.
+        var rule = rule
         switch RuleEvaluator.evaluate(context) {
         case .decided(let placement, let trace):
             return try Self.plan(from: placement, trace: trace, file: file,
@@ -293,8 +297,9 @@ actor Pipeline {
             // Unreachable with `allowModel: true`; kept so the switch stays
             // exhaustive and honest if that ever changes.
             return DecideResult(plan: nil)
-        case .needsModel(_, let token, _):
+        case .needsModel(let request, let token, _):
             resumeToken = token
+            rule = Self.applying(request.options, to: rule)
         }
 
         // 2. Content-addressed memo: identical bytes under this rule get the
@@ -529,6 +534,23 @@ actor Pipeline {
         return try Self.plan(from: placement, trace: trace, file: file, rule: rule,
                              target: target, ext: ext, usage: decided.usage,
                              usedLLM: decided.usedLLM)
+    }
+
+    /// A step's own model options laid over the rule's. All-nil — what the
+    /// migration writes, and what the editor writes until a prompt is typed —
+    /// is exactly the rule's own prompt, taxonomy, privacy mode and threshold.
+    /// Until this was applied, a per-step prompt was decoded, validated and
+    /// then ignored: the pipeline asked with the rule's prompt regardless, and
+    /// a rule whose only instruction lived on its step asked with none.
+    static func applying(_ options: ModelStepOptions, to rule: Rule) -> Rule {
+        var effective = rule
+        if let prompt = options.prompt, !prompt.trimmingCharacters(in: .whitespaces).isEmpty {
+            effective.prompt = prompt
+        }
+        if let taxonomy = options.taxonomy { effective.taxonomy = taxonomy }
+        if let privacyMode = options.privacyMode { effective.privacyMode = privacyMode }
+        if let threshold = options.confidenceThreshold { effective.confidenceThreshold = threshold }
+        return effective
     }
 
     /// The model's answer as the engine sees it. `folder` and `filename` are

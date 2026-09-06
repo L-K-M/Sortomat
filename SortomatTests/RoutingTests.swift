@@ -108,6 +108,26 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(answer.relativePath, "_Q/x.pdf")
     }
 
+    func testAStepsOwnModelOptionsLayOverTheRules() {
+        let base = Rule(name: "R", targetPath: "/t", prompt: "File invoices",
+                        taxonomy: ["A"], confidenceThreshold: 0.5)
+        XCTAssertEqual(Pipeline.applying(ModelStepOptions(), to: base), base,
+                       "all-nil options are exactly the rule's own settings")
+        let overridden = Pipeline.applying(
+            ModelStepOptions(prompt: "Name the genre", taxonomy: ["Fantasy", "Krimi"],
+                             privacyMode: .metadataOnly, confidenceThreshold: 0.9),
+            to: base
+        )
+        XCTAssertEqual(overridden.prompt, "Name the genre")
+        XCTAssertEqual(overridden.taxonomy, ["Fantasy", "Krimi"])
+        XCTAssertEqual(overridden.privacyMode, .metadataOnly)
+        XCTAssertEqual(overridden.confidenceThreshold, 0.9)
+        XCTAssertEqual(overridden.id, base.id, "the same rule, for the memo and the ledger")
+        // A blank prompt is no prompt: the rule's instruction stands.
+        XCTAssertEqual(Pipeline.applying(ModelStepOptions(prompt: "  "), to: base).prompt,
+                       "File invoices")
+    }
+
     func testASkipIsNotAnAnswerTheEngineCanResumeWith() throws {
         let c = Classification(action: "skip", reason: "not a book")
         let routing = try Pipeline.routing(for: c, rule: rule(), fileName: "x.pdf")

@@ -340,10 +340,29 @@ struct ActionRow: View {
             } else if RuleCatalog.takesTags(action.type) {
                 TextField(L10n.t("step.action.tags"), text: tagsText)
                     .textFieldStyle(.roundedBorder)
+            } else if action.type == .askModel {
+                TextField(L10n.t("step.action.prompt"), text: promptText)
+                    .textFieldStyle(.roundedBorder)
             }
             Button(action: onDelete) { Image(systemName: "minus.circle") }
                 .buttonStyle(.borderless)
         }
+    }
+
+    /// The step's own question for the model. Empty means the rule's
+    /// instruction, which is what a nil `prompt` encodes — so an emptied field
+    /// goes back to nil rather than to "", and a step with nothing else set
+    /// goes back to no options at all, which is the shape the migration writes
+    /// and the only one an older build can still read.
+    private var promptText: Binding<String> {
+        Binding(
+            get: { action.model?.prompt ?? "" },
+            set: { typed in
+                var options = action.model ?? ModelStepOptions()
+                options.prompt = typed.isEmpty ? nil : typed
+                action.model = options == ModelStepOptions() ? nil : options
+            }
+        )
     }
 
     private var tagsText: Binding<String> {
@@ -387,6 +406,9 @@ enum StepSentence {
             }
             if RuleCatalog.takesTags(action.type), !action.tags.isEmpty {
                 return "\(label) \(action.tags.joined(separator: ", "))"
+            }
+            if action.type == .askModel, let prompt = action.model?.prompt, !prompt.isEmpty {
+                return "\(label) «\(prompt)»"
             }
             return label
         }
