@@ -330,9 +330,30 @@ actor Pipeline {
         // Extraction can be real work now (OCR, office documents): run it off
         // the actor so other files keep flowing while one is being read.
         let privacyMode = rule.privacyMode
-        let description = await Task.detached(priority: .utility) {
+        // Detached so other files keep flowing. Cancellation reaches it through
+        // the handler below, and the readers poll `Task.isCancelled` between
+        // zip entries and between recognized pages — so a stopped pass drops
+        // the *next* page, not the one Vision is already inside. No explicit
+        // priority: the actor awaits this immediately, so demoting it to
+        // `.utility` could only make the pass everyone is waiting on slower.
+        // Cancellation that landed during an earlier suspension point is not
+        // observed by creating a task, so without this the most expensive work
+        // in the pass — OCR, a full document read — could still be started for
+        // a pass that was already stopped, and only noticed at the reader's
+        // next poll.
+        try Task.checkCancellation()
+        let extraction = Task.detached {
             FileContext.describe(url: file, privacyMode: privacyMode)
-        }.value
+        }
+        let description = await withTaskCancellationHandler {
+            await extraction.value
+        } onCancel: {
+            extraction.cancel()
+        }
+        // Cancelling the extraction only stops the reading. Without this, a
+        // stopped pass still went on to pay for the classification it was
+        // stopped to avoid.
+        try Task.checkCancellation()
         let result = try await client.classify(
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )

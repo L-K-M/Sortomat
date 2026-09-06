@@ -619,7 +619,7 @@ public enum L10n {
         "general.budget": "Max. Modell-Aufrufe pro Prüfung (0 = unbegrenzt): %d",
         "general.notifications": "Über einsortierte Dateien und Fehler benachrichtigen",
         "general.launchAtLogin": "Sortomat beim Anmelden starten",
-        "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet. Bei Bildern und gescannten PDFs ist der Auszug auf diesem Mac erkannter Text; sonst verlässt nichts den Rechner.",
+        "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet. Bei Bildern und gescannten PDFs ist der Auszug auf diesem Mac erkannter Text; nichts anderes verlässt den Rechner.",
 
         "path.choose": "Auswählen…",
         "path.placeholder": "/Pfad/zum/Ordner",

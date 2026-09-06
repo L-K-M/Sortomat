@@ -26,6 +26,7 @@ enum ImageText {
     // MARK: - Recognition
 
     static func recognize(imageAt url: URL) -> String {
+        guard !Task.isCancelled else { return "" }
         guard sizeAllows(url), let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return "" }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -40,6 +41,9 @@ enum ImageText {
     static func recognize(scannedPDF document: PDFDocument) -> String {
         var pieces: [String] = []
         for index in 0..<min(document.pageCount, scannedPDFPages) {
+            // Recognition is seconds per page; a stopped scan should not keep
+            // paying for pages nobody is waiting for.
+            if Task.isCancelled { break }
             guard let page = document.page(at: index) else { continue }
             let bounds = page.bounds(for: .mediaBox)
             guard bounds.width > 0, bounds.height > 0 else { continue }
@@ -54,6 +58,10 @@ enum ImageText {
     }
 
     static func recognize(_ image: CGImage) -> String {
+        // One `.accurate` request is seconds of CPU that cannot be interrupted
+        // once it starts; the cheapest place to notice a stopped pass is right
+        // before it does.
+        guard !Task.isCancelled else { return "" }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -97,8 +105,14 @@ enum ImageText {
         return facts
     }
 
-    private static func sizeAllows(_ url: URL) -> Bool {
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int64 ?? 0
+    /// Internal so the symlink behaviour can be asserted against the gate
+    /// itself rather than against `FileManager`.
+    static func sizeAllows(_ url: URL) -> Bool {
+        // `attributesOfItem` describes the *link*; `CGImageSourceCreateWithURL`
+        // follows it. A symlink to a forty-megapixel original weighed a few
+        // bytes and passed the cap that exists to stop that decode.
+        let target = url.resolvingSymlinksInPath()
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path))?[.size] as? Int64 ?? 0
         return size <= maxImageBytes
     }
 }
