@@ -194,8 +194,13 @@ folder right now" pane (§7).
 One thing worth doing when there is a compiler: `matchCount` runs *on* the
 `Pipeline` actor — up to five hundred `stat`s that block a pass in flight, and
 that queue behind one. Nothing in `dryDecide`, `matchCount`, `evaluationContext`
-or `candidateFiles` touches actor state, so all four can be `nonisolated`;
-the editor's counts then never wait for the watcher and never delay it. **S**
+or `candidateFiles` touches actor state, so all four can be `nonisolated` —
+**but only together with the caller moving off the main thread**: a
+`nonisolated` method runs on whoever calls it, and `AppState.matchCount`
+calls from `@MainActor`, so the same change without a `Task.detached` around
+the call would move those five hundred `stat`s onto the main thread and turn
+"the count waits for the watcher" into "the editor freezes". Both halves, or
+neither. **S**
 
 ### 1.4 Nested condition groups in the editor
 
