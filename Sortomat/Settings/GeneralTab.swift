@@ -40,9 +40,17 @@ struct GeneralTab: View {
                           format: .number)
                 TextField(L10n.t("general.pricing.output"), value: $state.config.outputPricePerMTok,
                           format: .number)
+                TextField(L10n.t("general.pricing.currency"), text: $state.config.currencyCode)
+                TextField(L10n.t("general.monthlyBudget"), value: $state.config.monthlyBudget,
+                          format: .number)
+                Text(L10n.t("general.monthlyBudget.help"))
+                    .font(.caption).foregroundStyle(.secondary)
                 if state.estimatedSpend > 0 {
-                    Text(L10n.t("menu.spend", state.estimatedSpendString))
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(state.withinMonthlyBudget
+                         ? L10n.t("menu.spend", state.estimatedSpendString)
+                         : L10n.t("general.monthlyBudget.reached", state.estimatedSpendString))
+                        .font(.caption)
+                        .foregroundStyle(state.withinMonthlyBudget ? Color.secondary : Color.orange)
                 }
             }
 
@@ -60,6 +68,10 @@ struct GeneralTab: View {
                     Text(L10n.t("general.budget", state.config.perScanBudget))
                 }
                 Toggle(L10n.t("general.notifications"), isOn: $state.config.notificationsEnabled)
+                Toggle(L10n.t("general.onlyOnPower"), isOn: $state.config.onlyOnPower)
+                Toggle(L10n.t("general.pauseInLowPower"), isOn: $state.config.pauseInLowPowerMode)
+                Text(L10n.t("general.power.help"))
+                    .font(.caption).foregroundStyle(.secondary)
                 // README promised this toggle all along; the SMAppService
                 // wrapper existed but was never wired to any UI.
                 Toggle(L10n.t("general.launchAtLogin"), isOn: $launchAtLogin)

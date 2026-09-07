@@ -19,12 +19,18 @@ struct JournalEntry: Codable, Identifiable, Equatable {
     /// (an undo tombstone appended by `undo`), not a new placement. Optional,
     /// so journals written before this field decode unchanged.
     var undoOf: UUID?
-    /// `size|mtime` of the placed file, captured right after the move. Undo
-    /// refuses to move back a file that no longer matches: without this, a
-    /// stale History entry would yank whatever *currently* sits at the
+    /// `size|seconds|milliseconds` of the placed file, captured right after the
+    /// move. Undo refuses to move back a file that no longer matches: without
+    /// this, a stale History entry would yank whatever *currently* sits at the
     /// destination (a replacement, a later edit) to the old source path.
     /// Optional, so journals written before this field decode unchanged.
     var destinationStamp: String?
+    /// The rule's target root at the time of the move. Undo prunes the folders
+    /// the move created on its way down, and this is where the pruning stops —
+    /// without it there is nothing to stop the walk at the user's own
+    /// configured folder. Optional, so old journals decode unchanged and
+    /// simply keep the old leave-it-behind behaviour.
+    var targetPath: String?
 
     var source: URL { URL(fileURLWithPath: sourcePath) }
     var destination: URL { URL(fileURLWithPath: destinationPath) }
@@ -175,7 +181,48 @@ enum Journal {
             at: entry.source.deletingLastPathComponent(), withIntermediateDirectories: true
         )
         try fm.moveItem(at: entry.destination, to: entry.source)
+        pruneEmptyFolders(under: entry)
         recordTombstone(for: entry)
+    }
+
+    /// Remove the now-empty folders along the move's path — including any that
+    /// existed before the move did, because nothing records which ones it
+    /// created. Undoing a batch of experiments used to leave a skeleton of
+    /// empty `Genre/Author/` directories behind, which then showed up in the
+    /// next taxonomy and in every Finder window the user opened.
+    ///
+    /// Bounded three ways, because this deletes directories: it never leaves
+    /// the rule's own target root, it stops at the first folder that still
+    /// holds something, and a folder counts as empty only when the sole thing
+    /// left in it is a `.DS_Store` that Finder wrote.
+    static func pruneEmptyFolders(under entry: JournalEntry) {
+        guard let targetPath = entry.targetPath else { return }
+        let fm = FileManager.default
+        // Both sides expanded, or neither: a journal that stores `~/Sorted`
+        // for the target and `~/Sorted/Genre/x.epub` for the destination would
+        // otherwise compare a tilde path against an expanded one, `hasPrefix`
+        // would be false, and the pruning would silently never run — in exactly
+        // the case the expansion was added to handle.
+        let root = URL(fileURLWithPath: (targetPath as NSString).expandingTildeInPath)
+            .standardizedFileURL
+        // Expanded on the *string*, before the URL exists. `URL(fileURLWithPath:)`
+        // resolves a relative path against the current directory, so by the
+        // time `entry.destination` is a URL a leading `~` sits behind a
+        // working-directory prefix and `expandingTildeInPath` no longer sees
+        // it at the front — which made the previous fix a no-op in exactly the
+        // case it was written for.
+        var folder = URL(fileURLWithPath: (entry.destinationPath as NSString).expandingTildeInPath)
+            .deletingLastPathComponent().standardizedFileURL
+        while folder.path.hasPrefix(root.path + "/") {
+            guard let contents = try? fm.contentsOfDirectory(atPath: folder.path),
+                  contents.allSatisfy({ $0 == ".DS_Store" })
+            else { return }
+            for leftover in contents {
+                try? fm.removeItem(at: folder.appendingPathComponent(leftover))
+            }
+            do { try fm.removeItem(at: folder) } catch { return }
+            folder = folder.deletingLastPathComponent().standardizedFileURL
+        }
     }
 
     private static func recordTombstone(for entry: JournalEntry) {

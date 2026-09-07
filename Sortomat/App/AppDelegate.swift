@@ -13,6 +13,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
+    /// macOS delivers the response to a click that *launched* the app as soon
+    /// as launching finishes, and drops it if no notification delegate exists
+    /// by then. Registering it here rather than in `didFinishLaunching` is what
+    /// makes Undo work on a banner left over from a previous session.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard !Self.isRunningTests else { return }
+        Notifier.prepareForLaunch()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Don't boot the full app under XCTest — the test host stays quiet.
         guard !Self.isRunningTests else { return }
@@ -32,6 +41,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpenMain: { [weak self] selection in self?.mainWindow.show(selection) },
             onCheckForUpdates: { [weak self] in Task { await self?.updateChecker.check(userInitiated: true) } }
         )
+
+        // What the buttons on a notification do. Installed before the first
+        // pass can post one.
+        Notifier.handler = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .undo(let batch):
+                // Only this case needs the state. Requiring it up front made
+                // "Show in Finder" and "Open log" — neither of which touches
+                // the app's state — inert in any situation where it were nil.
+                guard let state = self.state else { return }
+                Task { await state.undo(batch: batch, replyingToBanner: true) }
+            case .reveal(let url):
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            case .openLog:
+                NSWorkspace.shared.open(ConfigStore.logFile)
+            case .open:
+                // The Preview window this used to open is gone; the Inbox is
+                // where a pending decision lives now.
+                self.mainWindow.show(.inbox)
+            }
+        }
 
         // A real Edit menu so ⌘X/⌘C/⌘V/⌘A/⌘Z work in text fields, and ⌘0 to
         // bring the main window back once it has been closed. Built after the

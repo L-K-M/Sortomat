@@ -78,7 +78,7 @@ actor Pipeline {
     /// (used by the preview window). `batchID` groups every journaled move of
     /// one pass so it can be undone together. Returns entries + plans + usage.
     func scan(rule: Rule, config: Config, apiKey: String, forcePreview: Bool = false,
-              batchID: UUID = UUID()) async -> ScanResult {
+              batchID: UUID = UUID(), modelAllowed: Bool = true) async -> ScanResult {
         guard rule.enabled else { return ScanResult() }
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
@@ -98,8 +98,15 @@ actor Pipeline {
         // Without a key (when the provider needs one), deterministic pre-rules
         // still run — free, predictable sorting isn't held hostage by the key
         // field. Only files that would need the model are deferred.
-        let llmAvailable = !(config.providerRequiresKey && apiKey.isEmpty)
+        // `modelAllowed` is the caller's veto — a monthly spend ceiling reached,
+        // or a laptop on battery. It takes the same path as a missing key:
+        // steps still run and file what they can for free, and only the files
+        // that would have cost money wait for the next pass.
+        let llmAvailable = modelAllowed && !(config.providerRequiresKey && apiKey.isEmpty)
         let candidates = candidateFiles(in: watch, target: target, rule: rule)
+        // One pause for the pass, before any file is looked at — see
+        // `settledPaths`.
+        let settled = candidates.isEmpty ? [] : await Self.settledPaths(among: candidates)
 
         var budgetRemaining = config.perScanBudget > 0 ? config.perScanBudget : Int.max
         var result = ScanResult()
@@ -135,7 +142,7 @@ actor Pipeline {
                     group.addTask { [self] in
                         await process(file: file, rule: rule, target: target, config: config,
                                       apiKey: apiKey, previewing: previewing, allowLLM: allowLLM,
-                                      batchID: batchID)
+                                      batchID: batchID, settled: settled)
                     }
                 }
                 for await outcome in group {
@@ -167,7 +174,9 @@ actor Pipeline {
         if keyDeferred > 0 {
             result.entries.append(ActivityEntry(
                 ok: true,
-                message: L10n.plural("activity.keyDeferred", keyDeferred, rule.name)
+                message: modelAllowed
+                    ? L10n.plural("activity.keyDeferred", keyDeferred, rule.name)
+                    : L10n.plural("activity.modelHeld", keyDeferred, rule.name)
             ))
         }
         return result
@@ -187,8 +196,16 @@ actor Pipeline {
 
     private func process(
         file: URL, rule: Rule, target: URL, config: Config,
-        apiKey: String, previewing: Bool, allowLLM: Bool, batchID: UUID
+        apiKey: String, previewing: Bool, allowLLM: Bool, batchID: UUID,
+        settled: Set<String>
     ) async -> FileOutcome? {
+        // Checked before the ledger reservation below so an unsettled file is
+        // simply counted and retried, never marked in flight.
+        guard settled.contains(file.path) else {
+            var outcome = FileOutcome()
+            outcome.unstable = true
+            return outcome
+        }
         let fingerprint = Ledger.fingerprint(file)
         let ledgerKey = ledger.key(ruleID: rule.id, fingerprint: fingerprint)
 
@@ -200,11 +217,6 @@ actor Pipeline {
         inFlight.insert(ledgerKey)
         defer { inFlight.remove(ledgerKey) }
 
-        guard await isStable(file) else {
-            var outcome = FileOutcome()
-            outcome.unstable = true
-            return outcome
-        }
 
         var outcome = FileOutcome()
         do {
@@ -710,14 +722,15 @@ actor Pipeline {
                         ruleID: plan.ruleID, ruleName: plan.ruleName,
                         sourcePath: plan.source.path, destinationPath: url.path,
                         wasCopy: plan.copyInsteadOfMove, reason: plan.reason,
-                        batchID: batchID, destinationStamp: Journal.stamp(of: url)
+                        batchID: batchID, destinationStamp: Journal.stamp(of: url),
+                        targetPath: target.path
                     ))
                     // After the journal, never before: a side effect that
                     // fails must not be able to cost the user their undo.
                     ActionExecutor.apply(plan.sideEffects, to: url)
                     return ActivityEntry(ok: true,
                                          message: filedMessage(plan, finalURL: url, target: target, name: name),
-                                         kind: .filed)
+                                         kind: .filed, placed: url)
                 case .duplicate(let url):
                     ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .done)
                     return ActivityEntry(ok: true, message: L10n.t("activity.duplicate", rule.name, name, url.lastPathComponent))
@@ -841,18 +854,49 @@ actor Pipeline {
         return urls.sorted { $0.path < $1.path }
     }
 
-    private func isStable(_ url: URL) async -> Bool {
-        let fm = FileManager.default
-        guard let attrs = try? fm.attributesOfItem(atPath: url.path),
-              let modified = attrs[.modificationDate] as? Date
-        else { return false }
-        // abs(): a modification date in the *future* (bad camera clock, sloppy
-        // stamping by a downloader) must not park the file forever — the size
-        // probe below still catches files that are actively being written.
-        guard abs(Date().timeIntervalSince(modified)) > 5 else { return false }
-        let before = Self.sizeSignature(of: url)
-        try? await Task.sleep(nanoseconds: 700_000_000)
-        return before != nil && before == Self.sizeSignature(of: url)
+    /// How long the probe waits between its two looks at an item's size.
+    static let stabilityPause: UInt64 = 700_000_000
+
+    /// A file has to be older than this before its size is compared at all —
+    /// something written a moment ago is still in flight whatever the size says.
+    static let stabilityAge: TimeInterval = 5
+
+    /// Which of these items have settled: not still being written.
+    ///
+    /// One pause for the whole pass, not one per file. The probe used to run
+    /// inside the per-file path, so with the default concurrency of 2 a
+    /// thousand-file backlog spent five hundred sleeps of 0.7 s — about six
+    /// minutes — doing nothing at all, on every pass, until the backlog
+    /// cleared. Stat everything, wait once, stat everything again: 0.7 s
+    /// however many items it holds.
+    static func settledPaths(among urls: [URL], pause: UInt64 = stabilityPause) async -> Set<String> {
+        let now = Date()
+        var before: [String: String] = [:]
+        for url in urls {
+            guard let modified = (try? FileManager.default
+                    .attributesOfItem(atPath: url.path))?[.modificationDate] as? Date,
+                  // abs(): a modification date in the *future* (a bad camera
+                  // clock, a sloppy downloader) must not park the item
+                  // forever — the size comparison still catches one that is
+                  // actively growing.
+                  abs(now.timeIntervalSince(modified)) > stabilityAge,
+                  let signature = sizeSignature(of: url)
+            else { continue }
+            before[url.path] = signature
+        }
+        guard !before.isEmpty else { return [] }
+        try? await Task.sleep(nanoseconds: pause)
+        // `try?` swallows the cancellation, so a stopped pass would fall
+        // straight through: the second stat runs a microsecond after the
+        // first, every size matches, and the whole batch is declared settled —
+        // one cancellation turning into a batch of files filed mid-write.
+        // Nothing settled: they are all retried on the next pass.
+        if Task.isCancelled { return [] }
+        var settled: Set<String> = []
+        for (path, signature) in before where sizeSignature(of: URL(fileURLWithPath: path)) == signature {
+            settled.insert(path)
+        }
+        return settled
     }
 
     /// The byte count of a file, or "item count|total bytes" for a package —

@@ -15,12 +15,30 @@ struct ActivityEntry: Identifiable, Equatable {
     let ok: Bool
     let message: String
     let kind: Kind
+    /// Where the file actually landed, for a `.filed` entry. The message is a
+    /// sentence for a log; a notification that offers "Show in Finder" needs
+    /// the path itself, and re-parsing it out of the sentence would break in
+    /// German first.
+    let placed: URL?
 
-    init(ok: Bool, message: String, date: Date = Date(), kind: Kind? = nil) {
+    init(ok: Bool, message: String, date: Date = Date(), kind: Kind? = nil, placed: URL? = nil) {
+        // A `.filed` entry with no path is what the notification summary reads
+        // as "nothing was filed": the banner loses the file names, the folder,
+        // and with them the Undo and Show-in-Finder buttons, while the count
+        // still says five. There is one such call site today.
+        //
+        // `assert` is compiled out under `-O`, so this catches a second call
+        // site while it is being written and in the test run, not in a shipped
+        // build. That is the trade worth making: a banner with no buttons is
+        // not worth a `precondition` that would kill a file-organizing app
+        // mid-pass over it.
+        assert(kind != .filed || placed != nil,
+               "ActivityEntry: a .filed entry needs the path it landed at")
         self.ok = ok
         self.message = message
         self.date = date
         self.kind = kind ?? (ok ? .info : .failed)
+        self.placed = placed
     }
 }
 

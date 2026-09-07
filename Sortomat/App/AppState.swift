@@ -8,10 +8,25 @@ import SwiftUI
 /// the Pipeline.
 @MainActor
 final class AppState: ObservableObject {
-    @Published var config: Config
-    @Published var paused = false {
-        didSet { if !paused { requestScan() } }
+    @Published var config: Config {
+        // Two writable copies of one switch drift the moment anything writes
+        // the config side — a settings toggle bound straight to it, a config
+        // import, a restore. The guard in `paused.didSet` stops the loop.
+        didSet { if config.paused != paused { paused = config.paused } }
     }
+    /// The emergency brake. Written through to the config so it survives a
+    /// relaunch — including the relaunch the update checker offers.
+    @Published var paused: Bool {
+        didSet {
+            guard paused != config.paused else { return }
+            config.paused = paused
+            persistAndApply()
+            if !paused { requestScan() }
+        }
+    }
+    /// Why passes are being held right now, in the user's words, or nil when
+    /// they aren't. A brake nobody can see is indistinguishable from a bug.
+    @Published private(set) var holdReason: String?
     @Published var activity: [ActivityEntry] = []
     @Published var pendingActions: [PlannedAction] = []
     @Published var lastScan: Date?
@@ -29,6 +44,10 @@ final class AppState: ObservableObject {
     private var scanRequested = false
     private var scanRunning = false
     private var timerTask: Task<Void, Never>?
+    /// The interval the running timer is actually sleeping on, so a change can
+    /// be noticed. Without it, dropping 600 s to 15 s took up to ten minutes to
+    /// take effect — the length of the sleep already in progress.
+    private var timerInterval: Double = 0
     private var followUpScheduled = false
     /// Exclusive claim on the config directory for this process's lifetime.
     /// nil means another Sortomat process (usually a headless run) holds it;
@@ -49,6 +68,7 @@ final class AppState: ObservableObject {
     init() {
         let loaded = ConfigStore.load()
         config = loaded
+        paused = loaded.paused
         apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && loaded.providerRequiresKey
         if processLock == nil {
             ConfigStore.appendLog(L10n.t("process.lockWarning"))
@@ -71,7 +91,70 @@ final class AppState: ObservableObject {
     }
 
     var estimatedSpendString: String {
-        String(format: "$%.4f", estimatedSpend)
+        Self.money(estimatedSpend, code: config.currencyCode)
+    }
+
+    /// Four decimals because a single classification costs fractions of a cent,
+    /// and a meter that reads "0.00" for the first two hundred files teaches
+    /// the user that it doesn't work.
+    nonisolated static func money(_ amount: Double, code: String,
+                                  locale: Locale = .current) -> String {
+        moneyFormatter(code: code, locale: locale).string(from: NSNumber(value: amount))
+            ?? String(format: "%.4f %@", amount, code)
+    }
+
+    /// Locale placement and separators, not a hardcoded leading "$" and a
+    /// decimal point, for a German user paying a European provider in EUR.
+    /// The locale is a parameter so a test can compare against the same
+    /// formatter instead of against ASCII digits: a machine set to `ar_SA`
+    /// renders `١٫٢٣٤٥`, and asserting on the literal "2345" would fail there
+    /// while the code did exactly the right thing.
+    nonisolated static func moneyFormatter(code: String, locale: Locale) -> NumberFormatter {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .currency
+        formatter.currencyCode = code
+        formatter.minimumFractionDigits = 4
+        formatter.maximumFractionDigits = 4
+        return formatter
+    }
+
+    /// Whether an estimated spend is still under a ceiling. 0 = no ceiling.
+    /// Pure, so the one comparison that stands between a misbehaving rule and
+    /// a real bill can be tested without a running app. (`nonisolated` here and
+    /// below: `AppState` is `@MainActor`, which isolates its statics too, and
+    /// these touch nothing on the actor.)
+    nonisolated static func withinBudget(spend: Double, ceiling: Double) -> Bool {
+        ceiling <= 0 || spend < ceiling
+    }
+
+    /// `usage` is already scoped to the calendar month — `SpendStore.load`
+    /// discards a record from another month and `accumulate` restarts the
+    /// counter when the key rolls over — so `estimatedSpend` *is* this month's
+    /// spend, and the ceiling lifts by itself on the first of the month.
+    ///
+    /// The ceiling is a soft one: it is re-read between rules, not between
+    /// files, so one rule over a very large folder can overshoot before the
+    /// next rule is held. `perScanBudget` is the hard cap on a single burst;
+    /// this is the cap on the month.
+    var withinMonthlyBudget: Bool {
+        Self.withinBudget(spend: estimatedSpend, ceiling: config.monthlyBudget)
+    }
+
+    /// Why a pass may not run, given the settings and the machine's state, or
+    /// nil when it may. Deliberately separate from `paused`: this one
+    /// re-answers itself as the machine changes, so unplugging holds and
+    /// plugging back in resumes without anyone touching a switch.
+    nonisolated static func hold(for config: Config, lowPower: Bool, onBattery: Bool) -> String? {
+        if config.pauseInLowPowerMode, lowPower { return L10n.t("hold.lowPower") }
+        if config.onlyOnPower, onBattery { return L10n.t("hold.onBattery") }
+        return nil
+    }
+
+    func scanHold() -> String? {
+        Self.hold(for: config,
+                  lowPower: PowerSource.isInLowPowerMode,
+                  onBattery: PowerSource.isOnBattery)
     }
 
     // MARK: - Config persistence
@@ -85,6 +168,7 @@ final class AppState: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             ConfigStore.save(self.config)
             self.apiKeyMissing = (Keychain.apiKey() ?? "").isEmpty && self.config.providerRequiresKey
+            self.restartTimerIfIntervalChanged()
             self.rebuildWatchers()
             await self.invalidateStalePreviews()
         }
@@ -263,16 +347,46 @@ final class AppState: ObservableObject {
     // MARK: - Scanning
 
     private func startTimer() {
+        timerInterval = config.scanIntervalSeconds
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 let interval = await MainActor.run { self?.config.scanIntervalSeconds ?? 60 }
-                // Clamp before converting: a hand-edited absurd interval must
-                // not trap in the UInt64(Double) conversion at launch.
-                let seconds = interval.isFinite ? min(max(interval, 10), 86_400) : 60
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                do {
+                    try await Task.sleep(nanoseconds: Self.timerNanoseconds(for: interval))
+                } catch {
+                    // Cancelled: a restart is replacing this timer. `try?`
+                    // would have fallen through to `requestScan`, so every
+                    // debounced nudge of the interval slider fired a full pass.
+                    return
+                }
                 await MainActor.run { self?.requestScan() }
             }
         }
+    }
+
+    /// Clamped before converting: a hand-edited absurd interval must not trap
+    /// in the `UInt64(Double)` conversion at launch, and a NaN would trap
+    /// outright. `nonisolated` because `AppState` is `@MainActor`, which
+    /// isolates its statics too, and this one touches nothing on the actor.
+    nonisolated static func timerNanoseconds(for interval: Double) -> UInt64 {
+        let seconds = interval.isFinite ? min(max(interval, 10), 86_400) : 60
+        return UInt64(seconds * 1_000_000_000)
+    }
+
+    /// Cancel the sleep in progress and start the new one. A slider is a
+    /// promise about how soon something happens; honouring it only after the
+    /// *old* interval elapses makes the control feel broken at exactly the
+    /// moment someone is testing it.
+    private func restartTimerIfIntervalChanged() {
+        // Only ever *replaces* a running timer. Without the first condition a
+        // config save reaching this before `startTimer` ever ran — or after
+        // something deliberately stopped it — would start one from nothing,
+        // because `timerInterval` begins at a sentinel that mismatches every
+        // real value.
+        guard let timerTask, !timerTask.isCancelled,
+              config.scanIntervalSeconds != timerInterval else { return }
+        timerTask.cancel()
+        startTimer()
     }
 
     /// Coalesces watcher events and timer ticks into single scan passes.
@@ -292,6 +406,12 @@ final class AppState: ObservableObject {
         while scanRequested {
             scanRequested = false
             guard !paused else { return }
+            // Re-checked every pass, not once at launch: the answer changes
+            // when the user unplugs, and the timer keeps ticking so the hold
+            // lifts by itself.
+            let hold = scanHold()
+            holdReason = hold
+            guard hold == nil else { return }
             // No early bail on a missing key: the pipeline runs deterministic
             // pre-rules regardless and defers only the files that need the model.
             let apiKey = Keychain.apiKey() ?? ""
@@ -303,13 +423,16 @@ final class AppState: ObservableObject {
                 // Re-read per rule so selecting a rule to edit mid-pass takes
                 // effect immediately (rather than one stale execution).
                 if rule.id == editingRuleID { continue }
+                // Re-read per rule so a ceiling reached mid-pass stops the
+                // *next* rule rather than only the next pass.
                 let result = await pipeline.scan(
-                    rule: rule, config: snapshot, apiKey: apiKey, batchID: batchID
+                    rule: rule, config: snapshot, apiKey: apiKey, batchID: batchID,
+                    modelAllowed: withinMonthlyBudget
                 )
                 ingest(result)
                 passResults.append(result)
             }
-            notify(pass: passResults)
+            notify(pass: passResults, batch: batchID)
             await pipeline.persist()
             pruneStalePending()
             persistSpend()
@@ -375,13 +498,16 @@ final class AppState: ObservableObject {
     /// notifying from `ingest` produced once more than one rule was active.
     /// A missing watch folder alerts once per outage; the log still records
     /// every pass, and `ingest` re-arms the alert when the folder returns.
-    private func notify(pass results: [ScanResult]) {
+    private func notify(pass results: [ScanResult], batch: UUID?) {
         guard config.notificationsEnabled else { return }
         let entries = results.flatMap(\.entries)
 
-        let filed = entries.filter { $0.kind == .filed }.count
-        if filed > 0 {
-            Notifier.post(title: "Sortomat", body: L10n.plural("notify.filed", filed))
+        let filed = entries.filter { $0.kind == .filed }
+        if !filed.isEmpty {
+            // The banner carries Undo and Show in Finder, so it needs the paths
+            // as well as the count — "Sortomat / Filed 5 files." told you
+            // something had happened and nothing about what.
+            Notifier.postFiled(filed.compactMap(\.placed), count: filed.count, batch: batch)
         }
 
         let failures = entries.filter { $0.kind == .failed }
@@ -389,7 +515,7 @@ final class AppState: ObservableObject {
             let body = failures.count == 1
                 ? first.message
                 : L10n.plural("notify.failuresMore", failures.count - 1, first.message)
-            Notifier.post(title: "Sortomat", body: body)
+            Notifier.postFailed(count: failures.count, message: body)
         }
 
         // Outages are their own bucket so a folder that stays missing doesn't
@@ -412,12 +538,14 @@ final class AppState: ObservableObject {
         var passResults: [ScanResult] = []
         for rule in snapshot.rules.inExecutionOrder() {
             let result = await pipeline.scan(
-                rule: rule, config: snapshot, apiKey: apiKey, forcePreview: true
+                rule: rule, config: snapshot, apiKey: apiKey, forcePreview: true,
+                modelAllowed: withinMonthlyBudget
             )
             ingest(result)
             passResults.append(result)
         }
-        notify(pass: passResults)
+        // A refreshed preview files nothing, so there is no batch to undo.
+        notify(pass: passResults, batch: nil)
         pruneStalePending()
         // A preview can spend real tokens; without this the meter only reached
         // disk on the next scan pass or at quit.
@@ -479,12 +607,47 @@ final class AppState: ObservableObject {
 
     // MARK: - Undo
 
-    /// Undo one *named* batch — the one an Apply just wrote, rather than
-    /// whichever is newest by the time the user clicks.
+    /// Undo one *named* batch — the one an Apply just wrote, or the pass a
+    /// notification is about — rather than whichever is newest by the time the
+    /// user clicks. A banner from ten minutes ago must not quietly undo
+    /// whatever has happened since.
+    ///
+    /// `replyingToBanner` is for the caller that has nowhere to show a result.
+    /// A click on a banner's Undo happens with no window in sight, so without a
+    /// word back the user pressed a button that moves files and got no signal
+    /// that it worked, or that half of it didn't. The Inbox says so itself and
+    /// asks for no banner, because being told twice about a thing you are
+    /// looking at is how notifications teach people to dismiss them unread.
+    ///
+    /// Named for where the call came from rather than for what it does,
+    /// because everything below rests on there being exactly one such caller.
     @discardableResult
-    func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
+    func undo(batch id: UUID, replyingToBanner: Bool = false) async -> UndoOutcome {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
-        return await reverse(entries.filter { $0.batchID == id })
+        let result = await reverse(entries.filter { $0.batchID == id })
+        // Every outcome, including the empty one. `Journal.recent` folds away a
+        // move that has already been reversed, so an Undo pressed on a banner
+        // that has been sitting in Notification Center since yesterday finds
+        // nothing to do — and the old `> 0` guard turned that into silence,
+        // which is precisely the "did anything happen?" the button exists to
+        // answer.
+        //
+        // Not gated on `notificationsEnabled`, deliberately. This is a reply
+        // to something the user just pressed, not an unsolicited banner: the
+        // setting means "don't tell me about passes I didn't ask about", and
+        // turning it off between a banner arriving and its Undo being pressed
+        // must not be what makes that press silent.
+        //
+        // What this cannot promise is delivery. With notification permission
+        // revoked at the OS level `Notifier.post` no-ops, and the press is
+        // silent again — a case only a window can answer, not a banner.
+        if replyingToBanner {
+            let text = NotificationText.undoResult(
+                undone: result.undone, failed: result.failed, firstFailure: result.firstFailure
+            )
+            Notifier.post(title: text.title, body: text.body)
+        }
+        return result
     }
 
     /// Undo a journaled placement *and* pin the restored file as skipped in
@@ -505,7 +668,7 @@ final class AppState: ObservableObject {
 
     /// Undo the newest batch — one scan pass or one approved preview. Returns
     /// how many entries were reversed and how many refused.
-    func undoLastBatch() async -> (undone: Int, failed: Int) {
+    func undoLastBatch() async -> UndoOutcome {
         // The whole journal, not a 500-entry window: one pass over a big
         // folder can exceed it, and `lastBatch` would then reverse part of the
         // batch while reporting the whole thing undone.
@@ -513,17 +676,33 @@ final class AppState: ObservableObject {
         return await reverse(Journal.lastBatch(in: entries))
     }
 
-    private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {
-        var undone = 0, failed = 0
+
+    /// What one undo actually did. Counts alone can't say *why* a file refused
+    /// to move back, and the reason — something else is at that path now, the
+    /// copy was edited since — is the only part of a failure the user can act
+    /// on. It was being caught and thrown away.
+    struct UndoOutcome {
+        var undone = 0
+        var failed = 0
+        var firstFailure: String?
+    }
+
+    private func reverse(_ entries: [JournalEntry]) async -> UndoOutcome {
+        var result = UndoOutcome()
         for entry in entries {
             do {
                 try await undo(entry, persisting: false)
-                undone += 1
+                result.undone += 1
             } catch {
-                failed += 1
+                result.failed += 1
+                if result.firstFailure == nil {
+                    result.firstFailure = L10n.t("journal.undoFailed",
+                                                 entry.destination.lastPathComponent,
+                                                 error.localizedDescription)
+                }
             }
         }
         await pipeline.persist() // once for the batch, not once per entry
-        return (undone, failed)
+        return result
     }
 }
