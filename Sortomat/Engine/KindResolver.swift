@@ -154,7 +154,7 @@ enum MagicBytes {
             // this resolver exists to prevent, and only for the extensionless
             // files that reach the sniffer at all.
             if ["M4A", "M4B", "M4P"].contains(where: brand.hasPrefix) { return .audio }
-            let image = ["hei", "hev", "mif", "msf", "avi"]
+            let image = ["hei", "hev", "mif", "msf", "avi", "avci"]
             return image.contains(where: brand.hasPrefix) ? .image : .video
         }
         if starts([0x50, 0x4B, 0x03, 0x04]) { return .archive }                   // zip

@@ -822,6 +822,25 @@ final class RuleCodableTests: XCTestCase {
         XCTAssertEqual(rule.fallback, .askModel, "an unclaimed file still goes to the model")
     }
 
+    func testALegacyConfigThatNamesItsFallbackKeepsIt() throws {
+        // `upgrade` always answers `.askModel`, and the decoder took that
+        // answer even when the config had spelled a different one out. The
+        // memberwise initializer has guarded this all along, with a comment
+        // about two sites that must agree — this is the site that did not.
+        let rule = try decodeRule(#"""
+        {"name":"R","schemaVersion":1,"fallback":"skip",
+         "preRules":[{"name":"Old","match":"glob","pattern":"*.pdf","action":"skip"}]}
+        """#)
+        XCTAssertEqual(rule.steps.count, 1, "the pre-rule still becomes a step")
+        XCTAssertEqual(rule.fallback, .skip, "and the config's own fallback survives it")
+        // A legacy config that says nothing still gets the legacy default.
+        let quiet = try decodeRule(#"""
+        {"name":"R","schemaVersion":1,
+         "preRules":[{"name":"Old","match":"glob","pattern":"*.pdf","action":"skip"}]}
+        """#)
+        XCTAssertEqual(quiet.fallback, .askModel)
+    }
+
     func testValuesKeepTheirJSONType() throws {
         let rule = try decodeRule("""
         {"name":"R","steps":[{"when":{"all":[
@@ -1019,6 +1038,19 @@ final class LegacyMigrationTests: XCTestCase {
         // Literal braces survive into a language where braces are placeholders.
         XCTAssertEqual(LegacyMigration.route("Sorted {stuff}/{name}"),
                        "Sorted {{stuff}}/{stem}")
+    }
+
+    func testAnEscapedBraceThatSpellsALegacyTokenIsNotProjected() {
+        // `{{name}}` is the literal text «{name}» in this language and a live
+        // placeholder in the old one, so restoring the braces would rename the
+        // file after whatever the old engine substitutes — the same widening
+        // the glob projection refuses.
+        XCTAssertNil(LegacyMigration.legacyRoute("Archiv/{{name}}"))
+        XCTAssertNil(LegacyMigration.legacyRoute("{{year}}/{stem}"))
+        // Braces that spell anything else are still literal in both, which is
+        // what `route` writes for a legacy folder called «{stuff}».
+        XCTAssertEqual(LegacyMigration.legacyRoute("Sorted {{stuff}}/{stem}"),
+                       "Sorted {stuff}/{name}")
     }
 
     func testAMigratedRuleProjectsBackToTheSamePreRules() throws {

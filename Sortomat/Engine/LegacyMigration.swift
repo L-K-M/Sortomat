@@ -332,6 +332,13 @@ enum LegacyMigration {
         let remaining = TokenTemplate(text).tokens
         let legacyTokens: Set<String> = ["name", "ext", "year", "month", "day"]
         guard remaining.allSatisfy({ legacyTokens.contains($0) }) else { return nil }
+        // `{{name}}` is the literal text «{name}» here and a live placeholder
+        // in the old build, so restoring the braces would turn a file called
+        // `{name}.pdf` into whatever the old engine substitutes. The same
+        // widening the glob projection refuses, one syntax along.
+        for token in legacyTokens where text.contains("\u{0001}\(token)\u{0002}") {
+            return nil
+        }
         text = text.replacingOccurrences(of: "\u{0001}", with: "{")
         text = text.replacingOccurrences(of: "\u{0002}", with: "}")
         return text

@@ -241,7 +241,11 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
             let upgraded = LegacyMigration.upgrade(preRules: preRules,
                                                    copyInsteadOfMove: copyInsteadOfMove)
             steps = upgraded.steps
-            fallback = upgraded.fallback
+            // The same guard the memberwise initializer carries, whose comment
+            // says why: two sites that must agree and don't quite are how this
+            // codebase has been bitten before. A config that spells its
+            // fallback out keeps it; only the legacy default gives way.
+            if fallback == .askModel { fallback = upgraded.fallback }
         }
         if schemaVersion < Rule.currentSchema { schemaVersion = Rule.currentSchema }
     }
