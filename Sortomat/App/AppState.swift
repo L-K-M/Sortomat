@@ -595,7 +595,14 @@ final class AppState: ObservableObject {
         // nothing to do — and the old `> 0` guard turned that into silence,
         // which is precisely the "did anything happen?" the button exists to
         // answer.
-        if announcing, config.notificationsEnabled {
+        //
+        // Not gated on `notificationsEnabled`, deliberately. `announcing` is
+        // set by exactly one caller — the handler for a button *on a banner* —
+        // so this is a reply to something the user just pressed, not an
+        // unsolicited banner. The setting means "don't tell me about passes I
+        // didn't ask about"; turning it off between a banner arriving and its
+        // Undo being pressed must not be what makes that press silent.
+        if announcing {
             let text = NotificationText.undoResult(
                 undone: result.undone, failed: result.failed, firstFailure: result.firstFailure
             )

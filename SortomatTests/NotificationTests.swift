@@ -87,19 +87,33 @@ final class NotificationTests: XCTestCase {
 
     func testUndoThatPartlyRefusedReportsBothHalves() {
         L10n.forcedLanguage = "en"
-        let text = NotificationText.undoResult(undone: 2, failed: 1, firstFailure: "why")
+        // Some back, some refused — the commonest way to meet a refusal, and
+        // so the last place the reason should go missing.
+        let text = NotificationText.undoResult(
+            undone: 2, failed: 1, firstFailure: "Couldn't undo a.pdf: something else is there now"
+        )
         XCTAssertTrue(text.title.contains("2"), "got: \(text.title)")
         XCTAssertTrue(text.body.contains("1"), "got: \(text.body)")
+        XCTAssertTrue(text.body.contains("something else is there now"),
+                      "the mixed case drops the reason: \(text.body)")
     }
 
     func testUndoResultReadsInGermanToo() {
         L10n.forcedLanguage = "de"
+        // Assert the German, not merely the absence of a raw key: every one of
+        // these strings is built on *zurücklegen*, so a fall back to the
+        // English table would show. This is the same trap
+        // `testSummaryReadsInGermanToo` was in.
         for text in [NotificationText.undoResult(undone: 0, failed: 0),
                      NotificationText.undoResult(undone: 0, failed: 2, firstFailure: "warum"),
-                     NotificationText.undoResult(undone: 3, failed: 1)] {
+                     NotificationText.undoResult(undone: 3, failed: 1, firstFailure: "warum")] {
             XCTAssertFalse(text.title.contains("notify."), "renders a raw key: \(text.title)")
             XCTAssertFalse(text.body.contains("notify."), "renders a raw key: \(text.body)")
+            XCTAssertTrue(text.title.contains("zurück"), "fell back to English: \(text.title)")
         }
+        // And the one body that is entirely ours to translate.
+        let nothing = NotificationText.undoResult(undone: 0, failed: 0)
+        XCTAssertTrue(nothing.body.contains("zurückgelegt"), "got: \(nothing.body)")
     }
 
     // MARK: - Where they went

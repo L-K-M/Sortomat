@@ -42,14 +42,23 @@ enum NotificationText {
             return (L10n.t("notify.undoNothing"), L10n.t("notify.undoNothing.body"))
         }
         // Nothing moved and something refused: lead with the refusal rather
-        // than with "Put 0 files back", and carry the reason — "something else
-        // is at that path now" is the only part of this the user can act on.
+        // than with "Put 0 files back".
         if undone == 0 {
-            return (L10n.plural("notify.undoFailed", failed),
-                    firstFailure ?? "")
+            return (L10n.plural("notify.undoFailed", failed), firstFailure ?? "")
         }
-        return (L10n.plural("notify.undone", undone),
-                failed > 0 ? L10n.plural("notify.undoFailed", failed) : "")
+        return (L10n.plural("notify.undone", undone), refusal(failed, firstFailure))
+    }
+
+    /// The count *and* the reason, for every branch that reports a refusal.
+    /// "Something else is at that path now" is the only part of a failure the
+    /// user can act on, and a partial batch — some files back, some refused —
+    /// is the commonest way to meet one. Reporting the reason in the
+    /// all-refused case and dropping it in the mixed case would make the more
+    /// likely message the less useful one.
+    private static func refusal(_ failed: Int, _ firstFailure: String?) -> String {
+        guard failed > 0 else { return "" }
+        return [L10n.plural("notify.undoFailed", failed), firstFailure ?? ""]
+            .filter { !$0.isEmpty }.joined(separator: " — ")
     }
 
     /// The deepest folder that contains all of them — the one place a person

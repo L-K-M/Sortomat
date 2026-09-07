@@ -101,7 +101,7 @@ struct HistoryView: View {
             if result.failed > 0 {
                 error = [L10n.plural("journal.undoBatchFailed", result.failed),
                          result.firstFailure ?? ""]
-                    .filter { !$0.isEmpty }.joined(separator: " ")
+                    .filter { !$0.isEmpty }.joined(separator: " — ")
             }
         }
     }
