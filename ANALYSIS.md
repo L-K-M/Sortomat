@@ -87,10 +87,10 @@ Seven things that cost real time to learn, in the order they will bite.
 | 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | merged |
 | 5 | The wave-4 review record kept in the tree (`fable.md`) | [#44](https://github.com/L-K-M/Sortomat/pull/44) | merged |
 | 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46) | open: green on `0f30b91`, 372 tests, awaiting a review round |
-| 5 | Undo that says so when there is nothing left to undo, and a batch undo that says why it refused | [#47](https://github.com/L-K-M/Sortomat/pull/47) | open: green, 306 tests, two review rounds answered |
+| 5 | Undo that says so when there is nothing left to undo, and a batch undo that says why it refused | [#47](https://github.com/L-K-M/Sortomat/pull/47) | merged, four review rounds |
 
-**Wave 5 is on `main` except for the last two, which are green and waiting on
-a review round** (#46, #47 — merge them and this table needs one edit). Getting
+**Wave 5 is on `main` except for the engine, which is green and waiting on a
+review round** (#46 — merge it and this table needs one edit). Getting
 here took a two-day detour worth one sentence of memory: the last third of the
 wave was written with no compiler at all, because CI was down for the reason in
 trap 7 above, and each branch got a second reader's pass instead. That pass
