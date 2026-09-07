@@ -369,7 +369,9 @@ def _filtered(line, prev, bpp):
     # built with zip, which stops at the shorter of the two and would hand
     # back a short scanline that still encodes cleanly and decodes to garbage.
     if len(prev) != stride:
-        raise ValueError(f"previous row is {len(prev)} bytes, not {stride}")
+        raise ValueError(
+            f"scanline is {stride} bytes but the previous row is {len(prev)}"
+        )
     # A fully transparent row — every margin row of a margined icon, about a
     # fifth of them — has nothing to predict from. Filter 0 scores zero, which
     # is the floor, and `min` keeps the first of equal scores, so the search
