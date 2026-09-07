@@ -604,6 +604,10 @@ final class AppState: ObservableObject {
         // setting means "don't tell me about passes I didn't ask about", and
         // turning it off between a banner arriving and its Undo being pressed
         // must not be what makes that press silent.
+        //
+        // What this cannot promise is delivery. With notification permission
+        // revoked at the OS level `Notifier.post` no-ops, and the press is
+        // silent again — a case only a window can answer, not a banner.
         if replyingToBanner {
             let text = NotificationText.undoResult(
                 undone: result.undone, failed: result.failed, firstFailure: result.firstFailure

@@ -25,8 +25,13 @@ struct ActivityEntry: Identifiable, Equatable {
         // A `.filed` entry with no path is what the notification summary reads
         // as "nothing was filed": the banner loses the file names, the folder,
         // and with them the Undo and Show-in-Finder buttons, while the count
-        // still says five. There is one such call site today; this is what
-        // keeps there being one.
+        // still says five. There is one such call site today.
+        //
+        // `assert` is compiled out under `-O`, so this catches a second call
+        // site while it is being written and in the test run, not in a shipped
+        // build. That is the trade worth making: a banner with no buttons is
+        // not worth a `precondition` that would kill a file-organizing app
+        // mid-pass over it.
         assert(kind != .filed || placed != nil,
                "ActivityEntry: a .filed entry needs the path it landed at")
         self.ok = ok
