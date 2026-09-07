@@ -8,19 +8,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let state: AppState
     private let onOpenSettings: () -> Void
-    private let onOpenPreview: () -> Void
+    private let onOpenMain: (SidebarSelection) -> Void
     private let onCheckForUpdates: () -> Void
     private var cancellables: Set<AnyCancellable> = []
 
     init(
         state: AppState,
         onOpenSettings: @escaping () -> Void,
-        onOpenPreview: @escaping () -> Void,
+        onOpenMain: @escaping (SidebarSelection) -> Void,
         onCheckForUpdates: @escaping () -> Void
     ) {
         self.state = state
         self.onOpenSettings = onOpenSettings
-        self.onOpenPreview = onOpenPreview
+        self.onOpenMain = onOpenMain
         self.onCheckForUpdates = onCheckForUpdates
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
@@ -39,12 +39,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .store(in: &cancellables)
         state.$pendingActions.sink { [weak self] _ in Task { @MainActor in self?.updateIcon() } }
             .store(in: &cancellables)
+        state.$holdReason.sink { [weak self] _ in Task { @MainActor in self?.updateIcon() } }
+            .store(in: &cancellables)
+        state.$usage.sink { [weak self] _ in Task { @MainActor in self?.updateIcon() } }
+            .store(in: &cancellables)
     }
 
     private func updateIcon() {
         guard let button = statusItem.button else { return }
         button.image = Self.funnelImage()
-        button.appearsDisabled = state.paused
+        // Greyed while held as well as while paused: the icon is the only
+        // thing on screen, so it has to carry "not running right now".
+        button.appearsDisabled = state.paused || state.holdReason != nil
+            || !state.withinMonthlyBudget
         // Surface pending reviews right in the menu bar: a small count next to
         // the funnel. Without it, queued suggestions were invisible until the
         // menu was opened (the $pendingActions subscription existed but the
@@ -55,7 +62,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     /// The same "sorting funnel" as the app icon, drawn as a template image so it
-    /// tints correctly for light/dark menu bars.
+    /// tints correctly for light and dark menu bars.
+    ///
+    /// Two things about these numbers are deliberate. They are the app icon's
+    /// own funnel, mapped into this box, so the mark in the menu bar and the
+    /// mark in the Dock are the same shape rather than two hand-tuned
+    /// approximations of each other. And the artwork is inset: it used to span
+    /// 0.10–0.90 of an 18-point square as a *solid* fill, which puts far more
+    /// ink on screen than the stroked system symbols beside it and made
+    /// Sortomat's funnel the heaviest thing in the menu bar. Smaller is what
+    /// "the same weight as its neighbours" looks like for a filled glyph.
     static func funnelImage(width: CGFloat = 18) -> NSImage {
         let size = NSSize(width: width, height: width)
         let image = NSImage(size: size, flipped: false) { rect in
@@ -65,12 +81,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 NSPoint(x: rect.minX + x * w, y: rect.minY + (1 - topY) * h)
             }
             let path = NSBezierPath()
-            path.move(to: p(0.10, 0.18))
-            path.line(to: p(0.90, 0.18))
-            path.line(to: p(0.60, 0.52))
-            path.line(to: p(0.60, 0.82))
-            path.line(to: p(0.40, 0.82))
-            path.line(to: p(0.40, 0.52))
+            path.move(to: p(0.170, 0.22))
+            path.line(to: p(0.830, 0.22))
+            path.line(to: p(0.605, 0.50))
+            path.line(to: p(0.605, 0.78))
+            path.line(to: p(0.395, 0.78))
+            path.line(to: p(0.395, 0.50))
             path.close()
             NSColor.black.setFill()
             path.fill()
@@ -95,11 +111,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        if !state.pendingActions.isEmpty {
-            menu.addItem(BlockMenuItem(title: L10n.plural("menu.pendingReview", state.pendingActions.count)) {
-                [weak self] in self?.onOpenPreview()
-            })
-        }
+        menu.addItem(BlockMenuItem(
+            title: state.pendingActions.isEmpty
+                ? L10n.t("menu.openMain")
+                : L10n.plural("menu.pendingReview", state.pendingActions.count)
+        ) { [weak self] in self?.onOpenMain(.inbox) })
+        menu.addItem(BlockMenuItem(title: L10n.t("menu.openHistory")) { [weak self] in
+            self?.onOpenMain(.history)
+        })
         menu.addItem(BlockMenuItem(title: state.paused ? L10n.t("menu.resume") : L10n.t("menu.pause")) {
             [weak self] in self?.state.paused.toggle()
         })
@@ -108,7 +127,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         menu.addItem(scanItem)
         menu.addItem(BlockMenuItem(title: L10n.t("menu.previewNow")) { [weak self] in
-            self?.onOpenPreview()
+            self?.onOpenMain(.inbox)
             Task { await self?.state.refreshPreview() }
         })
 
@@ -135,6 +154,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             text = L10n.t("app.status.noKey")
         } else if state.paused {
             text = L10n.t("app.status.paused")
+        } else if !state.withinMonthlyBudget {
+            // The same principle as the power holds: model-bound files pile up
+            // deferred while the menu says "Active — 3 rules", and the only
+            // other signal is a caption inside Settings.
+            text = L10n.t("hold.budget")
+        } else if let hold = state.holdReason {
+            // A hold nobody can see is indistinguishable from a broken app:
+            // the funnel sits there, nothing gets filed, and the menu says
+            // "Active".
+            text = hold
         } else {
             text = L10n.plural("app.status.active", state.enabledRuleCount)
         }

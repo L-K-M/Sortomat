@@ -19,6 +19,11 @@ enum ActivationPolicy {
         }
         if !stillOpen {
             NSApp.setActivationPolicy(.accessory)
+            // Dropping the policy does not hand focus anywhere: the Sortomat
+            // menu stayed in the bar with no key window behind it — a menu bar
+            // belonging to an app with nothing on screen — until the user
+            // clicked another app. Give activation back explicitly.
+            NSApp.deactivate()
         }
     }
 }

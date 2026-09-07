@@ -49,7 +49,7 @@ enum Sanitizer {
             of: "\\s+", with: " ", options: .regularExpression
         )
         cleaned = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: " ."))
-        cleaned = String(cleaned.prefix(maxLength))
+        cleaned = truncated(cleaned, characters: maxLength)
             .trimmingCharacters(in: CharacterSet(charactersIn: " ."))
         // Never let a component become empty, "." or ".." after sanitizing.
         // The fallback name follows the UI language (it used to be German for
@@ -58,6 +58,47 @@ enum Sanitizer {
             return L10n.t("component.unknown")
         }
         return cleaned
+    }
+
+    /// APFS and HFS+ cap a single path component at 255 *bytes*, not
+    /// characters. A 150-character CJK or emoji title is 450–600 bytes, so the
+    /// grapheme cap alone let a perfectly sanitized name still fail the move
+    /// with `ENAMETOOLONG` — every pass, forever, for the same file.
+    static let maxComponentBytes = 255
+
+    /// A whole file name trimmed to fit one path component, dropping graphemes
+    /// from the *stem* so the extension always survives — it is how macOS, and
+    /// every rule in this app, recognizes what the file is.
+    ///
+    /// `sanitizeComponent` caps the name it is given, but the real extension is
+    /// forced on *afterwards*: a 252-byte CJK title plus `.epub` is a 257-byte
+    /// component, and the `ENAMETOOLONG` this cap exists to prevent came back
+    /// for exactly the common case.
+    static func fittingComponent(_ filename: String, bytes: Int = maxComponentBytes) -> String {
+        guard filename.utf8.count > bytes else { return filename }
+        let ext = (filename as NSString).pathExtension
+        let suffix = ext.isEmpty ? "" : "." + ext
+        let stem = String(filename.dropLast(suffix.count))
+        let trimmed = truncated(stem, characters: stem.count, bytes: bytes - suffix.utf8.count)
+        // An extension long enough to leave no room for a stem at all: keep a
+        // fitting prefix of the whole name rather than returning ".epub".
+        guard !trimmed.isEmpty else { return truncated(filename, characters: filename.count) }
+        return trimmed + suffix
+    }
+
+    /// Trimmed to both limits, cutting on grapheme boundaries so a truncation
+    /// can never split a character (or an emoji's joiner sequence) in half.
+    static func truncated(_ text: String, characters: Int,
+                          bytes: Int = maxComponentBytes) -> String {
+        var result = String(text.prefix(characters))
+        while result.utf8.count > bytes, !result.isEmpty {
+            // One grapheme at a time: a byte-wise cut would land inside a
+            // multi-byte character, and the remainder is what gets written to
+            // disk. Names this long are rare enough that the loop is cheaper
+            // than the arithmetic to avoid it.
+            result = String(result.dropLast())
+        }
+        return result
     }
 
     /// Build a safe absolute destination under `target` from a relative path,
@@ -86,6 +127,9 @@ enum Sanitizer {
         if !originalExtension.isEmpty {
             filename = forcingExtension(originalExtension, on: filename)
         }
+        // After the extension, not before: forcing one on can push a name that
+        // fitted back over the byte limit.
+        filename = fittingComponent(filename)
 
         var url = target
         for component in components {
