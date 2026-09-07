@@ -233,7 +233,12 @@ enum RuleEvaluator {
                 state.builder.setTerminal(.quarantine, reason: L10n.t("engine.reason.noStepMatched"),
                                           origin: .fallback)
             case .askModel:
-                if let answer = state.answer {
+                // Only an answer the *fallback* asked for. `state.answer` is
+                // also set when a step's question is being resumed, and if that
+                // step no longer matches on the second walk — `now` moved while
+                // the model was thinking — the fallback was binding an answer
+                // written for another prompt and recording it as its own.
+                if token?.fromFallback == true, let answer = state.answer {
                     state.builder.bindModel(answer, action: nil)
                 } else {
                     guard context.allowModel else { return .deferred(finish(&state, context: context)) }

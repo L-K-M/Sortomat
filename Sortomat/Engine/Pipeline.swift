@@ -538,7 +538,12 @@ actor Pipeline {
         let relative = rendered.string()
         guard !relative.trimmingCharacters(in: .whitespaces).isEmpty else { return skipPlan() }
 
-        let root = placement.rootPath.map { URL(fileURLWithPath: $0) } ?? target
+        // An empty root is not a root. `URL(fileURLWithPath: "")` is not the
+        // rule's target, and handing it to `Sanitizer.destination` would ask it
+        // to confine the file inside somewhere nobody chose — the relative path
+        // two lines up is already checked for exactly this.
+        let root = placement.rootPath
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) } ?? target
         let destination = try Sanitizer.destination(
             target: root, relativePath: relative, originalExtension: ext
         )

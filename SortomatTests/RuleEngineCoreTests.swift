@@ -716,6 +716,30 @@ final class RuleEvaluatorTests: XCTestCase {
         XCTAssertTrue(rendered.hasSuffix("Rechnung ACME.pdf"), rendered)
     }
 
+    func testTheFallbackDoesNotEatAStepsAnswer() {
+        // `state.answer` is set whenever an answer is being resumed, including
+        // one a *step* asked for. If that step no longer matches on the second
+        // walk, the fallback was binding an answer written for another prompt —
+        // with its own default options, and recorded as the fallback's own.
+        let asking = rule([
+            step("PDFs", ConditionTest(attribute: .ext, op: .equals, value: .text("pdf")),
+                 [RuleAction(type: .askModel)])
+        ], fallback: .askModel)
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(
+            context(asking, name: "Rechnung.pdf")
+        ) else {
+            return XCTFail("expected the step to ask")
+        }
+        let answer = ModelAnswer(relativePath: "Finanzen/x.pdf", confidence: 0.9)
+        // Same rule, a file the step does not claim: only the fallback is left.
+        guard case .needsModel(let request, _, _) = RuleEvaluator.resume(
+            token, answer: answer, context: context(asking, name: "Foto.png")
+        ) else {
+            return XCTFail("the fallback has its own question to ask")
+        }
+        XCTAssertEqual(request.stepIndex, -1, "and it is the fallback's, not the step's")
+    }
+
     func testAModelAnswerCannotEscapeTheTargetRoot() {
         // Not a change — a guarantee worth pinning. A review round asked for
         // `modelPath` to strip «..» itself; it does not need to, because
@@ -1134,6 +1158,11 @@ final class LegacyMigrationTests: XCTestCase {
         // what `route` writes for a legacy folder called «{stuff}».
         XCTAssertEqual(LegacyMigration.legacyRoute("Sorted {{stuff}}/{stem}"),
                        "Sorted {stuff}/{name}")
+        // And a folder called «{stem}» projects too — «stem» is this build's
+        // word, not the old one's, so the old engine reads it literally. The
+        // rewrite used to reach inside the escaped braces and turn this into
+        // `{{name}}`, which the guard above then refused.
+        XCTAssertEqual(LegacyMigration.legacyRoute("Archive/{{stem}}"), "Archive/{stem}")
     }
 
     func testAMigratedRuleProjectsBackToTheSamePreRules() throws {

@@ -200,9 +200,10 @@ enum LegacyMigration {
 
     /// Steps projected back to pre-rules, so an older build reading this config
     /// still does something sane. A step that cannot be represented is dropped
-    /// and the whole projection is prefixed with a catch-all skip: an old build
-    /// then does *nothing* for that rule rather than something its author never
-    /// asked for.
+    /// and the whole projection collapses to a catch-all skip *alone* — not a
+    /// prefix, which would leave every projected rule after it unreachable. An
+    /// old build then does nothing for that rule rather than something its
+    /// author never asked for.
     static func project(steps: [RuleStep], fallback: Rule.Fallback,
                         copyInsteadOfMove: Bool) -> [PreRule] {
         var projected: [PreRule] = []
@@ -322,12 +323,17 @@ enum LegacyMigration {
     /// anything the old engine could not express.
     static func legacyRoute(_ template: String) -> String? {
         var text = template
+        // Masked first. Rewriting tokens before hiding the escaped braces
+        // reached *inside* them: `{{stem}}` — a folder literally called
+        // «{stem}» — had its innards rewritten to `{{name}}`, and the guard
+        // below then refused a template that projects perfectly well, since
+        // «{stem}» means nothing to the old engine either.
+        text = text.replacingOccurrences(of: "{{", with: "\u{0001}")
+        text = text.replacingOccurrences(of: "}}", with: "\u{0002}")
         text = text.replacingOccurrences(of: "{modified|date:'yyyy'}", with: "{year}")
         text = text.replacingOccurrences(of: "{modified|date:'MM'}", with: "{month}")
         text = text.replacingOccurrences(of: "{modified|date:'dd'}", with: "{day}")
         text = text.replacingOccurrences(of: "{stem}", with: "{name}")
-        text = text.replacingOccurrences(of: "{{", with: "\u{0001}")
-        text = text.replacingOccurrences(of: "}}", with: "\u{0002}")
         // Anything left that looks like a placeholder is not expressible.
         let remaining = TokenTemplate(text).tokens
         let legacyTokens: Set<String> = ["name", "ext", "year", "month", "day"]
