@@ -5,6 +5,14 @@ All notable changes to Sortomat are documented here. The format loosely follows
 
 ## [Unreleased]
 
+### Since wave 5
+
+- **A real app icon.** Sortomat ships the artwork committed at
+  `media-sources/icon.png` instead of a procedurally drawn funnel tile.
+  `Tools/generate_icon.py` fits that artwork to Apple's 824-of-1024 grid and
+  filters it down to every size in the ladder, so replacing the icon is
+  replacing one PNG and re-running one script.
+
 ### Review wave 1 (merged as #1–#16; findings in `fable-is-awesome.md`)
 
 Data safety & correctness:

@@ -2,18 +2,17 @@
 //
 // GenerateAppIcon.swift — regenerate Sortomat's app icon natively on macOS.
 //
-// Draws the same brand-green tile + white "sorting funnel" as
-// Tools/generate_icon.py, but via Core Graphics. The committed PNGs are
-// produced by the Python script so they build on any box; use this on a Mac if
-// you would rather regenerate with AppKit.
+// Fits the master artwork at media-sources/icon.png to Apple's macOS icon
+// grid, exactly as Tools/generate_icon.py does. The committed PNGs are produced
+// by the Python script, which needs nothing but the standard library and so
+// runs on any box; use this on a Mac if you would rather go through AppKit.
 //
-// The geometry is Apple's macOS icon grid and must match the Python script
-// exactly: the body is 824 of a 1024 canvas, centred, with a 185.4 corner
-// radius — a fraction of the *body*, not of the canvas. An icon drawn edge to
-// edge renders about a quarter larger than every neighbour in the Dock,
-// because the system scales them all the same.
+// The geometry has to match the Python script: the body is 824 of a 1024
+// canvas, centred, with a 185.4 corner radius — a fraction of the *body*, not
+// of the canvas. An icon drawn edge to edge renders about a quarter larger than
+// every neighbour in the Dock, because the system scales them all the same.
 //
-// Usage: swift Tools/GenerateAppIcon.swift [OUTPUT_APPICONSET_DIR]
+// Usage: swift Tools/GenerateAppIcon.swift [OUTPUT_APPICONSET_DIR] [SOURCE_PNG]
 //
 import AppKit
 
@@ -22,20 +21,28 @@ let ladder: [(pt: Int, scale: Int)] = [
     (128, 2), (256, 1), (256, 2), (512, 1), (512, 2),
 ]
 
-let top = NSColor(srgbRed: 0x4F / 255.0, green: 0x9E / 255.0, blue: 0x74 / 255.0, alpha: 1)
-let bottom = NSColor(srgbRed: 0x2F / 255.0, green: 0x6B / 255.0, blue: 0x4C / 255.0, alpha: 1)
-let glyph = NSColor(srgbRed: 0xF6 / 255.0, green: 0xFB / 255.0, blue: 0xF8 / 255.0, alpha: 1)
-
 // Apple's macOS icon grid, in points on a 1024 canvas.
 let canvas: CGFloat = 1024
 let bodySide: CGFloat = 824
 let cornerRadius: CGFloat = 185.4
 
-/// The funnel, relative to the *body* rather than the canvas.
-let funnelPoints: [(CGFloat, CGFloat)] = [
-    (0.20, 0.24), (0.80, 0.24), (0.595, 0.51),
-    (0.595, 0.78), (0.405, 0.78), (0.405, 0.51),
-]
+let arguments = Array(CommandLine.arguments.dropFirst())
+let outDir = arguments.count > 0
+    ? arguments[0]
+    : "Sortomat/Resources/Assets.xcassets/AppIcon.appiconset"
+let sourcePath = arguments.count > 1 ? arguments[1] : "media-sources/icon.png"
+
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("GenerateAppIcon: \(message)\n".utf8))
+    exit(1)
+}
+
+guard let artwork = NSImage(contentsOfFile: sourcePath) else {
+    fail("cannot read artwork at \(sourcePath)")
+}
+guard artwork.size.width == artwork.size.height else {
+    fail("the artwork must be square (got \(artwork.size))")
+}
 
 func render(_ size: CGFloat) -> NSBitmapImageRep {
     let rep = NSBitmapImageRep(
@@ -44,40 +51,26 @@ func render(_ size: CGFloat) -> NSBitmapImageRep {
         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
     )!
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    let context = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = context
+    // The artwork is photographic and every size below 512 is a real
+    // downscale: at the default interpolation its edges alias into noise.
+    context.imageInterpolation = .high
 
     let scale = size / canvas
     let body = bodySide * scale
     let origin = (size - body) / 2
     let rect = NSRect(x: origin, y: origin, width: body, height: body)
     let radius = cornerRadius * scale
-    let squircle = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-    let gradient = NSGradient(starting: top, ending: bottom)!
-    squircle.addClip()
-    // Over the body, not the canvas: the margin is transparent, so a
-    // canvas-wide gradient would start part-way through its own ramp.
-    gradient.draw(in: rect, angle: -90)
-
-    // Funnel (y measured from the top; flip for AppKit's bottom-left origin).
-    func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
-        NSPoint(x: origin + x * body, y: origin + (1 - y) * body)
-    }
-    let funnel = NSBezierPath()
-    for (index, point) in funnelPoints.enumerated() {
-        let target = p(point.0, point.1)
-        if index == 0 { funnel.move(to: target) } else { funnel.line(to: target) }
-    }
-    funnel.close()
-    glyph.setFill()
-    funnel.fill()
+    NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).addClip()
+    // The artwork is square and edge-to-edge, so it *is* the tile: it fills
+    // the body rather than sitting on the canvas.
+    artwork.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
 
     NSGraphicsContext.restoreGraphicsState()
     return rep
 }
 
-let outDir = CommandLine.arguments.count > 1
-    ? CommandLine.arguments[1]
-    : "Sortomat/Resources/Assets.xcassets/AppIcon.appiconset"
 try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 
 for (pt, scale) in ladder {

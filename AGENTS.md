@@ -49,7 +49,8 @@ Prefer building/running from Xcode during development so the menu-bar item,
 permission prompts and notifications appear in a real GUI session.
 
 `scripts/build.sh` builds and reveals `Sortomat.app` in Finder (thin stub over
-the shared `lkm-build` engine). The app icon is generated; regenerate it with
+the shared `lkm-build` engine). The app icon is generated from the master
+artwork in `media-sources/icon.png`; edit that, then regenerate the ladder with
 `python3 Tools/generate_icon.py` (dependency-free) or, on macOS,
 `swift Tools/GenerateAppIcon.swift`.
 

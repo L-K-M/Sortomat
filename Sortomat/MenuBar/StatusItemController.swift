@@ -61,17 +61,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         button.title = pending > 0 ? " \(pending)" : ""
     }
 
-    /// The same "sorting funnel" as the app icon, drawn as a template image so it
-    /// tints correctly for light and dark menu bars.
+    /// Sortomat's monochrome mark — a sorting funnel — drawn as a template image
+    /// so it tints correctly for light and dark menu bars.
     ///
-    /// Two things about these numbers are deliberate. They are the app icon's
-    /// own funnel, mapped into this box, so the mark in the menu bar and the
-    /// mark in the Dock are the same shape rather than two hand-tuned
-    /// approximations of each other. And the artwork is inset: it used to span
-    /// 0.10–0.90 of an 18-point square as a *solid* fill, which puts far more
-    /// ink on screen than the stroked system symbols beside it and made
-    /// Sortomat's funnel the heaviest thing in the menu bar. Smaller is what
-    /// "the same weight as its neighbours" looks like for a filled glyph.
+    /// It is deliberately *not* the app icon. The icon is a photographic render
+    /// of the machine; flattened to one colour at 18 points it would be a
+    /// smudge. A menu-bar item wants a silhouette, and this is Sortomat's.
+    ///
+    /// The inset is deliberate too: the glyph used to span 0.10–0.90 of an
+    /// 18-point square as a *solid* fill, which puts far more ink on screen
+    /// than the stroked system symbols beside it and made Sortomat's funnel
+    /// the heaviest thing in the menu bar. Smaller is what "the same weight as
+    /// its neighbours" looks like for a filled glyph.
     static func funnelImage(width: CGFloat = 18) -> NSImage {
         let size = NSSize(width: width, height: width)
         let image = NSImage(size: size, flipped: false) { rect in
