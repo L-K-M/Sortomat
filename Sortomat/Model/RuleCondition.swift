@@ -83,7 +83,13 @@ public struct ConditionGroup: Equatable, Sendable, Codable, Identifiable {
 
     public init(from decoder: Decoder) throws {
         guard let container = try? decoder.container(keyedBy: Keys.self) else {
-            self = ConditionGroup()
+            // Fail closed. `ConditionGroup()` is `.all` with no items, which is
+            // vacuously true — so a `when` that is a string, an array or a
+            // number (a typo in a hand-written config, the audience this
+            // decoder exists for) became a step that claimed every file and
+            // ran its `then` on all of them, silently. `.any` with no items
+            // can never match, which is the safe reading of "unintelligible".
+            self = ConditionGroup(mode: .any)
             return
         }
         id = ((try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? nil) ?? UUID()
@@ -105,7 +111,11 @@ public struct ConditionGroup: Equatable, Sendable, Codable, Identifiable {
             return
         }
         let raw = ((try? container.decodeIfPresent(String.self, forKey: .mode)) ?? nil) ?? ""
-        mode = Mode(rawValue: raw) ?? .all
+        // Case-folded: `"Any"` or `"NONE"` would otherwise fall back to `.all`
+        // and widen the step into a catch-all — the fail-open direction, from
+        // nothing worse than a capital letter. An absent mode is still `.all`,
+        // which is the documented default.
+        mode = raw.isEmpty ? .all : (Mode(rawValue: raw.lowercased()) ?? .all)
         items = ((try? container.decodeIfPresent([Condition].self, forKey: .items)) ?? nil) ?? []
     }
 
@@ -135,8 +145,12 @@ public indirect enum Condition: Equatable, Sendable, Codable, Identifiable {
     public init(from decoder: Decoder) throws {
         if let container = try? decoder.container(keyedBy: Keys.self),
            container.contains(.items) || container.contains(.all)
-            || container.contains(.any) || container.contains(.none) {
-            self = .group((try? ConditionGroup(from: decoder)) ?? ConditionGroup())
+            || container.contains(.any) || container.contains(.none)
+            || container.contains(.mode) {
+            // `.mode` counts too: `{"mode":"all"}` with no items yet is a group
+            // the writer spelled as a group, and reading it as a condition test
+            // instead threw the shape away.
+            self = .group((try? ConditionGroup(from: decoder)) ?? ConditionGroup(mode: .any))
         } else {
             self = .test((try? ConditionTest(from: decoder)) ?? ConditionTest())
         }

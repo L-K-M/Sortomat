@@ -13,7 +13,10 @@ struct PlacementBuilder {
     private var origin: PlannedAction.Origin = .step
     private var effects: [(ActionType, [String])] = []
     private var modelAnswer: ModelAnswer?
-    private var stepName: String = ""
+    /// The matched step's name, for `{step}` in a template. Set by the
+    /// evaluator when a step claims the file — it was `private` and never
+    /// written, so `{step}` rendered empty for every rule that used it.
+    var stepName: String = ""
 
     var stopped = false
     var continueMatching = false
@@ -68,8 +71,8 @@ struct PlacementBuilder {
     mutating func bindModel(_ answer: ModelAnswer, action: RuleAction?,
                             claimsPlacement: Bool = true) {
         modelAnswer = answer
-        origin = answer.quarantined ? .confidence : .model
         if answer.quarantined {
+            origin = .confidence
             operation = .quarantine
             template = rule.quarantineSubfolder.isEmpty
                 ? "{name}"
@@ -77,7 +80,13 @@ struct PlacementBuilder {
             reason = answer.reason ?? ""
             return
         }
+        // Origin only where the model actually decided. Setting it before this
+        // guard claimed provenance for the model in exactly the case this
+        // method exists to support — a step's own `move` placing the file with
+        // `{model.folder}` filling one slot — so the Inbox reported "Model" for
+        // a placement a step had chosen.
         guard claimsPlacement, !isTerminal else { return }
+        origin = .model
         operation = rule.copyInsteadOfMove ? .copy : .move
         template = "{model.path}"
         reason = answer.reason ?? ""

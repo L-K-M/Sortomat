@@ -178,15 +178,24 @@ enum LegacyMigration {
         var lostSomething = false
 
         for step in steps {
-            guard step.enabled, let preRule = projectOne(step, copyInsteadOfMove: copyInsteadOfMove) else {
+            // A disabled step is not a loss. Omitting it is exactly what the
+            // old build does with a rule that isn't there, and toggling a step
+            // off is an ordinary thing to do — treating it as unrepresentable
+            // meant one switched-off step stopped the old build sorting at all.
+            guard step.enabled else { continue }
+            guard let preRule = projectOne(step, copyInsteadOfMove: copyInsteadOfMove) else {
                 lostSomething = true
                 continue
             }
             projected.append(preRule)
         }
         guard lostSomething else { return projected }
+        // The guard alone. `DeterministicEngine.evaluate` returns on the first
+        // matching pre-rule, so a catch-all skip in front makes everything
+        // after it unreachable — writing rules into the old build's config
+        // that can never run, and reading as though they might.
         return [PreRule(name: L10n.t("migration.downgradeGuard"), match: .glob,
-                        pattern: "*", action: .skip)] + projected
+                        pattern: "*", action: .skip)]
     }
 
     private static func projectOne(_ step: RuleStep, copyInsteadOfMove: Bool) -> PreRule? {

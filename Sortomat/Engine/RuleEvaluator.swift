@@ -136,6 +136,8 @@ enum RuleEvaluator {
                                       tests: evaluation.tests)
             )
             guard evaluation.matched else { continue }
+            // `{step}` resolves against this.
+            state.builder.stepName = step.name
 
             var descriptions: [String] = []
             for (actionIndex, action) in step.then.enumerated() {
@@ -145,8 +147,15 @@ enum RuleEvaluator {
                 // the question would otherwise leave with the pass that asked
                 // it. (They cannot include another `askModel` — the first
                 // pass would have stopped there instead.)
+                // The action's *type* as well as its position. A token carries
+                // indices, the model round-trip is asynchronous, and `resume`
+                // takes the rule from its caller — so a rule edited while the
+                // answer was in flight could bind a stale answer to whatever
+                // now sits at those indices. Tokens are only ever minted from
+                // an `askModel`, so this is a no-op when nothing changed.
                 if let token, token.fromFallback == false, let answer = state.answer,
-                   index == token.stepIndex, actionIndex == token.actionIndex {
+                   index == token.stepIndex, actionIndex == token.actionIndex,
+                   action.type == .askModel {
                     // If the step places the file itself further down, the
                     // model answered one *part* of a destination the user
                     // wrote — so it must not claim the placement here and

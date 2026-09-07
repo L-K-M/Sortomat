@@ -14,7 +14,11 @@ enum FactValue: Equatable {
         switch self {
         case .string(let value):
             return value.count > limit ? String(value.prefix(limit)) + "…" : value
-        case .strings(let values): return values.joined(separator: ", ")
+        case .strings(let values):
+            // Bounded like `.string` above: a file with forty tags or subjects
+            // would otherwise put the lot into a trace line.
+            let joined = values.joined(separator: ", ")
+            return joined.count > limit ? String(joined.prefix(limit)) + "…" : joined
         case .number(let value): return NumberText.canonical(value)
         case .date(let value):
             return TemplateDates.string(value, format: "yyyy-MM-dd HH:mm", timeZone: .current)
@@ -319,8 +323,13 @@ final class FileFacts {
              .dateAdded, .dateCreated, .dateModified, .tags, .label:
             return .stat
         case .dateOpened, .comment, .whereFrom, .whereFromHost, .isQuarantined,
-             .duration, .pageCount:
+             .duration:
             return .metadata
+        // Spotlight answers `pageCount` for free when it has it, but the
+        // fallback opens the document — so it is priced at what it can cost,
+        // which is what keeps a cheap condition ahead of it in the ordering.
+        case .pageCount:
+            return .header
         case .pixelWidth, .pixelHeight, .megapixels, .dateCaptured:
             return .header
         case .title, .authors, .subjects, .publisher, .language, .text:
@@ -363,13 +372,22 @@ final class FileFacts {
         case .whereFrom:
             return wrap(metadata().whereFrom.map { FactValue.string($0.joined(separator: "\n")) })
         case .whereFromHost:
-            let host = metadata().whereFrom?.compactMap { URLComponents(string: $0)?.host }.first
-            return wrap(host.map { FactValue.string($0) })
+            // Every host, not the first. macOS records two `kMDItemWhereFroms`
+            // entries for a normal download — the page the link was on, then
+            // the file's own URL — so `.first` answered with the referrer and
+            // a rule reading "downloaded from github.com" quietly never fired
+            // for anything reached by clicking a link. `.whereFrom` already
+            // joins its URLs the same way.
+            let hosts = metadata().whereFrom?.compactMap { URLComponents(string: $0)?.host } ?? []
+            return wrap(hosts.isEmpty ? nil : FactValue.string(hosts.joined(separator: "\n")))
         case .isQuarantined: return wrap(metadata().isQuarantined.map { FactValue.bool($0) })
         case .duration: return wrap(metadata().duration.map { FactValue.number($0) })
         case .pageCount:
             if let pages = metadata().pageCount { return .available(.number(pages)) }
-            return wrap(header().pageCount.map { FactValue.number($0) })
+            // `headerValue`, because this fallback opens the file: on one too
+            // large to read it has to say `.tooExpensive` rather than
+            // "unavailable", which reads as "this file has no pages".
+            return headerValue(header().pageCount.map { FactValue.number($0) })
 
         case .pixelWidth: return headerValue(header().pixelWidth.map { FactValue.number($0) })
         case .pixelHeight: return headerValue(header().pixelHeight.map { FactValue.number($0) })

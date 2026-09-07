@@ -94,6 +94,30 @@ final class ValueCoercionTests: XCTestCase {
         XCTAssertNil(ValueCoercion.parseNumber("later"))
     }
 
+    func testATimeSpanThatNamesNoDateFailsTheTestInsteadOfTheApp() {
+        // `Int(_: Double)` traps on NaN and infinity, and Swift parses every
+        // one of these — so an age condition reading `inf` used to take the
+        // whole app down rather than making the condition false.
+        let calendar = Calendar(identifier: .gregorian)
+        for text in ["infd", "inf", "nan", "1e999d"] {
+            let span = ValueCoercion.parseTimeSpan(text)
+            XCTAssertNotNil(span, "«\(text)» parses as a Double, so it reaches cutoff: \(text)")
+            XCTAssertNil(span?.cutoff(from: Date(), calendar: calendar), "got a date for «\(text)»")
+        }
+    }
+
+    func testFractionalSpansMeanWhatTheySay() {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertEqual(TimeSpan(amount: 1.5, unit: .hours).cutoff(from: now, calendar: calendar),
+                       now.addingTimeInterval(-5_400), "1.5h is ninety minutes, not two hours")
+        // Fixed seconds for days is also what the legacy engine did
+        // (`timeIntervalSince(mtime) / 86_400`), which the migration promises
+        // to preserve exactly.
+        XCTAssertEqual(TimeSpan(amount: 30, unit: .days).cutoff(from: now, calendar: calendar),
+                       now.addingTimeInterval(-30 * 86_400))
+    }
+
     func testCalendarArithmeticUsesRealMonths() {
         let calendar = Calendar(identifier: .gregorian)
         let now = DateComponents(calendar: calendar, year: 2026, month: 3, day: 31).date!
@@ -146,6 +170,41 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(render("{s|before:'-'}", ["s": .text("ACME-2026")]), "ACME")
         XCTAssertEqual(render("{s|after:'-'}", ["s": .text("ACME-2026")]), "2026")
         XCTAssertEqual(render("{s|replace:'a':'o'}", ["s": .text("cat")]), "cot")
+    }
+
+    func testPaddingNothingProducesNothing() {
+        // Padding an absent value invented one: `{n|pad:4}` became the literal
+        // folder «0000», and because `default:` only fires on empty text it
+        // also meant the fallback could never be reached.
+        XCTAssertEqual(render("{n|pad:4}"), "")
+        XCTAssertEqual(render("{n|pad:4|default:'none'}"), "none")
+    }
+
+    func testAPathValueLosesItsLeadingSlashEvenBehindWhitespace() {
+        // A model answer arriving with a space or a newline in front is
+        // ordinary; stripping slashes before trimming left the slash on, and
+        // `Sanitizer` then refused the whole destination.
+        for value in [" /Users/x/Docs", "\n/Users/x/Docs", "/Users/x/Docs"] {
+            XCTAssertFalse(TokenTemplate.escapePathValue(value).hasPrefix("/"),
+                           "got: \(TokenTemplate.escapePathValue(value))")
+        }
+        XCTAssertEqual(TokenTemplate.escapePathValue(" Rechnungen/2026 "), "Rechnungen/2026")
+    }
+
+    func testAnUnintelligibleConditionMatchesNothingRatherThanEverything() throws {
+        // `.all` with no items is vacuously true, so decoding a malformed
+        // `when` into an empty group turned one typo into a step that claimed
+        // every file and ran its actions on all of them.
+        for malformed in ["\"nonsense\"", "[1,2,3]", "42"] {
+            let json = Data("{\"when\":\(malformed),\"then\":[]}".utf8)
+            let step = try JSONDecoder().decode(RuleStep.self, from: json)
+            XCTAssertEqual(step.when.mode, .any, "malformed «\(malformed)» must fail closed")
+            XCTAssertTrue(step.when.items.isEmpty)
+        }
+        // An *absent* `when` is the documented default and still means "every
+        // file" — that is the editor's starting state, not a typo.
+        let bare = try JSONDecoder().decode(RuleStep.self, from: Data("{\"then\":[]}".utf8))
+        XCTAssertEqual(bare.when.mode, .all)
     }
 
     func testCounterIsAHoleTheCallerFills() {
@@ -735,6 +794,35 @@ final class LegacyMigrationTests: XCTestCase {
         XCTAssertEqual(projected[0].match, .glob)
         XCTAssertEqual(projected[0].pattern, "*")
         XCTAssertEqual(projected[0].action, .skip)
+    }
+
+    func testASwitchedOffStepIsOmittedRatherThanTreatedAsUnrepresentable() throws {
+        // Toggling a step off is an ordinary thing to do, and omitting it is
+        // exactly what an old build does with a rule that isn't there. Counting
+        // it as a loss prefixed the catch-all skip, and one switched-off step
+        // stopped the old build sorting at all.
+        var rule = Rule(name: "R", targetPath: "/target")
+        rule.steps = [
+            RuleStep(name: "Live", enabled: true,
+                     when: ConditionGroup(mode: .all, items: [
+                         .test(ConditionTest(attribute: .name, op: .matchesGlob, value: .text("*.pdf")))
+                     ]),
+                     then: [RuleAction(type: .move, template: "Docs/{name}")]),
+            RuleStep(name: "Off", enabled: false,
+                     when: ConditionGroup(mode: .all, items: [
+                         .test(ConditionTest(attribute: .name, op: .matchesGlob, value: .text("*.png")))
+                     ]),
+                     then: [RuleAction(type: .move, template: "Bilder/{name}")])
+        ]
+        let object = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(rule)) as! [String: Any]
+        let projected = try JSONDecoder().decode(
+            [PreRule].self,
+            from: try JSONSerialization.data(withJSONObject: object["preRules"] as Any)
+        )
+        XCTAssertEqual(projected.count, 1, "the disabled step is dropped, and nothing is guarded")
+        XCTAssertEqual(projected[0].pattern, "*.pdf")
+        XCTAssertEqual(projected[0].action, .route)
     }
 }
 

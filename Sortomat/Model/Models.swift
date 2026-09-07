@@ -177,9 +177,16 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         // pack — has to arrive in the same shape as one loaded from a config,
         // or the engine would find no steps and hand every file to the model.
         if steps.isEmpty, !preRules.isEmpty {
-            self.steps = LegacyMigration.upgrade(
+            // The whole upgrade, not just its steps. `upgrade` returns
+            // `.askModel` on its only path today, so taking the fallback
+            // changes nothing — but `init(from:)` takes it, and two migration
+            // sites that must agree and don't quite are how this codebase has
+            // been bitten before. An explicitly passed fallback still wins.
+            let upgraded = LegacyMigration.upgrade(
                 preRules: preRules, copyInsteadOfMove: copyInsteadOfMove
-            ).steps
+            )
+            self.steps = upgraded.steps
+            if fallback == .askModel { self.fallback = upgraded.fallback }
         }
     }
 

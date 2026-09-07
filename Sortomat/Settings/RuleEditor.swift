@@ -180,7 +180,14 @@ struct RuleEditor: View {
             extensionsText = rule.extensions.joined(separator: ", ")
             taxonomyText = rule.taxonomy.joined(separator: "\n")
         }
-        .onChange(of: rule) { _ in state.persistAndApply() }
+        .onChange(of: rule) { _ in
+            // Both results describe the rule as it was; leaving them up after
+            // an edit makes the editor assert something about a rule that no
+            // longer exists.
+            tryResult = nil
+            matchResult = nil
+            state.persistAndApply()
+        }
     }
 
     /// Run the rule against one chosen file without enabling it, writing

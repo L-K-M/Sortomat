@@ -14,18 +14,39 @@ struct TimeSpan: Equatable, Sendable {
     var amount: Double
     var unit: Unit
 
-    /// `now` minus this span, on the Gregorian calendar in the current zone —
-    /// so "3 months" is three real months, not ninety days.
+    /// `now` minus this span: exact seconds for the fixed-length units, real
+    /// calendar arithmetic for months and years — so "3 months" is three real
+    /// months, not ninety days.
+    ///
+    /// Fixed seconds for days and weeks is not a shortcut, it is parity: the
+    /// legacy engine compares `now.timeIntervalSince(mtime) / 86_400`, and a
+    /// migrated `olderThanDays: 30` rule has to keep meaning what it meant.
+    /// It also lets a fractional span mean what it says — `1.5h` is ninety
+    /// minutes rather than two hours.
     func cutoff(from now: Date, calendar: Calendar) -> Date? {
-        let whole = Int(amount.rounded())
+        // `Int(_: Double)` traps on NaN and on infinity, and Swift parses all
+        // of `inf`, `nan` and `1e999` as Doubles — so an age condition reading
+        // `inf` crashed the app instead of failing the test. A span that
+        // cannot name a date is uncoercible, which is the `.invalidValue`
+        // path this module documents.
+        guard amount.isFinite else { return nil }
         switch unit {
-        case .minutes: return calendar.date(byAdding: .minute, value: -whole, to: now)
-        case .hours: return calendar.date(byAdding: .hour, value: -whole, to: now)
-        case .days: return calendar.date(byAdding: .day, value: -whole, to: now)
-        case .weeks: return calendar.date(byAdding: .weekOfYear, value: -whole, to: now)
-        case .months: return calendar.date(byAdding: .month, value: -whole, to: now)
-        case .years: return calendar.date(byAdding: .year, value: -whole, to: now)
+        case .minutes: return now.addingTimeInterval(-amount * 60)
+        case .hours: return now.addingTimeInterval(-amount * 3_600)
+        case .days: return now.addingTimeInterval(-amount * 86_400)
+        case .weeks: return now.addingTimeInterval(-amount * 604_800)
+        case .months: return wholeUnits.flatMap { calendar.date(byAdding: .month, value: -$0, to: now) }
+        case .years: return wholeUnits.flatMap { calendar.date(byAdding: .year, value: -$0, to: now) }
         }
+    }
+
+    /// The amount as a whole number of calendar components, or nil when it
+    /// does not fit in one. `Calendar` takes an `Int`, and the conversion is
+    /// the trapping kind.
+    private var wholeUnits: Int? {
+        let rounded = amount.rounded()
+        guard rounded > -9_007_199_254_740_992, rounded < 9_007_199_254_740_992 else { return nil }
+        return Int(rounded)
     }
 }
 
@@ -119,11 +140,12 @@ enum ValueCoercion {
         guard let text = string(value)?.trimmingCharacters(in: .whitespaces), !text.isEmpty else {
             return nil
         }
+        // One formatter for the four attempts, not four.
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
         for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd", "yyyy/MM/dd"] {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.calendar = calendar
-            formatter.timeZone = calendar.timeZone
             formatter.dateFormat = format
             if let date = formatter.date(from: text) { return date }
         }
@@ -144,7 +166,10 @@ enum ValueCoercion {
             case "false", "no", "0": return false
             default: return nil
             }
-        case .list, .none: return nil
+        // A one-element list coerces like its element, the way `number` and
+        // `timeSpan` already do — a config writing `["true"]` meant `true`.
+        case .list(let list): return list.first.flatMap { bool(.text($0)) }
+        case .none: return nil
         }
     }
 }

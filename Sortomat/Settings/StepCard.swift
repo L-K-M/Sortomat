@@ -49,7 +49,17 @@ struct StepCard: View {
         // the run in flight, so the pause below is a debounce: a burst of
         // typing counts once, after the last keystroke.
         .task(id: step.when) {
-            guard countsCheaply else { return }
+            guard countsCheaply else {
+                // The old count was measured under different conditions, so it
+                // no longer describes this step — and the one number this pill
+                // promises to be truthful must not go on asserting itself
+                // about conditions it never saw. Clearing `counting` matters
+                // too: a run cancelled on its way here would otherwise leave
+                // the spinner turning for a count that will never arrive.
+                matched = nil
+                counting = false
+                return
+            }
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             await recount()
@@ -106,6 +116,11 @@ struct StepCard: View {
         guard !rule.watchPath.isEmpty else { return }
         counting = true
         let counts = await state.matchCount(for: rule, step: step)
+        // `task(id:)` cancels the run in flight on every keystroke, but a
+        // cancelled run still resumes here when the count it asked for comes
+        // back — and without this it would write counts for conditions the
+        // user has already typed past, over the fresher run's.
+        guard !Task.isCancelled else { return }
         matched = counts.matched
         scanned = counts.scanned
         counting = false

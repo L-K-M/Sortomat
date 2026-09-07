@@ -276,9 +276,17 @@ struct TokenTemplate {
             case "pad":
                 let digits = Int(filter.argument ?? "") ?? 0
                 let rendered = text ?? stringify(current, timeZone: timeZone)
-                text = rendered.count >= digits
-                    ? rendered
-                    : String(repeating: "0", count: digits - rendered.count) + rendered
+                // Nothing pads to nothing. Padding an absent value invented
+                // one — `{invoice|pad:4}` became the literal folder «0000» —
+                // and because `default:` only fires on empty text, it also
+                // meant `{invoice|pad:4|default:'none'}` could never say
+                // «none». `round:` and `unit:` already no-op on an absent
+                // value; this is the one filter that did not.
+                if !rendered.isEmpty {
+                    text = rendered.count >= digits
+                        ? rendered
+                        : String(repeating: "0", count: digits - rendered.count) + rendered
+                }
                 current = .text(text ?? "")
             case "round":
                 if case .number(let number)? = current {
@@ -402,10 +410,15 @@ struct TokenTemplate {
     /// paths cannot — `Sanitizer.destination` rejects those outright, and this
     /// keeps a leading slash from ever reaching it.
     static func escapePathValue(_ value: String) -> String {
-        var cleaned = value.precomposedStringWithCanonicalMapping
+        // Trimmed first. Stripping slashes before trimming missed the leading
+        // slash on " /Users/…" — and a model answer arriving with a space or a
+        // newline in front is entirely ordinary — so `Sanitizer` refused the
+        // whole destination and the file was quietly left where it was.
+        var cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "\\", with: "/")
         while cleaned.hasPrefix("/") { cleaned.removeFirst() }
-        return cleaned.trimmingCharacters(in: .whitespaces)
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// An interpolated value may never create a folder.

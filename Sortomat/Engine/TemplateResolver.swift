@@ -68,6 +68,10 @@ enum TemplateResolver {
         case "modified": return simple(facts, .dateModified)
         case "opened": return simple(facts, .dateOpened)
         case "captured": return simple(facts, .dateCaptured)
+        // `counter` is in `namedTokens` but has no case here on purpose:
+        // `TokenTemplate.render` intercepts it before `resolve` is ever
+        // called and leaves it as a hole, so the pipeline can try 1, 2, 3…
+        // against the file system. It never reaches this switch.
         default:
             return simple(facts, Attribute(token))
         }

@@ -322,9 +322,10 @@ enum RuleValidator {
             add("action.notAppliedYet", .warning,
                 L10n.t("validate.action.notAppliedYet", action.type.rawValue))
         }
-        // `trash` is accepted by the builder and then planned as a move, so
-        // the file lands in the destination folder instead of the Trash —
-        // safe, undoable, and not what the rule says.
+        // `trash` is accepted by the builder, but `Placement.relativePath` is
+        // nil for it, so `plan(from:)` turns it into a skip: the file is left
+        // exactly where it is. Safe, and not what the rule says — which is why
+        // the warning has to state it, and state it accurately.
         if action.type == .trash {
             add("action.trashMoves", .warning, L10n.t("validate.action.trashMoves"))
         }

@@ -80,6 +80,9 @@ actor Pipeline {
     func scan(rule: Rule, config: Config, apiKey: String, forcePreview: Bool = false,
               batchID: UUID = UUID(), modelAllowed: Bool = true) async -> ScanResult {
         guard rule.enabled else { return ScanResult() }
+        // One pass, one enumeration of the target: this pass must not answer
+        // "already filed?" from what the last one saw.
+        targetIndexes.removeAll()
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
         guard !rule.watchPath.isEmpty, !rule.targetPath.isEmpty else { return ScanResult() }
@@ -438,6 +441,9 @@ actor Pipeline {
     /// deterministically and without spending anything. Capped, because the
     /// answer is a reassurance, not a report.
     func matchCount(rule: Rule, limit: Int = 500) -> (matched: Int, scanned: Int, needsModel: Int) {
+        // A fresh count sees the folder as it is now, and then reuses one
+        // enumeration across all five hundred candidates.
+        targetIndexes.removeAll()
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
         let candidates = candidateFiles(in: watch, target: target, rule: rule).prefix(limit)
@@ -451,15 +457,35 @@ actor Pipeline {
         return (matched, candidates.count, needsModel)
     }
 
+    /// The duplicate index for this target, built at most once per pass.
+    ///
+    /// Only for a rule that actually asks "is this already filed?" — otherwise
+    /// every scan would enumerate the target folder for nothing. And *kept*,
+    /// because `TargetIndex` walks the whole target folder on first use and
+    /// this was being constructed per file: a rule using `duplicateInTarget`
+    /// against a fifty-thousand-file folder re-walked it for every candidate,
+    /// and `matchCount` did that five hundred times behind a single keystroke
+    /// in the editor. The type's own comment always promised one enumeration
+    /// per pass; now it is one.
+    ///
+    /// Actor-isolated state, so the scan's task group serializes on it rather
+    /// than racing: `TargetIndex` caches lazily and is not itself thread-safe.
+    private var targetIndexes: [String: TargetIndex] = [:]
+
+    private func targetIndex(for rule: Rule, target: URL) -> TargetIndex? {
+        guard Self.mentions(.duplicateInTarget, in: rule) else { return nil }
+        if let existing = targetIndexes[target.path] { return existing }
+        let built = TargetIndex(root: target)
+        targetIndexes[target.path] = built
+        return built
+    }
+
     /// The evaluation context for one file: the rule, the facts, and whether
     /// the model may be consulted at all right now.
     private func evaluationContext(file: URL, rule: Rule, target: URL,
                                    allowModel: Bool) -> RuleEvaluator.Context {
         let watchRoot = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
-        // The target index is only built for a rule that actually asks "is
-        // this already filed?" — otherwise every scan would enumerate the
-        // target folder for nothing.
-        let index = Self.mentions(.duplicateInTarget, in: rule) ? TargetIndex(root: target) : nil
+        let index = targetIndex(for: rule, target: target)
         let source = LiveFactSource(url: file, targetPath: target.path, targetIndex: index)
         let facts = FileFacts(
             url: file, watchRoot: watchRoot, source: source,
@@ -491,7 +517,11 @@ actor Pipeline {
             DecideResult(plan: PlannedAction(
                 ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
                 destination: nil, origin: placement.origin, reason: reason,
-                confidence: placement.confidence, copyInsteadOfMove: rule.copyInsteadOfMove
+                confidence: placement.confidence, copyInsteadOfMove: rule.copyInsteadOfMove,
+                // A step that tags a file and leaves it where it is plans as a
+                // skip, and dropping the effects here made "tag it green, keep
+                // it in Downloads" do nothing at all, silently.
+                sideEffects: placement.sideEffects
             ), usage: usage, usedLLM: usedLLM)
         }
         guard placement.operation != .skip, let rendered = placement.relativePath else {
@@ -691,6 +721,10 @@ actor Pipeline {
         switch plan.kind {
         case .skip:
             ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .skipped)
+            // Nothing moved, so there is no journal entry to protect and the
+            // effects are all there is to carry out. A tag-and-leave step has
+            // no other way to reach the file.
+            ActionExecutor.apply(plan.sideEffects, to: plan.source)
             return ActivityEntry(ok: true, message: plan.reason)
         case .duplicate:
             ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .done)
