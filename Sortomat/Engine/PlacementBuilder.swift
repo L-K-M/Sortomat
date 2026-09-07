@@ -124,7 +124,7 @@ struct PlacementBuilder {
             rendered = parsed.render(timeZone: context.timeZone) { token in
                 TemplateResolver.value(for: token, facts: context.facts, captures: captures,
                                        model: modelAnswer, rule: rule, step: stepName,
-                                       uuid: renderUUID, now: context.now)
+                                       now: context.now, uuid: renderUUID)
             }
         }
         return Placement(
@@ -155,7 +155,7 @@ struct PlacementBuilder {
                 TokenTemplate(value).render(timeZone: context.timeZone) { token in
                     TemplateResolver.value(for: token, facts: context.facts, captures: captures,
                                            model: modelAnswer, rule: rule, step: stepName,
-                                           uuid: renderUUID, now: context.now)
+                                           now: context.now, uuid: renderUUID)
                 }.string()
             })
         }

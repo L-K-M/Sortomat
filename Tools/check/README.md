@@ -1,7 +1,7 @@
 # Checks that need no compiler
 
 CI is the only Swift compiler this project has, so a typo costs a full cycle —
-and when Actions is unavailable it costs a day. These four scripts read the
+and when Actions is unavailable it costs a day. These seven scripts read the
 sources and answer questions a compiler would answer first. They are not a
 Swift parser and never will be; each is deliberately narrow, and each exists
 because the mistake it catches has actually been made here.
@@ -45,6 +45,20 @@ unlabelled arguments, a type name declared twice, a trailing closure.
 
 It checks *call sites*. Adding a stored property to a type with an explicit
 initializer is an error inside that initializer, which no call site shows.
+
+## `call_order.py` — a static call still passes its arguments in order
+
+Swift takes arguments in the order the declaration lists them, and says so:
+«argument 'now' must precede argument 'uuid'». That is a compile error, from a
+call site in a file the signature's own change never opened — and it is the one
+`init_labels.py` cannot see, because it reads initializers and this is
+`Type.method(...)`.
+
+Labels as a *sequence*, not a set: the call's labels must be a subsequence of
+the declaration's, which is exactly the rule Swift enforces once a defaulted
+parameter may be left out. Silent on the same things as `init_labels.py` —
+a positional argument, an unlabelled parameter, a name declared twice — since
+an overload set cannot be resolved without knowing the argument types.
 
 ## `switch_exhaustive.py` — a switch still covers the enum it switches over
 
