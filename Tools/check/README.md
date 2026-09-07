@@ -59,6 +59,22 @@ whose patterns are all `.member` of exactly one project enum, with no
 are skipped, as are switches over an `Optional`, whose own `.none` would
 otherwise match some unrelated enum that happens to have one.
 
+## `scope.py` — a declaration outside the type it belongs to
+
+A test method inserted after its class's closing brace still parses: it becomes
+a file-scope function, compiles as nothing, and every call to one of the
+class's private helpers fails with «cannot find 'x' in scope» — an error that
+names a symbol rather than the misplaced brace, several lines away from the
+mistake. This one exists because it happened twice in one afternoon, both times
+from inserting a test by matching on a neighbouring function's name.
+
+Brace counting, not parsing. The blanking order is the whole trick, and both
+orderings that get it wrong are represented in this repo: `"https://…"` looks
+like a line comment until strings are gone, and a comment mentioning
+`Invoices/*.pdf` looks like the start of a block comment until line comments
+are gone. So: raw strings, multi-line literals, plain strings, line comments,
+block comments — then count.
+
 ## What none of them do
 
 They do not typecheck. An expression that is well-formed but wrongly typed, a

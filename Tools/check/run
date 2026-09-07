@@ -3,6 +3,6 @@
 set -e
 root="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 here="$(cd "$(dirname "$0")" && pwd)"
-for c in l10n_keys l10n_arity conformance init_labels switch_exhaustive; do
+for c in l10n_keys l10n_arity conformance init_labels switch_exhaustive scope; do
     python3 "$here/$c.py" "$root"
 done
