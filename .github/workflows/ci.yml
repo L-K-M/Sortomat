@@ -1,9 +1,18 @@
 name: CI
 
+# A `claude/**` branch with an open pull request builds *twice* per push —
+# once for `push`, once for `pull_request` — and the two runs compile the same
+# code, disagreeing only about whether the merge commit is included, which is
+# exactly what the pull-request run is for. What that costs is no longer money
+# (this repository is public, so Actions minutes and artifact storage are both
+# free) but it is still two identical rows to read on every pull request and
+# two macOS runners held for one answer. Push the branch, open the pull
+# request — this repo's convention anyway — and the pull-request run is the
+# build.
 on:
   pull_request:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
 
 # Cancel an in-progress run when a branch is pushed again.
 concurrency:
@@ -50,9 +59,8 @@ jobs:
           path: TestResults.xcresult
           if-no-files-found: ignore
           # An .xcresult bundle is tens of megabytes. Without a retention limit
-          # these piled up under the account-wide storage quota until *new*
-          # uploads started failing — turning "upload the evidence" into a
-          # second red step. A week is long enough that a Friday-evening
-          # failure is still inspectable after a weekend, and still 13x less
-          # storage than the 90-day default.
+          # these piled up until *new* uploads started failing — turning
+          # "upload the evidence" into a second red step. A week is long enough
+          # that a Friday-evening failure is still inspectable after a weekend,
+          # and still 13x less storage than the 90-day default.
           retention-days: 7
