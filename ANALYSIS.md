@@ -736,7 +736,7 @@ So a future reader can judge how much to trust each item.
   arrived after #40 had merged and was triaged against `main` rather than
   dropped with the PR, found that the Undo button on a notification could
   complete in total silence (#47). A review that lands late is still a review.
-- **Tests:** 106 before wave 4, 161 after the integration train, 301 on `main`
+- **Tests:** 106 before wave 4, 161 after the integration train, 307 on `main`
   today and 372 with the engine branch — the exact figure is whatever the last
   green CI run reports.
 
