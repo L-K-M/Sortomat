@@ -258,6 +258,39 @@ final class AppState: ObservableObject {
         persistAndApply()
     }
 
+    /// What this rule would do with one file — no ledger, no memo, no journal,
+    /// no model call, no cost. The answer to "does this rule match anything?",
+    /// which until now required enabling the rule and watching.
+    func tryRule(_ rule: Rule, on file: URL) async -> Pipeline.DryRun {
+        await pipeline.dryDecide(file: file, rule: rule)
+    }
+
+    /// How many files in the watched folder this rule's steps claim right now.
+    func matchCount(for rule: Rule) async -> (matched: Int, scanned: Int, needsModel: Int) {
+        await pipeline.matchCount(rule: rule)
+    }
+
+    /// The same question for one step on its own: the rule minus every other
+    /// step, so the answer is "how many files does *this* condition claim",
+    /// not "how many are left by the time it runs". A step editor that cannot
+    /// answer that is asking the user to guess.
+    func matchCount(for rule: Rule, step: RuleStep) async -> (matched: Int, scanned: Int, needsModel: Int) {
+        await pipeline.matchCount(rule: Self.probe(rule, step: step))
+    }
+
+    /// The rule reduced to one step, which is what "how many files does *this*
+    /// step claim" is counted against. The fallback becomes `skip` because
+    /// whatever the step does not claim is claimed by nothing here: the point
+    /// is to count the step, not to hand the remainder to the model — and with
+    /// the rule's own `askModel` fallback left in place, counting a step would
+    /// have reported every file in the folder as a match.
+    nonisolated static func probe(_ rule: Rule, step: RuleStep) -> Rule {
+        var probe = rule
+        probe.steps = [step]
+        probe.fallback = .skip
+        return probe
+    }
+
     /// Add an imported rule (already normalized to disabled + preview by the
     /// pack) under a unique name; returns its id so the UI can select it.
     @discardableResult

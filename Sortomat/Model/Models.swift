@@ -79,6 +79,17 @@ public struct PreRule: Codable, Identifiable, Equatable, Sendable {
 
 /// One watched folder + how to file its new contents away.
 public struct Rule: Codable, Identifiable, Equatable, Sendable {
+    /// The config schema this build writes. 1 = pre-rules only (legacy).
+    public static let currentSchema = 2
+
+    /// What happens to a file no step claimed.
+    public enum Fallback: String, Codable, Sendable, CaseIterable {
+        case skip
+        /// Legacy behaviour: anything unclaimed goes to the model.
+        case askModel
+        case quarantine
+    }
+
     public var id: UUID
     public var name: String
     public var enabled: Bool
@@ -107,6 +118,18 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
     public var confidenceThreshold: Double
     /// New rules preview (never touch files) until the user disables this.
     public var dryRun: Bool
+    /// 1 when this rule was loaded from a config written before steps existed,
+    /// 2 once this build has written it.
+    public var schemaVersion: Int
+    /// The ordered "if … then …" list. Empty on a legacy rule until migration.
+    public var steps: [RuleStep]
+    /// What happens to a file no step claimed.
+    public var fallback: Fallback
+    /// Extra folders (besides `targetPath`) an action's `root` may name. A
+    /// destination can only ever leave the target folder through a root the
+    /// user typed here, and `Sanitizer.destination` still confines the
+    /// rendered path inside whichever root was chosen.
+    public var destinationRoots: [DestinationRoot]
 
     public init(
         id: UUID = UUID(),
@@ -124,7 +147,11 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         taxonomy: [String] = [],
         quarantineSubfolder: String = L10n.t("rule.defaultQuarantine"),
         confidenceThreshold: Double = 0,
-        dryRun: Bool = false
+        dryRun: Bool = false,
+        schemaVersion: Int = Rule.currentSchema,
+        steps: [RuleStep] = [],
+        fallback: Fallback = .askModel,
+        destinationRoots: [DestinationRoot] = []
     ) {
         self.id = id
         self.name = name
@@ -142,6 +169,39 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         self.quarantineSubfolder = quarantineSubfolder
         self.confidenceThreshold = confidenceThreshold
         self.dryRun = dryRun
+        self.schemaVersion = schemaVersion
+        self.steps = steps
+        self.fallback = fallback
+        self.destinationRoots = destinationRoots
+        // A rule built in code from pre-rules — a template, a test, a rule
+        // pack — has to arrive in the same shape as one loaded from a config,
+        // or the engine would find no steps and hand every file to the model.
+        if steps.isEmpty, !preRules.isEmpty {
+            // The whole upgrade, not just its steps. `upgrade` returns
+            // `.askModel` on its only path today, so taking the fallback
+            // changes nothing — but `init(from:)` takes it, and two migration
+            // sites that must agree and don't quite are how this codebase has
+            // been bitten before. An explicitly passed fallback still wins.
+            let upgraded = LegacyMigration.upgrade(
+                preRules: preRules, copyInsteadOfMove: copyInsteadOfMove
+            )
+            self.steps = upgraded.steps
+            if fallback == .askModel { self.fallback = upgraded.fallback }
+            // And the version, which `init(from:)` also bumps. A rule that has
+            // been upgraded is not a schema-1 rule any more, whatever the
+            // caller passed.
+            self.schemaVersion = max(schemaVersion, Rule.currentSchema)
+        }
+    }
+
+    /// Spelled out because this type provides *both* `init(from:)` and
+    /// `encode(to:)`, and Swift only synthesizes `CodingKeys` when it
+    /// synthesizes at least one of them.
+    private enum CodingKeys: String, CodingKey {
+        case id, name, enabled, priority, watchPath, targetPath, recursive, prompt
+        case extensions, copyInsteadOfMove, privacyMode, preRules, taxonomy
+        case quarantineSubfolder, confidenceThreshold, dryRun
+        case schemaVersion, steps, fallback, destinationRoots
     }
 
     public init(from decoder: Decoder) throws {
@@ -162,6 +222,73 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         quarantineSubfolder = try c.decodeIfPresent(String.self, forKey: .quarantineSubfolder) ?? L10n.t("rule.defaultQuarantine")
         confidenceThreshold = try c.decodeIfPresent(Double.self, forKey: .confidenceThreshold) ?? 0
         dryRun = try c.decodeIfPresent(Bool.self, forKey: .dryRun) ?? false
+        // A config written before this build has no schema key and *is* a
+        // legacy config, so the default here is 1 rather than currentSchema.
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        steps = try c.decodeIfPresent([RuleStep].self, forKey: .steps) ?? []
+        // Decoded as a raw string and mapped, never as the enum directly:
+        // synthesized `Decodable` for a String enum *throws* on an unknown
+        // value, and one such value would send the whole config to
+        // `config.json.corrupt-…`.
+        let fallbackRaw = try c.decodeIfPresent(String.self, forKey: .fallback) ?? ""
+        // Absent means a config written before fallbacks existed, where the
+        // model decided — that stays. A *present* value we cannot read comes
+        // from a newer build, and guessing "ask the model" there would spend
+        // money and send file content on a setting nobody chose.
+        fallback = fallbackRaw.isEmpty ? .askModel : (Fallback(rawValue: fallbackRaw) ?? .skip)
+        destinationRoots = try c.decodeIfPresent([DestinationRoot].self, forKey: .destinationRoots) ?? []
+
+        // A rule written before steps existed is upgraded on the way in, so
+        // the rest of the app only ever sees one shape. `preRules` is *not*
+        // cleared: it is re-derived on encode as a downgrade projection.
+        if schemaVersion < Rule.currentSchema, steps.isEmpty, !preRules.isEmpty {
+            let upgraded = LegacyMigration.upgrade(preRules: preRules,
+                                                   copyInsteadOfMove: copyInsteadOfMove)
+            steps = upgraded.steps
+            // The same guard the memberwise initializer carries, whose comment
+            // says why: two sites that must agree and don't quite are how this
+            // codebase has been bitten before. A config that spells its
+            // fallback out keeps it; only the legacy default gives way.
+            if fallback == .askModel { fallback = upgraded.fallback }
+        }
+        if schemaVersion < Rule.currentSchema { schemaVersion = Rule.currentSchema }
+    }
+
+    /// Written by hand rather than synthesized for one reason: `preRules` is a
+    /// *projection* of `steps`, so a build without the engine still runs
+    /// something sane — and does nothing at all for a rule it cannot express.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(priority, forKey: .priority)
+        try c.encode(watchPath, forKey: .watchPath)
+        try c.encode(targetPath, forKey: .targetPath)
+        try c.encode(recursive, forKey: .recursive)
+        try c.encode(prompt, forKey: .prompt)
+        try c.encode(extensions, forKey: .extensions)
+        try c.encode(copyInsteadOfMove, forKey: .copyInsteadOfMove)
+        try c.encode(privacyMode, forKey: .privacyMode)
+        try c.encode(taxonomy, forKey: .taxonomy)
+        try c.encode(quarantineSubfolder, forKey: .quarantineSubfolder)
+        try c.encode(confidenceThreshold, forKey: .confidenceThreshold)
+        try c.encode(dryRun, forKey: .dryRun)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(steps, forKey: .steps)
+        try c.encode(fallback, forKey: .fallback)
+        try c.encode(destinationRoots, forKey: .destinationRoots)
+        // No steps means no pre-rules — not the ones this rule used to have.
+        // `preRules` is kept in memory as the source the migration read, so
+        // re-encoding it when the user has deleted every step writes rules
+        // nobody asked for: an old build keeps filing by them, and a pack
+        // exported and re-imported brings them back through the memberwise
+        // upgrade, which has no schema guard to stop it.
+        let projected = steps.isEmpty
+            ? []
+            : LegacyMigration.project(steps: steps, fallback: fallback,
+                                      copyInsteadOfMove: copyInsteadOfMove)
+        try c.encode(projected, forKey: .preRules)
     }
 }
 

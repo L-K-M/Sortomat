@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import Sortomat
 
@@ -88,5 +89,87 @@ final class L10nTests: XCTestCase {
                 }
             }
         }
+    }
+
+    /// Key parity is only half the promise. `String(format:)` reads its
+    /// arguments off the *format string*, so a German translation that grew a
+    /// `%@` its English original never had reads past the arguments the call
+    /// site passed — and that is not a wrong word on screen, it is a crash, on
+    /// German machines only, in whichever build shipped the translation.
+    ///
+    /// Order matters unless the string uses positional markers, which exist
+    /// precisely so a translation may reorder: `%1$@ von %2$@` is a correct
+    /// German rendering of `%2$@ of %1$@`, and comparing those in order would
+    /// forbid the one thing positional arguments are for.
+    func testEveryStringTakesTheSameArgumentsInBothLanguages() {
+        for (key, english) in L10n.english {
+            guard let german = L10n.german[key] else { continue }
+            let left = Self.conversions(in: english)
+            let right = Self.conversions(in: german)
+            if left.contains(where: { $0.contains("$") })
+                || right.contains(where: { $0.contains("$") }) {
+                // Which argument gets which conversion, not merely which
+                // conversions appear. Comparing sorted multisets let a
+                // *swap* through — `%1$d … %2$@` against `%1$@ … %2$d` reduces
+                // to ["@", "d"] on both sides — and that is the exact crash
+                // this test exists to prevent: the count read as an object
+                // pointer, in German only, at the call site.
+                XCTAssertEqual(Self.argumentsByIndex(left), Self.argumentsByIndex(right),
+                               "«\(key)» takes different arguments in German: \(german)")
+            } else {
+                XCTAssertEqual(left, right,
+                               "«\(key)» takes different arguments in German: \(german)")
+            }
+        }
+    }
+
+    /// The conversions a format string consumes, in order, each keeping its
+    /// positional prefix when it has one (`1$@`). `%%` is an escaped percent
+    /// sign and consumes nothing.
+    private static func conversions(in format: String) -> [String] {
+        // No space in the flags class: `%` + space + a letter is ordinary prose
+        // («100 % Rabatt» would otherwise read as a `%o` specifier and fail the
+        // parity check on a translation that is perfectly correct), while the
+        // signed-space format `% d` never appears in UI copy. `.*` precision is
+        // recognised so `%.*f` is checked rather than skipped.
+        let pattern = "%(\\d+\\$)?[-+#0]*[0-9*]*(?:\\.[0-9*]+)?"
+            + "(?:hh|h|ll|l|q|L|z|j|t)?([@dioxXufFeEgGcsp%])"
+        // Not `try?`: a pattern that stops compiling would make every string
+        // yield no conversions, every comparison trivially equal, and this
+        // whole test a green no-op.
+        let regex = try! NSRegularExpression(pattern: pattern, options: [])
+        let text = format as NSString
+        let whole = NSRange(location: 0, length: text.length)
+        return regex.matches(in: format, options: [], range: whole).compactMap { match -> String? in
+            let conversionRange = match.range(at: 2)
+            guard conversionRange.location != NSNotFound else { return nil }
+            let conversion = text.substring(with: conversionRange)
+            guard conversion != "%" else { return nil }
+            let positionRange = match.range(at: 1)
+            guard positionRange.location != NSNotFound else { return conversion }
+            return text.substring(with: positionRange) + conversion
+        }
+    }
+
+    /// Argument index → the conversion that reads it. A positional specifier
+    /// names its argument; a plain one takes the next in sequence.
+    ///
+    /// Comparing these maps accepts every reordering positional arguments
+    /// exist for — `%2$@ of %1$@` against `%1$@ von %2$@`, and a plain English
+    /// string against a reordered German one — while still catching a type
+    /// swap at any index, which the sorted comparison could not.
+    private static func argumentsByIndex(_ conversions: [String]) -> [Int: String] {
+        var next = 1
+        var byIndex: [Int: String] = [:]
+        for token in conversions {
+            guard let dollar = token.firstIndex(of: "$") else {
+                byIndex[next] = token
+                next += 1
+                continue
+            }
+            let index = Int(token[token.startIndex..<dollar]) ?? next
+            byIndex[index] = String(token[token.index(after: dollar)...])
+        }
+        return byIndex
     }
 }

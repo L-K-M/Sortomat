@@ -40,7 +40,12 @@ enum ConfigStore {
     static func load(from file: URL = configFile) -> Config {
         guard let data = try? Data(contentsOf: file) else {
             var config = Config()
-            config.rules = [RuleTemplate.ebooks.makeRule()]
+            // The rule a brand-new user finds should be one that works. The
+            // e-book template that used to be seeded here cannot do anything at
+            // all without an API key, so a first launch offered a rule that was
+            // guaranteed to sit there doing nothing; the tidy-up template is
+            // entirely deterministic. Both are still in the gallery.
+            config.rules = [RuleTemplate.tidy.makeRule()]
             save(config)
             return config
         }

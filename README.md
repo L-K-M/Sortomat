@@ -2,17 +2,26 @@
 
 **Hazel, but the rule is a sentence.**
 
-Sortomat is a macOS menu-bar app that watches folders and files their new
-contents away automatically — using **plain-language rules** you write, applied
-by an LLM. Instead of hand-coding sorting logic, you describe what you want:
+Sortomat is a macOS app that watches folders and files their new contents away.
+A rule is a list of *if this, then that* steps — conditions on the name, kind,
+size, dates, tags, origin or contents of a file, and a destination written as a
+template:
+
+> *`kind is image` → `Images/{name}`*
+> *`name matches ^RE-(\d{4})` → `Invoices/{match.1}/{name}`*
+
+Everything that can be decided that way is decided that way: for free, offline,
+instantly, and identically every time. **A rule that needs no model runs
+without an API key at all** — the template you meet on first launch is one of
+those.
+
+For the judgement a pattern cannot express — *what genre is this book, who sent
+this invoice, what project is this screenshot from* — a rule can hand the file
+to a language model, with the answer constrained to a folder set you chose and
+anything doubtful parked rather than misfiled:
 
 > *"Sort e-books into `{Genre}/{Last, First}/{Title}.epub`."*
 > *"File invoices under `{Year}/{Sender}/{Date Subject}.pdf`."*
-> *"Route screenshots into the matching project folder."*
-
-…and Sortomat applies it to every new file that lands, letting the model handle
-the fuzzy judgment (genre, author, topic, "what is this document about") that
-deterministic rules can't express.
 
 **Latest release:** v<!-- version -->1.0.0<!-- /version --> ·
 [Download](https://github.com/L-K-M/Sortomat/releases/latest)
@@ -21,31 +30,51 @@ deterministic rules can't express.
 > Most of this code was written by an LLM from the design in `AGENTS.md` and
 > `PLAN.md`. The file-moving core (path safety, dedup, undo) is deliberately
 > conservative and covered by tests — but review before trusting it with
-> irreplaceable files, and start in **preview** mode.
+> irreplaceable files, and leave new rules on **Ask first**.
 
 ## What it does
 
-- **Natural-language rules.** Each rule is a watched folder + a target folder +
-  a prompt. New files are classified and moved (or copied) into the structure
-  the prompt describes.
-- **Safe by default.** New rules start in **preview** — Sortomat shows you every
-  planned move and touches nothing until you approve it. Path building rejects
+- **Rules that are steps, not one guess.** Each step is a group of conditions
+  (all / any / none, nestable) and the actions that follow. Conditions can ask
+  about the name, stem, extension, path and depth; the kind (`image`, `pdf`,
+  `archive`, …, resolved through the type system, not a hard-coded extension
+  list); size; **five different dates** — added, created, modified, opened,
+  captured — because "the date" silently meaning *modified* is the most
+  confusing thing about every other tool; Finder tags, label and comment; where
+  a file was downloaded from; image dimensions, page count, duration; and the
+  file's **text**.
+- **Real patterns.** Globs with `{a,b}`, `[0-9]`, `**` and negation, and
+  regular expressions whose captures you can use in the destination —
+  `Rechnung_(\d{4})` → `{match.1}/`. Patterns that could take exponential time
+  are refused rather than run.
+- **Destinations as templates.** `{name}`, `{stem}`, `{ext}`, `{parent}`,
+  `{added|date:'yyyy-MM'}`, `{match.invoice.year}`, `{counter}` — with filters
+  for case, padding, truncation and fallbacks.
+- **It tells you what it will do.** Every step shows how many files in the
+  folder it claims *right now*; point it at one file and it explains, condition
+  by condition, what it found and what it decided. The rule editor lists what
+  is wrong with a rule — a condition that can never be true, a step that hides
+  the ones after it, a destination that could leave a file with no name —
+  before you turn it on.
+- **Reads what files contain.** Word, Excel, PowerPoint, OpenDocument, RTF,
+  HTML, PDF and EPUB text without leaving the machine, and on-device **OCR**
+  for screenshots and scans, so a rule can match on a scanned invoice's number.
+- **Safe by default.** New rules start in **ask first** — Sortomat shows every
+  planned move and touches nothing until you approve. Path building rejects
   traversal and absolute paths, forces the real file extension, detects true
   duplicates by **content hash** (not just size), and verifies cross-volume
   copies before deleting the original.
-- **Reversible.** Every move is journaled; one click in the History tab (or
-  `Sortomat … undo`) puts it back.
-- **Predictable where it can be.** Deterministic **pre-rules** (glob / regex /
-  kind / age) handle the obvious cases for free, and only what falls through
-  goes to the model.
-- **Constrained where it matters.** Give a rule an **allowed folder set
-  (taxonomy)** and the model can only file into those folders; anything else —
-  or anything low-confidence — goes to a quarantine folder instead of being
-  mis-sorted.
+- **Reversible.** Every move is journaled; one click in History, one click on
+  the notification, or `Sortomat … undo` puts it back.
+- **Constrained where the model is involved.** Give a rule an **allowed folder
+  set (taxonomy)** and the model can only file into those folders; anything
+  else — or anything low-confidence — is parked rather than mis-sorted.
 - **Private by choice.** A rule can run **metadata-only** (name + metadata,
-  contents never leave the machine), and you can point it at a **local model**
-  (Ollama, LM Studio) instead of the cloud.
-- **Cost-aware.** Set a per-check budget and see estimated spend in the menu.
+  contents never read), and you can point it at a **local model** (Ollama, LM
+  Studio) instead of the cloud.
+- **Cost-aware.** A per-check budget *and* a monthly ceiling, spend in the
+  menu, and holds for battery and Low Power Mode — so an afternoon of downloads
+  cannot quietly become a bill.
 
 ## Install
 
@@ -64,31 +93,39 @@ Launch at login is a toggle inside the app. Requires macOS 13+.
 
 ## Setup
 
-1. Menu-bar icon → **Rules & Settings…**
-2. **Settings** tab: paste your model API key (stored in the Keychain). The
-   default provider is Mistral; point the base URL at any OpenAI-compatible
-   endpoint, including a local one.
-3. **Rules** tab: add a rule (start from a template), choose the watched and
-   target folders, write the prompt, and leave **Preview only** on until you've
-   seen it do the right thing.
-
-A disabled e-book example rule (German genre taxonomy) is seeded on first launch.
+1. Open the window from the menu-bar icon, or ⌘0. It has three things: the
+   **Inbox** (files waiting for a yes), **History** (everything filed, with
+   undo), and your rules grouped by the folder they watch.
+2. Pick a rule template. **Tidy up by kind** needs no API key and nothing else
+   configured — choose the folder to watch and the folder to file into, and it
+   works. It is the rule seeded on first launch.
+3. For a rule that asks a model, paste an API key in **Settings** (it is stored
+   in the Keychain). The default provider is Mistral; point the base URL at any
+   OpenAI-compatible endpoint, including a local one.
+4. Every rule is **Automatic**, **Ask first** or **Off**. New rules start on
+   *Ask first*: they do all the work and then wait for you in the Inbox.
 
 ## How it works
 
 For each new, *stable* file (not still being written; partial downloads and
 hidden files are ignored):
 
-1. **Deterministic pre-rules** run first — a match can route, skip, or defer to
-   the model.
-2. If deferred, the file's name, metadata and (unless the rule is metadata-only)
-   a text excerpt — plain text, PDF via PDFKit, EPUB via an in-process reader —
-   are sent to the model, which returns a destination folder + filename and a
-   confidence.
+1. **The rule's steps run in order**, and the first one whose conditions match
+   claims the file — unless it says *continue*, which hands the file and
+   anything it captured to the next step. Conditions inside a step are
+   evaluated cheapest-first, so a name test rejects a file before anything
+   opens it: a rule that never mentions contents never reads one.
+2. **Only what no step claimed** reaches the model, and only if the rule says
+   so. Then the file's name, metadata and (unless the rule is metadata-only) a
+   text excerpt are sent, and the model returns a destination and a confidence.
 3. The answer is **sanitized** and, if the rule has a taxonomy or a confidence
-   threshold, checked; out-of-set or low-confidence results are quarantined.
+   threshold, checked; out-of-set or low-confidence results are parked.
 4. The file is moved/copied with collision suffixing and duplicate detection,
-   and the move is journaled.
+   the move is journaled, and any tags the rule asked for are applied.
+
+Identical bytes under the same rule get the identical decision without asking
+twice — the answer is remembered by content, so re-downloading the same file
+costs nothing.
 
 Folders are watched via FSEvents — new files are picked up within seconds of
 *settling* (a short stability probe guards against half-written downloads) —
@@ -131,10 +168,12 @@ xcodebuild -project Sortomat.xcodeproj -scheme Sortomat -destination 'platform=m
 ./scripts/build.sh
 ```
 
-See [`CICD.md`](CICD.md) for the release process, [`AGENTS.md`](AGENTS.md)
-for the architecture, and [`fable-is-awesome.md`](fable-is-awesome.md) for the
-ongoing code review (findings, fixes, and what's still open). `sort_epubs.py`
-is the original dependency-free batch EPUB sorter that seeded the idea.
+See [`CICD.md`](CICD.md) for the release process, [`AGENTS.md`](AGENTS.md) for
+the architecture, and [`ANALYSIS.md`](ANALYSIS.md) for what is done, what is
+open and what to read first — it is the document to start from.
+[`fable-is-awesome.md`](fable-is-awesome.md) is the earlier review record.
+`sort_epubs.py` is the original dependency-free batch EPUB sorter that seeded
+the idea.
 
 ## Releasing
 

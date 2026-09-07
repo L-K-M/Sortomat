@@ -163,7 +163,20 @@ struct InboxItem: Identifiable, Equatable {
     }
 
     var id: UUID { plan.id }
-    var heat: Heat { plan.origin == .preRule ? .exact : Heat(confidence: plan.confidence) }
+    /// A decision a *step* made is exact — no model was asked, so there is no
+    /// confidence to report and "Certain" would be a weaker word than the
+    /// truth. `.fallback` deliberately is not: the rule's fallback parking a
+    /// file it could not place is the definition of unsure.
+    var heat: Heat {
+        switch plan.origin {
+        case .preRule, .step: return .exact
+        // Listed rather than `default:`, because a new origin landing silently
+        // in the confidence bucket is exactly the mistake `switch_exhaustive.py`
+        // exists to catch — and that checker skips any switch with a `default`.
+        case .model, .taxonomy, .confidence, .fallback, .system:
+            return Heat(confidence: plan.confidence)
+        }
+    }
     var destinationText: String { plan.relativeDestination(to: target) }
 
     /// Where the decision came from, in the user's words. "A step decided
@@ -171,10 +184,15 @@ struct InboxItem: Identifiable, Equatable {
     /// difference is the whole reason to trust either.
     var originText: String {
         switch plan.origin {
-        case .preRule: return L10n.t("origin.step")
+        // `.preRule` is the engine's old spelling of `.step` and no longer
+        // produced; the two say the same thing to a reader, so they say it in
+        // the same words rather than inventing a distinction to keep them
+        // apart.
+        case .preRule, .step: return L10n.t("origin.step")
         case .model: return L10n.t("origin.model")
         case .taxonomy: return L10n.t("origin.folders")
         case .confidence: return L10n.t("origin.unsure")
+        case .fallback: return L10n.t("origin.fallback")
         case .system: return L10n.t("origin.system")
         }
     }

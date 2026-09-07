@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct RuleEditor: View {
@@ -8,6 +9,9 @@ struct RuleEditor: View {
     // newline in the taxonomy field and keeps the extensions text stable.
     @State private var extensionsText = ""
     @State private var taxonomyText = ""
+    @State private var tryResult: String?
+    @State private var matchResult: String?
+    @State private var counting = false
 
     var body: some View {
         Form {
@@ -103,29 +107,71 @@ struct RuleEditor: View {
                 }
             }
 
-            Section(L10n.t("rule.preRules.section")) {
-                Text(L10n.t("rule.preRules.help"))
+            RuleIssues(rule: rule)
+
+            Section(L10n.t("rule.steps.section")) {
+                Text(L10n.t("rule.steps.help"))
                     .font(.caption).foregroundStyle(.secondary)
-                ForEach(rule.preRules) { preRule in
-                    if let index = rule.preRules.firstIndex(where: { $0.id == preRule.id }) {
-                        PreRuleCard(
-                            preRule: $rule.preRules[index],
+                // By identity, never by index: a row keyed on its position
+                // outlives the element it showed for one render after a
+                // delete, and `$rule.steps[index]` then subscripts past the
+                // end. Looking the index up by id each time returns nil for a
+                // step that is gone, and the row simply isn't drawn.
+                let findings = RuleValidator.findings(for: rule)
+                ForEach(rule.steps) { step in
+                    if let index = rule.steps.firstIndex(where: { $0.id == step.id }) {
+                        StepCard(
+                            step: $rule.steps[index],
+                            rule: rule,
                             position: index + 1,
                             canMoveUp: index > 0,
-                            canMoveDown: index < rule.preRules.count - 1,
-                            onMoveUp: { move(preRule.id, by: -1) },
-                            onMoveDown: { move(preRule.id, by: 1) },
-                            onDelete: { rule.preRules.removeAll { $0.id == preRule.id } }
+                            canMoveDown: index < rule.steps.count - 1,
+                            findings: findings.filter { $0.stepID == step.id },
+                            onMoveUp: { move(step.id, by: -1) },
+                            onMoveDown: { move(step.id, by: 1) },
+                            onDelete: { rule.steps.removeAll { $0.id == step.id } }
                         )
                         .padding(.vertical, 4)
                     }
                 }
                 Button {
-                    rule.preRules.append(PreRule())
+                    rule.steps.append(RuleStep(
+                        when: ConditionGroup(mode: .all, items: [.test(ConditionTest())]),
+                        then: [RuleAction(type: .move, template: "{name}")]
+                    ))
                 } label: {
-                    Label(L10n.t("rule.preRules.add"), systemImage: "plus.circle")
+                    Label(L10n.t("rule.steps.add"), systemImage: "plus.circle")
                 }
                 .buttonStyle(.borderless)
+
+                Divider()
+
+                HStack(spacing: 10) {
+                    Button(L10n.t("rule.tryIt.pick")) { tryOneFile() }
+                    Button(L10n.t("rule.tryIt.count")) { countMatches() }
+                        .disabled(counting || rule.watchPath.isEmpty)
+                    if counting { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                if let tryResult {
+                    Text(tryResult)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let matchResult {
+                    Text(matchResult).font(.callout)
+                }
+                Text(L10n.t("rule.tryIt.help"))
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Picker(L10n.t("rule.fallback"), selection: $rule.fallback) {
+                    Text(L10n.t("rule.fallback.askModel")).tag(Rule.Fallback.askModel)
+                    Text(L10n.t("rule.fallback.skip")).tag(Rule.Fallback.skip)
+                    Text(L10n.t("rule.fallback.quarantine")).tag(Rule.Fallback.quarantine)
+                }
+                Text(L10n.t("rule.fallback.help"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -134,14 +180,78 @@ struct RuleEditor: View {
             extensionsText = rule.extensions.joined(separator: ", ")
             taxonomyText = rule.taxonomy.joined(separator: "\n")
         }
-        .onChange(of: rule) { _ in state.persistAndApply() }
+        .onChange(of: rule) { _ in
+            // Both results describe the rule as it was; leaving them up after
+            // an edit makes the editor assert something about a rule that no
+            // longer exists.
+            tryResult = nil
+            matchResult = nil
+            state.persistAndApply()
+        }
+    }
+
+    /// Run the rule against one chosen file without enabling it, writing
+    /// anything down, or calling the model.
+    private func tryOneFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        if !rule.watchPath.isEmpty {
+            panel.directoryURL = URL(
+                fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath
+            )
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let snapshot = rule
+        Task { @MainActor in
+            let run = await state.tryRule(snapshot, on: url)
+            // The rule the user is looking at, not the one this run asked
+            // about: `onChange` clears the field on every edit, and a result
+            // that lands afterwards would put a concrete destination back on
+            // screen for a rule that no longer says it.
+            guard rule == snapshot else { return }
+            let name = url.lastPathComponent
+            if run.needsModel {
+                tryResult = L10n.t("rule.tryIt.needsModel", name, run.summary)
+            } else if let destination = run.destination, run.operation != .skip {
+                tryResult = L10n.t("rule.tryIt.would", name,
+                                   RuleCatalog.label(for: operationType(run.operation)),
+                                   destination, run.summary)
+            } else {
+                tryResult = L10n.t("rule.tryIt.skip", name, run.summary)
+            }
+        }
+    }
+
+    private func countMatches() {
+        counting = true
+        let snapshot = rule
+        Task { @MainActor in
+            let counts = await state.matchCount(for: snapshot)
+            counting = false
+            guard rule == snapshot else { return }
+            matchResult = L10n.t("rule.tryIt.matches", "\(counts.matched)",
+                                 "\(counts.scanned)", "\(counts.needsModel)")
+        }
+    }
+
+    private func operationType(_ operation: Placement.Operation) -> ActionType {
+        switch operation {
+        case .move: return .move
+        case .copy: return .copy
+        case .rename: return .rename
+        case .trash: return .trash
+        case .quarantine: return .quarantine
+        case .skip: return .skip
+        }
     }
 
     private func move(_ id: UUID, by offset: Int) {
-        guard let i = rule.preRules.firstIndex(where: { $0.id == id }) else { return }
-        let j = i + offset
-        guard rule.preRules.indices.contains(j) else { return }
-        rule.preRules.swapAt(i, j)
+        guard let index = rule.steps.firstIndex(where: { $0.id == id }) else { return }
+        let target = index + offset
+        guard rule.steps.indices.contains(target) else { return }
+        rule.steps.swapAt(index, target)
     }
 
     private var pathWarnings: [String] {

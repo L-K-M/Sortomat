@@ -114,16 +114,47 @@ final class UIModelTests: XCTestCase {
     }
 
     func testEveryOriginSaysWhereTheDecisionCameFrom() {
+        // Restored rather than left set: `setUp` clears it for *this* class,
+        // which does nothing for whichever class the runner picks next.
+        let previous = L10n.forcedLanguage
         L10n.forcedLanguage = "en"
-        let origins = PlannedAction.Origin.allCases
-        var seen: Set<String> = []
-        for origin in origins {
-            let item = InboxItem(plan: plan(origin: origin, confidence: 0.5),
-                                 target: URL(fileURLWithPath: "/t"), ruleMode: .automatic)
-            XCTAssertFalse(item.originText.hasPrefix("origin."), "\(origin) renders its key")
-            seen.insert(item.originText)
+        addTeardownBlock { L10n.forcedLanguage = previous }
+        func label(_ origin: PlannedAction.Origin) -> String {
+            InboxItem(plan: plan(origin: origin, confidence: 0.5),
+                      target: URL(fileURLWithPath: "/t"), ruleMode: .automatic).originText
         }
-        XCTAssertEqual(seen.count, origins.count, "two origins read the same to a user")
+        for origin in PlannedAction.Origin.allCases {
+            XCTAssertFalse(label(origin).hasPrefix("origin."), "\(origin) renders its key")
+            XCTAssertFalse(label(origin).isEmpty, "\(origin) says nothing")
+        }
+        // The distinctness this used to assert across *every* case: `.preRule`
+        // is the engine's old spelling of `.step` and is no longer produced,
+        // so the two deliberately read the same rather than being told apart
+        // by a distinction a user does not have. What must stay distinct is
+        // the promise each one makes.
+        XCTAssertEqual(label(.preRule), label(.step))
+        // Every remaining pair, not six chosen ones: distinctness is not
+        // transitive, so a hand-written list stays green while `.step` and
+        // `.taxonomy` quietly come to read the same — and it does not grow a
+        // case when `Origin` does.
+        var seen: Set<String> = []
+        for origin in PlannedAction.Origin.allCases where origin != .preRule {
+            XCTAssertTrue(seen.insert(label(origin)).inserted,
+                          "\(origin) reads the same to a user as another origin")
+        }
+    }
+
+    func testAStepDecisionIsExactAndAFallbackIsNot() {
+        // A step asked no model, so there is no confidence to report and
+        // "Certain" would understate it. A fallback parking a file it could
+        // not place is the definition of unsure.
+        func heat(_ origin: PlannedAction.Origin) -> Heat {
+            InboxItem(plan: plan(origin: origin, confidence: nil),
+                      target: URL(fileURLWithPath: "/t"), ruleMode: .automatic).heat
+        }
+        XCTAssertEqual(heat(.step), .exact)
+        XCTAssertEqual(heat(.preRule), .exact)
+        XCTAssertEqual(heat(.fallback), .unsure)
     }
 
     // MARK: - RuleGroup

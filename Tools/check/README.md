@@ -1,7 +1,7 @@
 # Checks that need no compiler
 
 CI is the only Swift compiler this project has, so a typo costs a full cycle —
-and when Actions is unavailable it costs a day. These four scripts read the
+and when Actions is unavailable it costs a day. These seven scripts read the
 sources and answer questions a compiler would answer first. They are not a
 Swift parser and never will be; each is deliberately narrow, and each exists
 because the mistake it catches has actually been made here.
@@ -46,6 +46,20 @@ unlabelled arguments, a type name declared twice, a trailing closure.
 It checks *call sites*. Adding a stored property to a type with an explicit
 initializer is an error inside that initializer, which no call site shows.
 
+## `call_order.py` — a static call still passes its arguments in order
+
+Swift takes arguments in the order the declaration lists them, and says so:
+«argument 'now' must precede argument 'uuid'». That is a compile error, from a
+call site in a file the signature's own change never opened — and it is the one
+`init_labels.py` cannot see, because it reads initializers and this is
+`Type.method(...)`.
+
+Labels as a *sequence*, not a set: the call's labels must be a subsequence of
+the declaration's, which is exactly the rule Swift enforces once a defaulted
+parameter may be left out. Silent on the same things as `init_labels.py` —
+a positional argument, an unlabelled parameter, a name declared twice — since
+an overload set cannot be resolved without knowing the argument types.
+
 ## `switch_exhaustive.py` — a switch still covers the enum it switches over
 
 ANALYSIS records this one as having cost a CI round: widen an enum — a new
@@ -58,6 +72,22 @@ whose patterns are all `.member` of exactly one project enum, with no
 `default`, must name every case. Switches it cannot pin to exactly one enum
 are skipped, as are switches over an `Optional`, whose own `.none` would
 otherwise match some unrelated enum that happens to have one.
+
+## `scope.py` — a declaration outside the type it belongs to
+
+A test method inserted after its class's closing brace still parses: it becomes
+a file-scope function, compiles as nothing, and every call to one of the
+class's private helpers fails with «cannot find 'x' in scope» — an error that
+names a symbol rather than the misplaced brace, several lines away from the
+mistake. This one exists because it happened twice in one afternoon, both times
+from inserting a test by matching on a neighbouring function's name.
+
+Brace counting, not parsing. The blanking order is the whole trick, and both
+orderings that get it wrong are represented in this repo: `"https://…"` looks
+like a line comment until strings are gone, and a comment mentioning
+`Invoices/*.pdf` looks like the start of a block comment until line comments
+are gone. So: raw strings, multi-line literals, plain strings, line comments,
+block comments — then count.
 
 ## What none of them do
 

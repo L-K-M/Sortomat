@@ -80,6 +80,9 @@ actor Pipeline {
     func scan(rule: Rule, config: Config, apiKey: String, forcePreview: Bool = false,
               batchID: UUID = UUID(), modelAllowed: Bool = true) async -> ScanResult {
         guard rule.enabled else { return ScanResult() }
+        // One pass, one enumeration of the target: this pass must not answer
+        // "already filed?" from what the last one saw.
+        targetIndexes.removeAll()
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
         guard !rule.watchPath.isEmpty, !rule.targetPath.isEmpty else { return ScanResult() }
@@ -285,26 +288,33 @@ actor Pipeline {
     ) async throws -> DecideResult {
         let ext = file.pathExtension
 
-        // 1. Deterministic pre-rules.
-        switch DeterministicEngine.evaluate(rule: rule, file: file) {
-        case .skip(let name):
-            return DecideResult(plan: PlannedAction(
-                ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
-                destination: nil, origin: .preRule,
-                reason: L10n.t("activity.preRuleSkip", rule.name, file.lastPathComponent, name),
-                confidence: nil, copyInsteadOfMove: rule.copyInsteadOfMove
-            ))
-        case .route(let relativePath, let name):
-            let dest = try Sanitizer.destination(target: target, relativePath: relativePath, originalExtension: ext)
-            return DecideResult(plan: PlannedAction(
-                ruleID: rule.id, ruleName: rule.name, source: file,
-                kind: rule.copyInsteadOfMove ? .copy : .move,
-                destination: dest, origin: .preRule,
-                reason: L10n.t("reason.preRule", name), confidence: nil,
-                copyInsteadOfMove: rule.copyInsteadOfMove
-            ))
-        case .useLLM:
-            break
+        // 1. The rule's steps. Evaluation is pure: everything it can know
+        //    arrives through `FileFacts`, which loads each cost tier at most
+        //    once and only when a condition actually asks.
+        //
+        //    The model is always *allowed* here, whatever the budget says: a
+        //    step that asks for it hands back a resume token, and whether the
+        //    question is actually put is decided below — after the memo, so
+        //    that identical bytes are still filed from memory when the budget
+        //    is spent or there is no key, which is the whole promise of the
+        //    memo. Deferring at this point would have skipped that lookup.
+        let context = evaluationContext(file: file, rule: rule, target: target, allowModel: true)
+        var resumeToken: ResumeToken?
+        // The rule as the model will see it. A step's own prompt, taxonomy,
+        // privacy mode or threshold lays over the rule's from here on, so the
+        // question, the valves and the extraction all read the same settings.
+        var rule = rule
+        switch RuleEvaluator.evaluate(context) {
+        case .decided(let placement, let trace):
+            return try Self.plan(from: placement, trace: trace, file: file,
+                                 rule: rule, target: target, ext: ext)
+        case .deferred:
+            // Unreachable with `allowModel: true`; kept so the switch stays
+            // exhaustive and honest if that ever changes.
+            return DecideResult(plan: nil)
+        case .needsModel(let request, let token, _):
+            resumeToken = token
+            rule = Self.applying(request.options, to: rule)
         }
 
         // 2. Content-addressed memo: identical bytes under this rule get the
@@ -321,8 +331,13 @@ actor Pipeline {
                         ?? L10n.t("memo.rememberedBare"),
                     confidence: hit.confidence
                 )
-                return try route(remembered, file: file, rule: rule, target: target,
-                                 ext: ext, usage: TokenUsage(), usedLLM: false)
+                let decided = try route(remembered, file: file, rule: rule, target: target,
+                                        ext: ext, usage: TokenUsage(), usedLLM: false)
+                // A remembered answer goes through the same steps as a fresh
+                // one: the second identical file must be filed by the actions
+                // the rule wrote, not by the raw path the first one was asked.
+                return try resumedPlan(resumeToken, classification: remembered, decided: decided,
+                                       file: file, rule: rule, target: target, ext: ext)
             }
         }
 
@@ -363,8 +378,13 @@ actor Pipeline {
             rulePrompt: rule.prompt, taxonomy: rule.taxonomy, fileDescription: description
         )
         let c = result.classification
-        let decided = try route(c, file: file, rule: rule, target: target,
-                                ext: ext, usage: result.usage, usedLLM: true)
+        let routed = try route(c, file: file, rule: rule, target: target,
+                               ext: ext, usage: result.usage, usedLLM: true)
+        // The model is a *binding* action: its answer fills {model.*} and the
+        // actions after it decide what to do with them. A rule whose askModel
+        // is the last action behaves exactly as before.
+        let decided = try resumedPlan(resumeToken, classification: c, decided: routed,
+                                      file: file, rule: rule, target: target, ext: ext)
 
         // Remember the verdict for these exact bytes — a re-download or a
         // renamed copy never pays again. Only answers that routed cleanly are
@@ -376,6 +396,244 @@ actor Pipeline {
                         reason: c.reason, confidence: c.confidence)
         }
         return decided
+    }
+
+    /// What a rule *would* do with a file, with nothing written down: no
+    /// ledger entry, no memo, no journal, no in-flight marking, and — unless
+    /// asked — no model call and therefore no cost.
+    ///
+    /// This is the whole reason the evaluator is pure. Until now the only way
+    /// to find out whether a rule matched anything was to enable it and watch.
+    struct DryRun: Equatable, Sendable {
+        var operation: Placement.Operation
+        /// Relative to the rule's target folder, already rendered.
+        var destination: String?
+        var summary: String
+        var needsModel: Bool
+        /// Whether any step's `when` held for this file. This — not the
+        /// operation — is what "does this step match?" asks: a step that
+        /// tags and continues, leaves the file alone, or asks the model has
+        /// matched just as surely as one that moves it.
+        var matched: Bool
+    }
+
+    func dryDecide(file: URL, rule: Rule, allowModel: Bool = false) -> DryRun {
+        let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
+        let context = evaluationContext(file: file, rule: rule, target: target,
+                                        allowModel: allowModel)
+        switch RuleEvaluator.evaluate(context) {
+        case .decided(let placement, let trace):
+            return DryRun(
+                operation: placement.operation,
+                destination: placement.relativePath?.string(),
+                summary: trace.summary,
+                needsModel: false,
+                matched: trace.steps.contains { $0.matched }
+            )
+        case .needsModel(_, _, let trace), .deferred(let trace):
+            return DryRun(operation: .skip, destination: nil,
+                          summary: trace.summary, needsModel: true,
+                          matched: trace.steps.contains { $0.matched })
+        }
+    }
+
+    /// How many of a rule's own watched files its steps claim right now,
+    /// deterministically and without spending anything. Capped, because the
+    /// answer is a reassurance, not a report.
+    func matchCount(rule: Rule, limit: Int = 500) -> (matched: Int, scanned: Int, needsModel: Int) {
+        // A fresh count sees the folder as it is now, and then reuses one
+        // enumeration across all five hundred candidates — but it must not
+        // take the *scan's* snapshot with it. `Pipeline` is an actor and this
+        // method never suspends, so it runs whole between two of a scan's
+        // awaits; clearing outright left the scan to rebuild its index from a
+        // folder it had itself been filing into, and the files it had already
+        // moved then answered "already filed?" for the ones still to come.
+        // Saved and put back, so the pass keeps the enumeration it started.
+        let scanIndexes = targetIndexes
+        defer { targetIndexes = scanIndexes }
+        targetIndexes.removeAll()
+        let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
+        let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
+        let candidates = candidateFiles(in: watch, target: target, rule: rule).prefix(limit)
+        var matched = 0
+        var needsModel = 0
+        for file in candidates {
+            let run = dryDecide(file: file, rule: rule)
+            if run.matched { matched += 1 }
+            if run.needsModel { needsModel += 1 }
+        }
+        return (matched, candidates.count, needsModel)
+    }
+
+    /// The duplicate index for this target, built at most once per pass.
+    ///
+    /// Only for a rule that actually asks "is this already filed?" — otherwise
+    /// every scan would enumerate the target folder for nothing. And *kept*,
+    /// because `TargetIndex` walks the whole target folder on first use and
+    /// this was being constructed per file: a rule using `duplicateInTarget`
+    /// against a fifty-thousand-file folder re-walked it for every candidate,
+    /// and `matchCount` did that five hundred times behind a single keystroke
+    /// in the editor. The type's own comment always promised one enumeration
+    /// per pass; now it is one.
+    ///
+    /// Actor-isolated state, so the scan's task group serializes on it rather
+    /// than racing: `TargetIndex` caches lazily and is not itself thread-safe.
+    private var targetIndexes: [String: TargetIndex] = [:]
+
+    private func targetIndex(for rule: Rule, target: URL) -> TargetIndex? {
+        guard Self.mentions(.duplicateInTarget, in: rule) else { return nil }
+        if let existing = targetIndexes[target.path] { return existing }
+        let built = TargetIndex(root: target)
+        targetIndexes[target.path] = built
+        return built
+    }
+
+    /// The evaluation context for one file: the rule, the facts, and whether
+    /// the model may be consulted at all right now.
+    private func evaluationContext(file: URL, rule: Rule, target: URL,
+                                   allowModel: Bool) -> RuleEvaluator.Context {
+        let watchRoot = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
+        let index = targetIndex(for: rule, target: target)
+        let source = LiveFactSource(url: file, targetPath: target.path, targetIndex: index)
+        let facts = FileFacts(
+            url: file, watchRoot: watchRoot, source: source,
+            contentPolicy: rule.privacyMode == .metadataOnly ? .blocked : .allowed
+        )
+        return RuleEvaluator.Context(rule: rule, facts: facts, allowModel: allowModel)
+    }
+
+    static func mentions(_ attribute: Attribute, in rule: Rule) -> Bool {
+        func walk(_ group: ConditionGroup) -> Bool {
+            group.items.contains { item in
+                switch item {
+                case .test(let test): return test.attribute == attribute
+                case .group(let nested): return walk(nested)
+                }
+            }
+        }
+        return rule.steps.contains { walk($0.when) }
+    }
+
+    /// A `Placement` becomes a `PlannedAction`. `Sanitizer` still builds and
+    /// confines every path; the engine only ever says what and where.
+    private static func plan(from placement: Placement, trace: RuleTrace, file: URL,
+                             rule: Rule, target: URL, ext: String,
+                             usage: TokenUsage = TokenUsage(),
+                             usedLLM: Bool = false) throws -> DecideResult {
+        let reason = placement.reason.isEmpty ? trace.summary : placement.reason
+        func skipPlan() -> DecideResult {
+            DecideResult(plan: PlannedAction(
+                ruleID: rule.id, ruleName: rule.name, source: file, kind: .skip,
+                destination: nil, origin: placement.origin, reason: reason,
+                confidence: placement.confidence, copyInsteadOfMove: rule.copyInsteadOfMove,
+                // A step that tags a file and leaves it where it is plans as a
+                // skip, and dropping the effects here made "tag it green, keep
+                // it in Downloads" do nothing at all, silently.
+                sideEffects: placement.sideEffects
+            ), usage: usage, usedLLM: usedLLM)
+        }
+        guard placement.operation != .skip, let rendered = placement.relativePath else {
+            return skipPlan()
+        }
+        let relative = rendered.string()
+        guard !relative.trimmingCharacters(in: .whitespaces).isEmpty else { return skipPlan() }
+
+        // An empty root is not a root. `URL(fileURLWithPath: "")` is not the
+        // rule's target, and handing it to `Sanitizer.destination` would ask it
+        // to confine the file inside somewhere nobody chose — the relative path
+        // two lines up is already checked for exactly this.
+        let root = placement.rootPath
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) } ?? target
+        let destination = try Sanitizer.destination(
+            target: root, relativePath: relative, originalExtension: ext
+        )
+        let kind: PlannedAction.Kind
+        switch placement.operation {
+        case .copy: kind = .copy
+        case .quarantine: kind = .quarantine
+        case .move, .rename, .trash: kind = .move
+        case .skip: kind = .skip
+        }
+        return DecideResult(plan: PlannedAction(
+            ruleID: rule.id, ruleName: rule.name, source: file, kind: kind,
+            destination: destination, origin: placement.origin, reason: reason,
+            confidence: placement.confidence,
+            copyInsteadOfMove: placement.operation == .copy,
+            sideEffects: placement.sideEffects
+        ), usage: usage, usedLLM: usedLLM)
+    }
+
+    /// Hand the model's answer back to the engine so the actions after
+    /// `askModel` can use it. The routing result stands as it is when there
+    /// is nothing to resume, or when the answer produced no placement (a
+    /// skip) — and it keeps its own `usage` and `usedLLM`, so a remembered
+    /// answer that went through the steps is still not billed as a call.
+    private func resumedPlan(_ token: ResumeToken?, classification: Classification,
+                             decided: DecideResult, file: URL, rule: Rule, target: URL,
+                             ext: String) throws -> DecideResult {
+        guard let token, let plan = decided.plan, plan.kind != .skip,
+              !rule.steps.isEmpty else { return decided }
+        let routing = try Self.routing(for: classification, rule: rule,
+                                       fileName: file.lastPathComponent)
+        guard let answer = Self.modelAnswer(for: classification, routing: routing) else {
+            return decided
+        }
+        // The answer is in hand, so nothing is asked again; a *second*
+        // `askModel` further down the same step would need a call this build
+        // does not make, and the routing result stands for it.
+        let context = evaluationContext(file: file, rule: rule, target: target,
+                                        allowModel: false)
+        guard case .decided(let placement, let trace) = RuleEvaluator.resume(
+            token, answer: answer, context: context
+        ) else { return decided }
+        return try Self.plan(from: placement, trace: trace, file: file, rule: rule,
+                             target: target, ext: ext, usage: decided.usage,
+                             usedLLM: decided.usedLLM)
+    }
+
+    /// A step's own model options laid over the rule's. All-nil — what the
+    /// migration writes, and what the editor writes until a prompt is typed —
+    /// is exactly the rule's own prompt, taxonomy, privacy mode and threshold.
+    /// Until this was applied, a per-step prompt was decoded, validated and
+    /// then ignored: the pipeline asked with the rule's prompt regardless, and
+    /// a rule whose only instruction lived on its step asked with none.
+    static func applying(_ options: ModelStepOptions, to rule: Rule) -> Rule {
+        var effective = rule
+        if let prompt = options.prompt, !prompt.trimmingCharacters(in: .whitespaces).isEmpty {
+            effective.prompt = prompt
+        }
+        // Non-empty, like the prompt above: an empty list is an untouched
+        // field, not an instruction to drop the rule's taxonomy — and dropping
+        // it would quietly retire the folder enforcement for that one ask.
+        if let taxonomy = options.taxonomy, !taxonomy.isEmpty { effective.taxonomy = taxonomy }
+        if let privacyMode = options.privacyMode { effective.privacyMode = privacyMode }
+        if let threshold = options.confidenceThreshold { effective.confidenceThreshold = threshold }
+        return effective
+    }
+
+    /// The model's answer as the engine sees it. `folder` and `filename` are
+    /// what `{model.folder}` and `{model.filename}` render, and they are read
+    /// off the path that will actually be applied rather than off the model's
+    /// own `folder` field: that field is not what the taxonomy was checked
+    /// against, and a remembered verdict carries no fields at all, only the
+    /// path. A model that answered with one `relative_path` still answered a
+    /// folder and a name.
+    static func modelAnswer(for c: Classification, routing: Routing) -> ModelAnswer? {
+        guard let relativePath = routing.relativePath else { return nil }
+        let components = (c.resolvedRelativePath() ?? relativePath)
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0 != "." }
+        let folder = components.dropLast().joined(separator: "/")
+        return ModelAnswer(
+            folder: folder.isEmpty ? nil : folder,
+            filename: components.last,
+            relativePath: relativePath,
+            reason: routing.reason,
+            confidence: c.confidence,
+            quarantined: routing.origin == .confidence || routing.origin == .taxonomy
+        )
     }
 
     /// The routing shared by a fresh model answer and a memo hit: skip
@@ -479,6 +737,10 @@ actor Pipeline {
         switch plan.kind {
         case .skip:
             ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .skipped)
+            // Nothing moved, so there is no journal entry to protect and the
+            // effects are all there is to carry out. A tag-and-leave step has
+            // no other way to reach the file.
+            ActionExecutor.apply(plan.sideEffects, to: plan.source)
             return ActivityEntry(ok: true, message: plan.reason)
         case .duplicate:
             ledger.record(ruleID: plan.ruleID, fingerprint: fingerprint, status: .done)
@@ -513,6 +775,9 @@ actor Pipeline {
                         batchID: batchID, destinationStamp: Journal.stamp(of: url),
                         targetPath: target.path
                     ))
+                    // After the journal, never before: a side effect that
+                    // fails must not be able to cost the user their undo.
+                    ActionExecutor.apply(plan.sideEffects, to: url)
                     return ActivityEntry(ok: true,
                                          message: filedMessage(plan, finalURL: url, target: target, name: name),
                                          kind: .filed, placed: url)

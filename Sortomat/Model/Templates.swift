@@ -3,6 +3,7 @@ import Foundation
 /// Ready-made rules the user can drop in and adjust — the onboarding story for
 /// non-programmers (PLAN Phase 4).
 public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
+    case tidy
     case ebooks
     case screenshots
     case invoices
@@ -12,6 +13,7 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
 
     public var title: String {
         switch self {
+        case .tidy: return L10n.t("template.tidy.title")
         case .ebooks: return L10n.t("template.ebooks.title")
         case .screenshots: return L10n.t("template.screenshots.title")
         case .invoices: return L10n.t("template.invoices.title")
@@ -21,6 +23,7 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
 
     public var summary: String {
         switch self {
+        case .tidy: return L10n.t("template.tidy.summary")
         case .ebooks: return L10n.t("template.ebooks.summary")
         case .screenshots: return L10n.t("template.screenshots.summary")
         case .invoices: return L10n.t("template.invoices.summary")
@@ -32,6 +35,23 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
     /// nothing moves until the user has picked folders and reviewed it.
     public func makeRule() -> Rule {
         switch self {
+        case .tidy:
+            // The one template that needs no key, no model and no network: a
+            // file's kind is a `UTType` lookup, and four buckets cover most of
+            // what lands in a Downloads folder. It is also the honest answer to
+            // "what can this app do for free?", which every previous template
+            // answered with "nothing".
+            //
+            // The fallback is `skip`, not `askModel`: anything the four steps
+            // do not recognize is left exactly where it is. A tidy-up rule that
+            // starts spending money on the files it did not understand would be
+            // the opposite of what it says on the tin.
+            return Rule(
+                name: L10n.t("template.tidy.title"),
+                enabled: false,
+                steps: Self.tidySteps,
+                fallback: .skip
+            )
         case .ebooks:
             return Rule(
                 name: L10n.t("template.ebooks.title"),
@@ -108,6 +128,30 @@ public enum RuleTemplate: String, CaseIterable, Identifiable, Sendable {
         case .blank:
             return Rule(dryRun: true)
         }
+    }
+
+    /// Four buckets by content kind, each a single free condition. `{name}` is
+    /// the last component of every destination, so a file always arrives with
+    /// the name it had — the one thing a tidy-up rule must never get wrong.
+    static var tidySteps: [RuleStep] {
+        func step(_ folderKey: String, _ kinds: [Kind]) -> RuleStep {
+            let folder = L10n.t(folderKey)
+            return RuleStep(
+                name: folder,
+                when: ConditionGroup(mode: .all, items: [
+                    .test(ConditionTest(attribute: .kind, op: .isIn,
+                                        value: .list(kinds.map(\.rawValue))))
+                ]),
+                then: [RuleAction(type: .move, template: "\(folder)/{name}")]
+            )
+        }
+        return [
+            step("template.tidy.folder.images", [.image]),
+            step("template.tidy.folder.documents",
+                 [.pdf, .document, .spreadsheet, .presentation, .text, .ebook]),
+            step("template.tidy.folder.media", [.audio, .video]),
+            step("template.tidy.folder.archives", [.archive, .diskImage]),
+        ]
     }
 
     /// The 31 normalized German genres from the original batch script, reused as
