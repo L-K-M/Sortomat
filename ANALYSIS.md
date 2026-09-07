@@ -21,11 +21,13 @@ Seven things that cost real time to learn, in the order they will bite.
    `Testing failed:` block — `xcbeautify` prints the error messages there
    without file or line, and the full text a few lines further down. A round
    trip is about seventy seconds. **Run `Tools/check/run` before every push**:
-   five scripts that answer, without a compiler, the questions a compiler asks
+   seven scripts that answer, without a compiler, the questions a compiler asks
    first — every localized key exists in both languages, every format string
    consumes what its call site passes, every type that claims a protocol
    implements it, every initializer call site still matches its type, and
-   every exhaustive switch still covers its enum (trap 3 below). Each
+   every exhaustive switch still covers its enum (trap 3 below), every static
+   call site passes its arguments in the order the declaration lists them, and
+   every test method sits inside the class whose helpers it calls. Each
    exists because that mistake was made here and cost a cycle. They do not
    typecheck; a clean run means the mechanical mistakes are gone, not that the
    branch builds. `Tools/check/README.md` says what each one cannot see.
@@ -86,12 +88,11 @@ Seven things that cost real time to learn, in the order they will bite.
 | 5 | One CI build per push instead of two, artifact upload kept | [#43](https://github.com/L-K-M/Sortomat/pull/43) | merged |
 | 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | merged |
 | 5 | The wave-4 review record kept in the tree (`fable.md`) | [#44](https://github.com/L-K-M/Sortomat/pull/44) | merged |
-| 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46) | open: green on `0f30b91`, 372 tests, awaiting a review round |
+| 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46) | merged, seven review rounds |
 | 5 | Undo that says so when there is nothing left to undo, and a batch undo that says why it refused | [#47](https://github.com/L-K-M/Sortomat/pull/47) | merged, four review rounds |
 
-**Wave 5 is on `main` except for the engine, which is green and waiting on a
-review round** (#46 — merge it and this table needs one edit). Getting
-here took a two-day detour worth one sentence of memory: the last third of the
+**All of wave 5 is on `main`.** Getting here took a two-day detour worth one
+sentence of memory: the last third of the
 wave was written with no compiler at all, because CI was down for the reason in
 trap 7 above, and each branch got a second reader's pass instead. That pass
 found eight real defects in the engine branch (§1) and the compiler then found
@@ -108,9 +109,9 @@ P0-12 and P0-16 (globs), P0-13 (dates), P0-14 (tokens and captures), P0-15
 
 ---
 
-## 1. The rule engine — the largest open piece
+## 1. The rule engine — landed, phases 1–3 of five
 
-[#46](https://github.com/L-K-M/Sortomat/pull/46) implements phases 1–3 of the
+[#46](https://github.com/L-K-M/Sortomat/pull/46) landed phases 1–3 of the
 five-phase plan: the data model, the pure evaluator, the fact
 source, lossless migration in both directions, the pipeline wiring, a step
 editor, a validator, and the side-effect executor. Two thirds of it was written
@@ -165,10 +166,12 @@ it:
   with a compiler at hand: Finder comments have no public setter (`MDItemSetAttribute`
   is not it), `URLResourceValues.labelNumber` is read-only on some SDKs, and
   `runShortcut` means spawning the `shortcuts` binary. **M**
-- **`trash`** — accepted, then planned as a move, so the file lands in the
-  destination folder instead of the Trash. Safe and undoable, and not what the
-  rule says; the validator says so. Journal it as a move whose destination is
-  the file's `~/.Trash` URL and `Journal.undo` reverses it with no new code; if
+- **`trash`** — accepted, and then planned as a *skip*, because
+  `Placement.relativePath` is nil for it and `plan(from:)` requires one: the
+  file is left exactly where it is. Safe, and not what the rule says; the
+  validator warns, and now says accurately which of the two happens. Journal it
+  as a move whose destination is the file's `~/.Trash` URL and `Journal.undo`
+  reverses it with no new code; if
   `FileManager.trashItem(at:resultingItemURL:)` proves awkward to bridge, move
   into `<target>/_Trash/` instead. **S**
 
@@ -178,7 +181,7 @@ reverse them. They are not file moves and do not belong in `journal.jsonl`,
 whose shape is frozen. Today an undone move leaves the tags it added behind —
 which matches what Hazel does, and is worth deciding rather than inheriting.
 
-### 1.2 `RuleValidator` — done, with one piece left
+### 1.2 `RuleValidator` — done
 
 `RuleValidator.findings(for:)` is pure: no disk, no cost, safe to
 run on every keystroke, and each finding carries the exact step, condition or
@@ -207,6 +210,14 @@ lookups that produce them, and `RuleCatalog`'s `needsContent` is derived from
 them rather than stored, because those two lists had already drifted on
 exactly that attribute — the editor stayed quiet while the validator called
 the rule broken.
+
+The review rounds found a second finding of that shape. The token checker ran
+on every action's template, but two action types do not hold a token template:
+`sortIntoDatedFolder` reads its as a *date format*, and `runShortcut` reads its
+as a Shortcuts *name*. A shortcut called "Convert {heic}" is a perfectly good
+shortcut and was being called a broken template — an error, on a rule that
+works. Both are exempt now, and `runShortcut` keeps the check that is right for
+a name: it must not be empty.
 
 Two rules kept it useful and are worth keeping: an **error** is a rule that
 cannot do what it says, a **note** is a rule that works but probably surprises
@@ -524,6 +535,60 @@ in.
   nothing, would unlock a whole category of tests; a `Notifier` delivery hook
   (the shape `L10n.forcedLanguage` already uses) would let those tests assert
   what the app *said*. **M**, and the highest-leverage **M** in this list.
+- **An apostrophe inside a quoted filter argument breaks the template.**
+  `indexOfClose`, `parseBody` and `splitReplacement` each toggle a `quoted`
+  flag with no escape, so `{title|default:'L'été'}` toggles three times, the
+  closing brace is read as quoted, and the template reports
+  `.unterminatedPlaceholder`. French, Italian and English possessives are
+  ordinary values. Doubling — `''` for a literal apostrophe — is the usual
+  answer and has to go into all three scanners plus the unquoting. **S** each,
+  **M** to be sure they agree.
+- **`{n|round:…}` promises fractional spans that `mo` and `y` do not keep.**
+  `TimeSpan.cutoff` documents that `1.5h` is ninety minutes, and it is — for
+  the fixed-second units. `wholeUnits` rounds, so `1.5mo` is two months and
+  nothing in the trace says so. Either round-trip the fraction through days or
+  say in the operator help that months and years are whole. **S**
+- **`RegexCache` re-scans the pattern for named groups on every match.**
+  `firstMatch` calls `namedGroups(in:)` per invocation — an O(pattern) scan and
+  a fresh array per file — beside a cache that exists precisely to avoid
+  per-file work. Cache the names next to the compiled expression. **S**
+- **The five date attributes offer `before`/`after` with a duration field.**
+  All five declare `shape: .duration` with examples like "30d", and
+  `dateOperators` includes `.before` and `.after`, which compare against a
+  calendar date. `ValueShape.date` exists and no attribute uses it, which is
+  the tell. Split the operator sets, or wire the shape up. **S**
+- **A case drift between the watch root and the file's path costs `relPath`,
+  `subfolder` and `depth`.** `FileFacts.relativePath` tests
+  `full.hasPrefix(base + "/")` exactly. macOS volumes are case-insensitive by
+  default, so a persisted watch root and the spelling an enumerator reports can
+  disagree; when they do, all three attributes silently fall back to the file
+  name, `""` and `0`. An anchored case-insensitive match is the obvious fix and
+  is *not* obviously right: on a case-sensitive volume it would compute a
+  relative path for a file genuinely not under that root, trading a visible
+  degradation for a wrong answer. Worth doing with a case-sensitivity probe of
+  the volume, or not at all. **S** to change, **M** to get right.
+- **A side effect that failed is indistinguishable from one that had nothing
+  to do.** `ActionExecutor.apply` returns the action *types* it carried out, and
+  a tag it skipped because the file already had it looks exactly like a tag it
+  could not write. `Pipeline` discards the result at both call sites and reports
+  `ok: true` regardless — and for a tag-and-leave skip the side effects are the
+  whole operation, so the activity line can say "done" when nothing happened.
+  The fix is a return shape that separates "nothing to do" from "tried and
+  failed", not another call site reading the existing one. **M**
+- **`matchesRegex` on a list attribute says `.unknownOperator`.** `stringList`
+  has no regex case, so `tags matchesRegex ^client-` falls through to the
+  verdict that means "you typed the operator wrong" — when the operator is real
+  and simply unsupported for lists. Either implement it per element (captures
+  are meaningless there, which is most of why it was skipped) or add a verdict
+  that says "not for this kind of value". **S** either way, and the diagnostic
+  is the part that matters. **S**
+- **`TemplateDates` builds a `DateFormatter` per token.** Every `{date:…}`
+  in a destination constructs one, and a rule with three date tokens
+  constructs three per file. `DateFormatter` is famously dear to build and
+  cheap to reuse, and `RegexCache` is the pattern already in the tree for
+  exactly this. Measure first — a pass is dominated by disk, and a cache keyed
+  by format string plus locale plus time zone is only worth it if it shows up.
+  **S**
 - **Tags an undo leaves behind.** `ActionExecutor` writes Finder tags after the
   move is journaled, and `Journal.undo` puts the file back with the tags still
   on it. This matches what Hazel does; the fix is the `SideEffectJournal` in
@@ -727,18 +792,17 @@ So a future reader can judge how much to trust each item.
   that logs one function up.
 - **Review bot rounds:** four on the integration train, one on #37 (nine
   actionable items, all resolved; the second round never returned), five on #38,
-  and one each on #39–#42. Everything applied, declined or refuted is recorded
-  in the commit messages, which is where the reasoning lives. The rounds earned
-  their keep three times over: round 5 on #38 caught that round 3 of the same
+  one each on #39–#42, four on #47 and seven on #46. Everything applied,
+  declined or refuted is recorded in the commit messages, which is where the
+  reasoning lives. The rounds earned their keep three times over: round 5 on #38 caught that round 3 of the same
   PR had silently disabled the fallback it added; the round on #41 caught a Core
   Foundation over-release — `takeRetainedValue` on a Get-rule function — that
   would only ever have crashed in the field; and the round on #40, which
   arrived after #40 had merged and was triaged against `main` rather than
   dropped with the PR, found that the Undo button on a notification could
   complete in total silence (#47). A review that lands late is still a review.
-- **Tests:** 106 before wave 4, 161 after the integration train, 307 on `main`
-  today and 372 with the engine branch — the exact figure is whatever the last
-  green CI run reports.
+- **Tests:** 106 before wave 4, 161 after the integration train, 307 on `main` before
+  the engine and 449 with it, green on the merge commit.
 
 ---
 
