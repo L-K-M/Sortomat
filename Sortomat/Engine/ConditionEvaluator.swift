@@ -177,6 +177,11 @@ enum ConditionEvaluator {
             guard !expected.isEmpty else { return TestResult(.invalidValue, actual: actual) }
             return TestResult(expected.contains { folded.contains($0) } ? .fail : .pass, actual: actual)
         case .equals, .eq:
+            // The same guard every branch above carries. Without it a blank
+            // value coerces to no strings and `folded == expected` reads as
+            // «this file has no tags» — a rule the user did not write, passing
+            // silently, instead of the misconfiguration it is.
+            guard !expected.isEmpty else { return TestResult(.invalidValue, actual: actual) }
             return TestResult(folded == expected ? .pass : .fail, actual: actual)
         case .matchesGlob, .notMatchesGlob:
             guard let pattern = ValueCoercion.string(test.value), !pattern.isEmpty else {

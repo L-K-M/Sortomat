@@ -89,6 +89,36 @@ enum LegacyMigration {
         ConditionGroup(mode: .all, items: [.test(test)])
     }
 
+    /// Whether unescaping this pattern can be trusted to mean the same thing
+    /// to the old engine.
+    ///
+    /// `unescapeLegacyGlob` drops the backslash from *every* escape, which is
+    /// right for a pattern `escapeLegacyGlob` wrote and wrong for one a person
+    /// typed here: `report\*final` means a literal asterisk in this build and
+    /// projects to `report*final`, a wildcard, in the old one — an old build
+    /// moving files the rule never claimed. The other direction is quieter and
+    /// also wrong: `photo[0-9].jpg` uses syntax the old engine reads
+    /// literally, so the projected rule matches nothing.
+    ///
+    /// So: a pattern is projectable only when every escape is one of the five
+    /// characters `escapeLegacyGlob` introduces, and no unescaped one appears.
+    /// Everything else degrades to the downgrade guard, which is this module's
+    /// standing answer to "the old build cannot say this".
+    static func isProjectableGlob(_ pattern: String) -> Bool {
+        var escaped = false
+        for character in pattern {
+            if escaped {
+                guard newGlobMetacharacters.contains(character) else { return false }
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if newGlobMetacharacters.contains(character) {
+                return false
+            }
+        }
+        return !escaped     // a pattern ending in a lone backslash is not one either
+    }
+
     /// Escapes the characters the new glob language added, so an old pattern
     /// keeps its literal meaning.
     static func escapeLegacyGlob(_ pattern: String) -> String {
@@ -173,7 +203,8 @@ enum LegacyMigration {
     /// and the whole projection is prefixed with a catch-all skip: an old build
     /// then does *nothing* for that rule rather than something its author never
     /// asked for.
-    static func project(steps: [RuleStep], copyInsteadOfMove: Bool) -> [PreRule] {
+    static func project(steps: [RuleStep], fallback: Rule.Fallback,
+                        copyInsteadOfMove: Bool) -> [PreRule] {
         var projected: [PreRule] = []
         var lostSomething = false
 
@@ -183,11 +214,29 @@ enum LegacyMigration {
             // off is an ordinary thing to do — treating it as unrepresentable
             // meant one switched-off step stopped the old build sorting at all.
             guard step.enabled else { continue }
+            // Nor is a step that can never match. `.any` with no items is what
+            // an unreadable condition decodes to, and reading one of those as
+            // unrepresentable froze the old build's whole config over a step
+            // that does nothing here either. `.all` and `.none` with no items
+            // are the opposite case — vacuously *true* — and must still be
+            // treated as unrepresentable.
+            if step.when.mode == .any, step.when.items.isEmpty { continue }
             guard let preRule = projectOne(step, copyInsteadOfMove: copyInsteadOfMove) else {
                 lostSomething = true
                 continue
             }
             projected.append(preRule)
+        }
+        // The old build has one fallback: hand what nothing claimed to the
+        // model. Any other fallback has to be written down, or a config that
+        // says «skip what no step claims» quietly starts paying for LLM calls
+        // on the old build. A catch-all skip at the *end* says it exactly, and
+        // it is also the safe reading of `quarantine`, which the old build has
+        // no idea how to do: leave the file alone rather than route it by a
+        // rule the user never wrote.
+        if fallback != .askModel, !lostSomething {
+            projected.append(PreRule(name: L10n.t("migration.downgradeFallback"),
+                                     match: .glob, pattern: "*", action: .skip))
         }
         guard lostSomething else { return projected }
         // The guard alone. `DeterministicEngine.evaluate` returns on the first
@@ -208,12 +257,20 @@ enum LegacyMigration {
         let pattern: String
         switch (test.attribute, test.op) {
         case (.name, .matchesGlob):
+            let raw = ValueCoercion.string(test.value) ?? ""
+            guard isProjectableGlob(raw) else { return nil }
             match = .glob
-            pattern = unescapeLegacyGlob(ValueCoercion.string(test.value) ?? "")
+            pattern = unescapeLegacyGlob(raw)
         case (.name, .matchesRegex):
             match = .regex
             pattern = ValueCoercion.string(test.value) ?? ""
         case (.kind, .equals):
+            // `upgrade` pins a migrated kind rule to the extension table
+            // because the UTType resolver matches different files. A rule
+            // written *here* uses the UTType resolver, so projecting it as a
+            // legacy kind rule hands the old build a question it answers
+            // differently — the same rule, a different set of files.
+            guard test.kindSource == .extensionTable else { return nil }
             match = .kind
             pattern = ValueCoercion.string(test.value) ?? ""
         case (.dateModified, .olderThan), (.dateModified, .newerThan):

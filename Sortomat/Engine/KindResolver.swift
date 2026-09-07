@@ -139,7 +139,16 @@ enum MagicBytes {
         }
         if starts([0x66, 0x74, 0x79, 0x70], at: 4) {                              // …ftyp
             let brand = bytes.count >= 12 ? String(decoding: bytes[8..<12], as: UTF8.self) : ""
-            return brand.hasPrefix("hei") || brand.hasPrefix("avi") ? .image : .video
+            // Not every still image in an ISO container says «heic». HEIF's
+            // brands are `mif1` and `msf1` as often as `heic`/`heix`
+            // (ISO/IEC 23008-12), AVIF's are `avif`/`avis`, and an iTunes
+            // audio file says `M4A `/`M4B `/`M4P `. Defaulting all of those to
+            // video put a photo in the video folder — the wrong-bucket failure
+            // this resolver exists to prevent, and only for the extensionless
+            // files that reach the sniffer at all.
+            if ["M4A", "M4B", "M4P"].contains(where: brand.hasPrefix) { return .audio }
+            let image = ["hei", "hev", "mif", "msf", "avi"]
+            return image.contains(where: brand.hasPrefix) ? .image : .video
         }
         if starts([0x50, 0x4B, 0x03, 0x04]) { return .archive }                   // zip
         if starts([0x1F, 0x8B]) { return .archive }                               // gzip

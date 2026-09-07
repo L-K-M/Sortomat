@@ -143,7 +143,13 @@ enum ValueCoercion {
         // One formatter for the four attempts, not four.
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = calendar
+        // Gregorian, not the caller's calendar. The formats below are
+        // Gregorian conventions, and `DateFormatter` reads "2026-01-05" as
+        // year 2026 *of whatever calendar it holds* — on a machine set to the
+        // Buddhist calendar that is 1483 CE, so `modifiedBefore 2026-01-05`
+        // matched every file on disk. The time zone is still the caller's:
+        // that one genuinely is a local question.
+        formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = calendar.timeZone
         // The `T` form too: `ISO8601DateFormatter` below wants a zone offset,
         // so a bare `2026-01-01T09:30:00` fell through everything.

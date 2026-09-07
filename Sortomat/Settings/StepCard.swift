@@ -115,12 +115,15 @@ struct StepCard: View {
     private func recount() async {
         guard !rule.watchPath.isEmpty else { return }
         counting = true
+        let asked = step.when
         let counts = await state.matchCount(for: rule, step: step)
         // `task(id:)` cancels the run in flight on every keystroke, but a
         // cancelled run still resumes here when the count it asked for comes
         // back — and without this it would write counts for conditions the
-        // user has already typed past, over the fresher run's.
-        guard !Task.isCancelled else { return }
+        // user has already typed past, over the fresher run's. Cancellation
+        // alone is not enough: the run the *pill* starts is unstructured and
+        // is never cancelled, so it also has to check what it measured.
+        guard !Task.isCancelled, asked == step.when else { return }
         matched = counts.matched
         scanned = counts.scanned
         counting = false

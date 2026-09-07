@@ -423,8 +423,15 @@ struct TokenTemplate {
         var cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
             .precomposedStringWithCanonicalMapping
             .replacingOccurrences(of: "\\", with: "/")
-        while cleaned.hasPrefix("/") { cleaned.removeFirst() }
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Trimming *inside* the loop, because one pass left the trim at the
+        // end to re-expose a slash: "/ /tmp" lost its first slash, the final
+        // trim removed the space behind it, and the function handed back
+        // "/tmp" — the absolute path this whole function exists to prevent.
+        while cleaned.hasPrefix("/") {
+            cleaned.removeFirst()
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return cleaned
     }
 
     /// An interpolated value may never create a folder.

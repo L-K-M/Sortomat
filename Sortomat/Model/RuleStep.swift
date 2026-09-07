@@ -22,14 +22,24 @@ public struct RuleStep: Codable, Equatable, Sendable, Identifiable {
     }
 
     public init(from decoder: Decoder) throws {
+        // Fail closed, the same way `ConditionGroup` does. `RuleStep()` carries
+        // the *editor's* default — `.all` with no items, which is vacuously
+        // true — so an unintelligible step claimed every file the rule saw.
+        // `.any` with no items can never match, which is the safe reading.
         guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
-            self = RuleStep()
+            self = RuleStep(when: ConditionGroup(mode: .any))
             return
         }
         id = ((try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? nil) ?? UUID()
         name = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
         enabled = ((try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? nil) ?? true
-        when = ((try? container.decodeIfPresent(ConditionGroup.self, forKey: .when)) ?? nil) ?? ConditionGroup()
+        // An absent `when` is the same question as an unintelligible one, and
+        // was the one path still failing open: `{"name":"PDFs","then":[…]}` —
+        // the shape a hand-written config gets wrong — ran its `then` on every
+        // file. The memberwise default stays `.all`: a step the *editor* has
+        // just added has no conditions yet, and the validator says so.
+        when = ((try? container.decodeIfPresent(ConditionGroup.self, forKey: .when)) ?? nil)
+            ?? ConditionGroup(mode: .any)
         then = ((try? container.decodeIfPresent([RuleAction].self, forKey: .then)) ?? nil) ?? []
     }
 

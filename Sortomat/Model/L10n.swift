@@ -327,6 +327,7 @@ public enum L10n {
         "migration.stepsFromPreRules": "%@ pre-rules became steps",
         "migration.ageUsesModified": "Age conditions still use the modification date — the editor can switch them to «date added»",
         "migration.downgradeGuard": "Needs a newer Sortomat",
+        "migration.downgradeFallback": "Leave anything else alone",
         "preview.origin.step": "Rule step",
         "preview.origin.fallback": "Fallback",
 
@@ -809,6 +810,7 @@ public enum L10n {
         "migration.stepsFromPreRules": "%@ Vorregeln wurden zu Schritten",
         "migration.ageUsesModified": "Altersbedingungen nutzen weiterhin das Änderungsdatum – im Editor auf «hinzugefügt am» umstellbar",
         "migration.downgradeGuard": "Benötigt ein neueres Sortomat",
+        "migration.downgradeFallback": "Alles andere in Ruhe lassen",
         "preview.origin.step": "Regelschritt",
         "preview.origin.fallback": "Auffangregel",
 

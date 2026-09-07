@@ -40,11 +40,18 @@ struct ModelAnswer: Equatable, Sendable {
 
 /// Where evaluation stopped, so it can pick up again once the model answered.
 struct ResumeToken: Equatable, Sendable {
+    /// Which rule asked. The indices alone are not an address: the model
+    /// round-trip is asynchronous, and a rule edited while an answer is in
+    /// flight can have a *different* `askModel` at the same step and action.
+    /// `ModelRequest` has carried the rule's id all along; the token that
+    /// binds the answer back has to carry it too.
+    var ruleID: UUID
     var stepIndex: Int
     var actionIndex: Int
     var fromFallback: Bool
 
-    init(stepIndex: Int, actionIndex: Int, fromFallback: Bool = false) {
+    init(ruleID: UUID, stepIndex: Int, actionIndex: Int, fromFallback: Bool = false) {
+        self.ruleID = ruleID
         self.stepIndex = stepIndex
         self.actionIndex = actionIndex
         self.fromFallback = fromFallback
@@ -97,6 +104,12 @@ enum RuleEvaluator {
     /// Continue after the pipeline resolved a model request.
     static func resume(_ token: ResumeToken, answer: ModelAnswer,
                               context: Context) -> Outcome {
+        // The answer belongs to the rule that asked. If that rule is gone or
+        // has been replaced, evaluating from scratch is the honest thing to
+        // do — it either finds a new question to ask or decides without one,
+        // where binding would have placed the file by an answer computed for
+        // a prompt the user has since changed.
+        guard token.ruleID == context.rule.id else { return evaluate(context) }
         var state = State(rule: context.rule, timeZone: context.timeZone)
         state.answer = answer
         // The steps before the one that asked already ran; re-running them is
@@ -177,7 +190,8 @@ enum RuleEvaluator {
                     let request = ModelRequest(ruleID: rule.id, stepIndex: index,
                                                actionIndex: actionIndex,
                                                options: action.model ?? ModelStepOptions())
-                    let resume = ResumeToken(stepIndex: index, actionIndex: actionIndex)
+                    let resume = ResumeToken(ruleID: rule.id, stepIndex: index,
+                                             actionIndex: actionIndex)
                     return .needsModel(request, resume, finish(&state, context: context))
                 }
                 if let description = state.builder.apply(action) {
@@ -209,7 +223,8 @@ enum RuleEvaluator {
                 } else {
                     guard context.allowModel else { return .deferred(finish(&state, context: context)) }
                     let request = ModelRequest(ruleID: rule.id, stepIndex: -1, actionIndex: -1)
-                    let resume = ResumeToken(stepIndex: -1, actionIndex: -1, fromFallback: true)
+                    let resume = ResumeToken(ruleID: rule.id, stepIndex: -1,
+                                             actionIndex: -1, fromFallback: true)
                     return .needsModel(request, resume, finish(&state, context: context))
                 }
             }

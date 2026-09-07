@@ -272,7 +272,8 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         try c.encode(destinationRoots, forKey: .destinationRoots)
         let projected = steps.isEmpty
             ? preRules
-            : LegacyMigration.project(steps: steps, copyInsteadOfMove: copyInsteadOfMove)
+            : LegacyMigration.project(steps: steps, fallback: fallback,
+                                      copyInsteadOfMove: copyInsteadOfMove)
         try c.encode(projected, forKey: .preRules)
     }
 }

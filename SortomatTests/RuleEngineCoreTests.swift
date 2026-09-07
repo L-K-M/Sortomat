@@ -156,6 +156,23 @@ final class ValueCoercionTests: XCTestCase {
         let expected = calendar.date(byAdding: .month, value: -1, to: now)
         XCTAssertEqual(cutoff, expected)
     }
+
+    func testADateMeansTheSameThingOnEveryCalendar() {
+        // `DateFormatter` reads "2026-01-05" as year 2026 *of the calendar it
+        // holds*. Handed the caller's, a machine set to the Buddhist calendar
+        // read it as 1483 CE — so `modifiedBefore 2026-01-05` matched every
+        // file on disk. The digit formats are a Gregorian convention; only the
+        // time zone is the caller's to decide.
+        let utc = TimeZone(identifier: "UTC")!
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = utc
+        var buddhist = Calendar(identifier: .buddhist)
+        buddhist.timeZone = utc
+        let value = ConditionValue.text("2026-01-05")
+        let reference = ValueCoercion.date(value, calendar: gregorian)
+        XCTAssertNotNil(reference, "the format has to parse at all for this to mean anything")
+        XCTAssertEqual(ValueCoercion.date(value, calendar: buddhist), reference)
+    }
 }
 
 final class TokenTemplateTests: XCTestCase {
@@ -258,6 +275,18 @@ final class TokenTemplateTests: XCTestCase {
 
     func testUnterminatedPlaceholderIsReported() {
         XCTAssertEqual(TokenTemplate("{name").errors, [.unterminatedPlaceholder])
+    }
+
+    func testASlashHidingBehindWhitespaceIsStrippedToo() {
+        // One stripping pass, then a trim, put the slash back: "/ /tmp" lost
+        // its first slash, the trim removed the space behind it, and what came
+        // out was "/tmp" — the absolute path this function exists to prevent,
+        // which `Sanitizer` then refuses, leaving the file where it was.
+        XCTAssertEqual(TokenTemplate.escapePathValue("/ /tmp"), "tmp")
+        XCTAssertEqual(TokenTemplate.escapePathValue("/\n/tmp"), "tmp")
+        XCTAssertEqual(TokenTemplate.escapePathValue(" /Users/x"), "Users/x")
+        XCTAssertEqual(TokenTemplate.escapePathValue("Rechnungen/ 2026"), "Rechnungen/ 2026",
+                       "a space *inside* the value is part of it")
     }
 }
 
@@ -364,6 +393,20 @@ final class ConditionEvaluatorTests: XCTestCase {
     func testEmptinessAnswersEvenForAMissingFact() {
         XCTAssertEqual(evaluate(ConditionTest(attribute: .comment, op: .isEmpty), facts()).verdict, .pass)
         XCTAssertEqual(evaluate(ConditionTest(attribute: .comment, op: .isNotEmpty), facts()).verdict, .fail)
+    }
+
+    func testAListConditionWithNoValueIsAMisconfigurationNotAMatch() {
+        // Every other list operator says `.invalidValue` for a value that
+        // coerces to no strings — a condition the editor left unfinished, or a
+        // config with the `value` key missing. `equals` compared anyway, so it
+        // read as «this file has no tags» and passed for every untagged file.
+        let untagged = facts(source: StubFactSource(stat: StatFacts(tags: [])))
+        XCTAssertEqual(
+            evaluate(ConditionTest(attribute: .tags, op: .equals), untagged).verdict,
+            .invalidValue)
+        XCTAssertEqual(
+            evaluate(ConditionTest(attribute: .tags, op: .equals, value: .list(["urgent"])),
+                     untagged).verdict, .fail)
     }
 }
 
@@ -595,6 +638,31 @@ final class RuleEvaluatorTests: XCTestCase {
         XCTAssertEqual(tests[0].verdict, .notEvaluated, "the content condition must not be reached")
         XCTAssertEqual(tests[1].verdict, .fail)
     }
+
+    func testAnAnswerCannotBindToARuleTheUserHasSinceReplaced() {
+        // The round trip is asynchronous and the rule is editable while it is
+        // in flight. `stepIndex`/`actionIndex` still address *an* `askModel`
+        // afterwards — which is all the type check could ever see — so without
+        // the rule's own identity on the token, an answer computed for one
+        // prompt is bound to another.
+        let steps = [step("Ask", ConditionTest(attribute: .ext, op: .equals, value: .text("pdf")),
+                          [RuleAction(type: .askModel)])]
+        let asked = rule(steps)
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(asked)) else {
+            return XCTFail("expected a question")
+        }
+        let answer = ModelAnswer(folder: "Rechnungen", filename: "x.pdf", confidence: 0.9)
+
+        let replaced = rule(steps)     // same shape, different rule
+        guard case .needsModel = RuleEvaluator.resume(token, answer: answer,
+                                                      context: context(replaced)) else {
+            return XCTFail("a rule that did not ask must ask for itself")
+        }
+        guard case .decided = RuleEvaluator.resume(token, answer: answer,
+                                                   context: context(asked)) else {
+            return XCTFail("the rule that asked still binds its own answer")
+        }
+    }
 }
 
 final class RuleCodableTests: XCTestCase {
@@ -687,6 +755,17 @@ final class RuleCodableTests: XCTestCase {
         XCTAssertEqual(list.value, .list(["pdf", "epub"]))
         XCTAssertEqual(age.value, .text("30d"))
     }
+
+    func testAStepWithoutAWhenClaimsNothing() throws {
+        // `ConditionGroup` fails closed for a `when` it cannot read; an absent
+        // one was the path still failing open. This is the shape a
+        // hand-written config gets wrong, and it ran its `then` on every file.
+        let rule = try decodeRule("""
+        {"name":"R","steps":[{"name":"PDFs","then":[{"type":"move","to":"PDFs/{name}"}]}]}
+        """)
+        XCTAssertEqual(rule.steps[0].when.mode, .any)
+        XCTAssertTrue(rule.steps[0].when.items.isEmpty, "and .any with no items never matches")
+    }
 }
 
 final class KindResolverTests: XCTestCase {
@@ -735,6 +814,26 @@ final class KindResolverTests: XCTestCase {
         XCTAssertEqual(MagicBytes.kind(sniffing: Data([0xFF, 0xD8, 0xFF, 0xE0])), .image)
         XCTAssertEqual(MagicBytes.kind(sniffing: Data([0x50, 0x4B, 0x03, 0x04])), .archive)
         XCTAssertEqual(MagicBytes.kind(sniffing: Data("#!/bin/sh\n".utf8)), .text)
+    }
+
+    func testTheBrandsInAnISOContainerThatAreNotVideo() {
+        // Only files Launch Services could not identify reach the sniffer, so
+        // this is the last word on them. HEIF says `mif1` and `msf1` at least
+        // as often as `heic` (ISO/IEC 23008-12), AVIF says `avif`, and an
+        // iTunes audio file says `M4A `. Defaulting all of those to video put
+        // a photo in the video folder.
+        func header(_ brand: String) -> Data {
+            Data([0x00, 0x00, 0x00, 0x18]) + Data("ftyp".utf8) + Data(brand.utf8)
+        }
+        for brand in ["mif1", "msf1", "heic", "heix", "hevc", "avif"] {
+            XCTAssertEqual(MagicBytes.kind(sniffing: header(brand)), .image, "brand «\(brand)»")
+        }
+        for brand in ["M4A ", "M4B "] {
+            XCTAssertEqual(MagicBytes.kind(sniffing: header(brand)), .audio, "brand «\(brand)»")
+        }
+        for brand in ["isom", "mp42", "M4V "] {
+            XCTAssertEqual(MagicBytes.kind(sniffing: header(brand)), .video, "brand «\(brand)»")
+        }
     }
 }
 
@@ -907,6 +1006,98 @@ final class LegacyMigrationTests: XCTestCase {
         XCTAssertEqual(projected.count, 1, "the disabled step is dropped, and nothing is guarded")
         XCTAssertEqual(projected[0].pattern, "*.pdf")
         XCTAssertEqual(projected[0].action, .route)
+    }
+
+    /// What an old build would find in `preRules` after this rule is saved.
+    private func projection(of rule: Rule) throws -> [PreRule] {
+        let object = try JSONSerialization.jsonObject(
+            with: try JSONEncoder().encode(rule)) as! [String: Any]
+        return try JSONDecoder().decode(
+            [PreRule].self,
+            from: try JSONSerialization.data(withJSONObject: object["preRules"] as Any))
+    }
+
+    private func globStep(_ pattern: String, kindSource: ConditionTest.KindSource = .utType,
+                          attribute: Attribute = .name,
+                          op: Operator = .matchesGlob) -> RuleStep {
+        RuleStep(name: pattern, when: ConditionGroup(mode: .all, items: [
+            .test(ConditionTest(attribute: attribute, op: op, value: .text(pattern),
+                                kindSource: kindSource))
+        ]), then: [RuleAction(type: .move, template: "Docs/{name}")])
+    }
+
+    func testAStepThatCanNeverMatchIsNotALoss() throws {
+        // `.any` with no items is what an unreadable condition decodes to, and
+        // it claims nothing here either — so counting it as unrepresentable
+        // prefixed the catch-all skip and froze the old build's whole config
+        // over a step that does nothing. The same reasoning as a disabled step.
+        var rule = Rule(name: "R", targetPath: "/target")
+        rule.steps = [
+            globStep("*.pdf"),
+            RuleStep(name: "Dead", when: ConditionGroup(mode: .any, items: []),
+                     then: [RuleAction(type: .move, template: "Nirgends/{name}")])
+        ]
+        let projected = try projection(of: rule)
+        XCTAssertEqual(projected.count, 1, "the inert step is dropped, and nothing is guarded")
+        XCTAssertEqual(projected[0].pattern, "*.pdf")
+
+        // `.all` with no items is the opposite case — vacuously *true* — and
+        // is a genuine loss, because the old build has no way to say it.
+        rule.steps[1].when = ConditionGroup(mode: .all, items: [])
+        XCTAssertEqual(try projection(of: rule).map(\.action), [.skip],
+                       "a match-everything step the old build cannot express is the guard")
+    }
+
+    func testAFallbackThatIsNotTheModelIsWrittenDown() throws {
+        // The old build has one fallback: hand what nothing claimed to the
+        // model. Saying nothing meant a config that reads «skip what no step
+        // claims» quietly started paying for LLM calls on the old build.
+        var rule = Rule(name: "R", targetPath: "/target", fallback: .skip)
+        rule.steps = [globStep("*.pdf")]
+        let projected = try projection(of: rule)
+        XCTAssertEqual(projected.count, 2)
+        XCTAssertEqual(projected[0].pattern, "*.pdf", "the step still comes first")
+        XCTAssertEqual(projected[1].match, .glob)
+        XCTAssertEqual(projected[1].pattern, "*")
+        XCTAssertEqual(projected[1].action, .skip)
+
+        rule.fallback = .askModel
+        XCTAssertEqual(try projection(of: rule).count, 1, "the legacy default needs no help")
+    }
+
+    func testAGlobTheOldEngineWouldReadDifferentlyIsNotProjected() throws {
+        var rule = Rule(name: "R", targetPath: "/target")
+
+        // A literal asterisk here is a wildcard there: unescaping hands the old
+        // build `report*final`, which moves files this rule never claimed.
+        rule.steps = [globStep("report\\*final")]
+        XCTAssertEqual(try projection(of: rule).map(\.action), [.skip],
+                       "widening the pattern is the one thing a downgrade may not do")
+
+        // The quieter direction: syntax the old engine reads literally, so the
+        // projected rule would match nothing at all.
+        rule.steps = [globStep("photo[0-9].jpg")]
+        XCTAssertEqual(try projection(of: rule).map(\.action), [.skip])
+
+        // And what `upgrade` itself writes still round-trips, which is the
+        // whole point of escaping those five characters in the first place.
+        rule.steps = [globStep(LegacyMigration.escapeLegacyGlob("Rechnung [2024].pdf"))]
+        XCTAssertEqual(try projection(of: rule).map(\.pattern), ["Rechnung [2024].pdf"])
+    }
+
+    func testAKindStepOnTheSystemResolverIsNotProjected() throws {
+        // `upgrade` pins a migrated kind rule to the extension table because
+        // the two resolvers match different files. A rule written here uses the
+        // UTType resolver, so projecting it as a legacy kind rule hands the old
+        // build the same words and a different set of files.
+        var rule = Rule(name: "R", targetPath: "/target")
+        rule.steps = [globStep("image", kindSource: .utType, attribute: .kind, op: .equals)]
+        XCTAssertEqual(try projection(of: rule).map(\.action), [.skip])
+
+        rule.steps = [globStep("image", kindSource: .extensionTable, attribute: .kind, op: .equals)]
+        let projected = try projection(of: rule)
+        XCTAssertEqual(projected.map(\.match), [.kind])
+        XCTAssertEqual(projected.map(\.pattern), ["image"])
     }
 }
 

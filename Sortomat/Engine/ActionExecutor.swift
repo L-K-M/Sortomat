@@ -27,6 +27,12 @@ enum ActionExecutor {
     @discardableResult
     static func apply(_ effects: [SideEffect], to url: URL) -> [ActionType] {
         var performed: [ActionType] = []
+        // The activity line names what was done, once each: two tag effects on
+        // one file are one thing that happened to it, not two.
+        func record(_ type: ActionType) {
+            guard !performed.contains(type) else { return }
+            performed.append(type)
+        }
         for effect in effects where supported.contains(effect.type) {
             switch effect.type {
             case .addTags, .removeTags:
@@ -36,10 +42,10 @@ enum ActionExecutor {
                 guard let existing = tags(of: url) else { continue }
                 let updated = resolve(existing, applying: effect)
                 guard updated != existing, writeTags(updated, to: url) else { continue }
-                performed.append(effect.type)
+                record(effect.type)
             case .notify:
                 guard notify(effect, about: url) else { continue }
-                performed.append(effect.type)
+                record(effect.type)
             default:
                 continue
             }

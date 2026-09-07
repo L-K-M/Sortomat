@@ -203,9 +203,14 @@ struct RuleEditor: View {
             )
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let rule = rule
+        let snapshot = rule
         Task { @MainActor in
-            let run = await state.tryRule(rule, on: url)
+            let run = await state.tryRule(snapshot, on: url)
+            // The rule the user is looking at, not the one this run asked
+            // about: `onChange` clears the field on every edit, and a result
+            // that lands afterwards would put a concrete destination back on
+            // screen for a rule that no longer says it.
+            guard rule == snapshot else { return }
             let name = url.lastPathComponent
             if run.needsModel {
                 tryResult = L10n.t("rule.tryIt.needsModel", name, run.summary)
@@ -221,10 +226,11 @@ struct RuleEditor: View {
 
     private func countMatches() {
         counting = true
-        let rule = rule
+        let snapshot = rule
         Task { @MainActor in
-            let counts = await state.matchCount(for: rule)
+            let counts = await state.matchCount(for: snapshot)
             counting = false
+            guard rule == snapshot else { return }
             matchResult = L10n.t("rule.tryIt.matches", "\(counts.matched)",
                                  "\(counts.scanned)", "\(counts.needsModel)")
         }

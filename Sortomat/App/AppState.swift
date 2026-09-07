@@ -258,8 +258,6 @@ final class AppState: ObservableObject {
         persistAndApply()
     }
 
-    /// Add an imported rule (already normalized to disabled + preview by the
-    /// pack) under a unique name; returns its id so the UI can select it.
     /// What this rule would do with one file — no ledger, no memo, no journal,
     /// no model call, no cost. The answer to "does this rule match anything?",
     /// which until now required enabling the rule and watching.
@@ -293,6 +291,8 @@ final class AppState: ObservableObject {
         return probe
     }
 
+    /// Add an imported rule (already normalized to disabled + preview by the
+    /// pack) under a unique name; returns its id so the UI can select it.
     @discardableResult
     func importRule(_ rule: Rule) -> UUID {
         var imported = rule
