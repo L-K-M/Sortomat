@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// Hosts `SettingsView`, flipping the agent to `.regular` while visible so the
-/// window can take focus and show in the Dock, then back to `.accessory` on close.
+/// window can take focus and show in the Dock, then back to `.accessory` on
+/// close. Rules moved to the main window: this holds the things you set once.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
@@ -36,12 +37,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private func present(_ window: NSWindow) {
         ActivationPolicy.showRegular()
         window.makeKeyAndOrderFront(nil)
-        state.setSettingsWindowOpen(true)
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Editing is over — let the edited rule run again (recompute + rescan).
-        state.setSettingsWindowOpen(false)
         ActivationPolicy.revertToAccessoryIfNoOrdinaryWindows(excluding: window)
     }
 }
