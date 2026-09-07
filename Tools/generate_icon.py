@@ -29,6 +29,10 @@ Four things here are load-bearing and easy to get wrong:
   colour toward transparent black at the rounded corners, which is a dark halo
   on every icon edge. Everything below the mask is premultiplied; the
   un-premultiply happens once, on the way into the PNG.
+* **Scanline filters.** Storing rows unfiltered is fine for flat colour and
+  costs about a third of the file for a photograph, because zlib is then
+  compressing absolute pixel values rather than the differences between
+  neighbours. Every row picks its own filter.
 
 Usage:
     python3 Tools/generate_icon.py [-s SOURCE_PNG] [OUTPUT_APPICONSET_DIR]
@@ -345,11 +349,96 @@ def unpremultiply(row, size):
 # PNG out
 # --------------------------------------------------------------------------
 
+# Byte -> its distance from zero as a signed value, so a row of small
+# corrections scores low and a row of large ones scores high.
+_MAGNITUDE = bytes(min(b, 256 - b) for b in range(256))
+
+
+def _filtered(line, prev, bpp):
+    """The cheapest of the five PNG scanline filters for one row.
+
+    Filter 0 (store the bytes as they are) is the right answer for flat
+    colour and the wrong one for a photograph: zlib then has to compress
+    absolute pixel values instead of the differences between neighbours,
+    which costs about a third of the file. This is the heuristic the PNG
+    spec suggests — pick the candidate whose bytes are smallest read as
+    signed — and it recovers all of it.
+    """
+    stride = len(line)
+    # Average and Paeth index `prev` and would raise; the Up candidate below is
+    # built with zip, which stops at the shorter of the two and would hand
+    # back a short scanline that still encodes cleanly and decodes to garbage.
+    if len(prev) != stride:
+        raise ValueError(
+            f"scanline is {stride} bytes but the previous row is {len(prev)}"
+        )
+    # A fully transparent row — every margin row of a margined icon, about a
+    # fifth of them — has nothing to predict from. Filter 0 scores zero, which
+    # is the floor, and `min` keeps the first of equal scores, so the search
+    # below already returns exactly this. Skipping it is not an approximation.
+    if not any(line):
+        return 0, bytes(line)
+    candidates = [(0, bytes(line))]
+
+    sub = bytearray(line)
+    for i in range(stride - 1, bpp - 1, -1):
+        sub[i] = (line[i] - line[i - bpp]) & 0xFF
+    candidates.append((1, bytes(sub)))
+
+    candidates.append((2, bytes((a - b) & 0xFF for a, b in zip(line, prev))))
+
+    avg = bytearray(stride)
+    for i in range(stride):
+        left = line[i - bpp] if i >= bpp else 0
+        avg[i] = (line[i] - ((left + prev[i]) >> 1)) & 0xFF
+    candidates.append((3, bytes(avg)))
+
+    paeth = bytearray(stride)
+    for i in range(stride):
+        left = line[i - bpp] if i >= bpp else 0
+        upleft = prev[i - bpp] if i >= bpp else 0
+        up = prev[i]
+        guess = left + up - upleft
+        dl, du, dul = abs(guess - left), abs(guess - up), abs(guess - upleft)
+        if dl <= du and dl <= dul:
+            pick = left
+        elif du <= dul:
+            pick = up
+        else:
+            pick = upleft
+        paeth[i] = (line[i] - pick) & 0xFF
+    candidates.append((4, bytes(paeth)))
+
+    return min(candidates, key=lambda c: sum(c[1].translate(_MAGNITUDE)))
+
+
 def write_png(path, rows, size):
     raw = bytearray()
-    for row in rows:
-        raw.append(0)                   # filter type 0 (None)
-        raw.extend(unpremultiply(row, size))
+    stride = size * 4               # RGBA; the IHDR below says colour type 6
+    prev = bytes(stride)
+    for y, row in enumerate(rows):
+        line = unpremultiply(row, size)
+        kind, data = _filtered(line, prev, 4)
+        # Unfilter what we just filtered, with the same code that reads a PNG
+        # back in. A filter bug does not corrupt the file — it produces a
+        # well-formed one that decodes to garbage, which nothing downstream
+        # would report and a person would have to see. One extra pass over
+        # the row buys the whole class — bar the one case it cannot see: a
+        # misreading of the spec present in *both* halves of the pair, which
+        # agrees with itself and with nothing else. Closing that needs an
+        # outside decoder, so check an output against Pillow or pngcheck
+        # whenever this filter code changes.
+        check = bytearray(data)
+        _unfilter(kind, check, prev, 4, stride)
+        if check != line:
+            bad = next(i for i in range(stride) if check[i] != line[i])
+            raise ValueError(
+                f"filter {kind} does not round-trip at row {y} of {path}: "
+                f"byte {bad} came back {check[bad]}, not {line[bad]}"
+            )
+        raw.append(kind)
+        raw.extend(data)
+        prev = line
 
     def chunk(tag, data):
         out = struct.pack(">I", len(data)) + tag + data
@@ -373,16 +462,27 @@ def check_grid(rows, size):
     The margin is the whole point of the grid, and it is invisible in a diff of
     ten binary files: without this, "the icon looks a bit big" is something a
     person has to notice months later in a Dock full of correctly sized icons.
+
+    Raised rather than asserted, here and at the two guards in `_filtered` and
+    `write_png`: `python3 -O` strips `assert` outright, and a check that a
+    stray `PYTHONOPTIMIZE` can turn off is not a check.
     """
-    assert rows[0][3] == 0, f"the canvas corner is not transparent ({rows[0][3]})"
+    if rows[0][3] != 0:
+        raise ValueError(f"the canvas corner is not transparent ({rows[0][3]})")
     middle = rows[size // 2]
-    assert middle[3] == 0, f"the icon touches the canvas edge ({middle[3]})"
+    if middle[3] != 0:
+        raise ValueError(f"the icon touches the canvas edge ({middle[3]})")
+    # Before the margin is measured, not after: this is also what makes the
+    # search below total. An empty canvas would otherwise reach `next` with
+    # nothing to find and raise a bare StopIteration — the mute failure this
+    # function exists to replace — two lines above the check that says what
+    # actually went wrong.
+    if middle[(size // 2) * 4 + 3] != 255:
+        raise ValueError("the artwork did not land in the middle of the canvas")
     expected = round((CANVAS - BODY) / 2 * (size / CANVAS))
     first = next(x for x in range(size) if middle[x * 4 + 3] > 0)
-    assert abs(first - expected) <= 1, (
-        f"body starts at {first}px, expected about {expected}px"
-    )
-    assert rows[size // 2][(size // 2) * 4 + 3] == 255, "the artwork did not land"
+    if abs(first - expected) > 1:
+        raise ValueError(f"body starts at {first}px, expected about {expected}px")
     print(f"  grid ok: {first}px margin on a {size}px master")
 
 
