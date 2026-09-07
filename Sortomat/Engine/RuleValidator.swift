@@ -252,7 +252,11 @@ enum RuleValidator {
             add("condition.noValue", .error,
                 L10n.t("validate.condition.noValue", test.op.rawValue))
         }
-        if test.op == .between, case .list(let items) = test.value, items.count != 2 {
+        // Any shape but a two-element list: a `between` carrying `.text` was
+        // slipping through the old `case .list` pattern entirely, so the one
+        // shape a hand-edited rule is most likely to get wrong was the one
+        // shape that validated.
+        if test.op == .between, !isTwoElementList(test.value) {
             add("condition.betweenNeedsTwo", .error, L10n.t("validate.condition.betweenNeedsTwo"))
         }
         // A rule that never reads contents cannot test them, and the engine
@@ -382,9 +386,27 @@ enum RuleValidator {
 
     // MARK: - Helpers
 
+    private static func isTwoElementList(_ value: ConditionValue) -> Bool {
+        if case .list(let items) = value { return items.count == 2 }
+        return false
+    }
+
     /// A group that is true for every file: `all` or `none` with nothing in it.
+    ///
+    /// Recursive, because an `all` holding nothing *but* vacuous groups is
+    /// vacuously true as well — and the editor can build exactly that shape,
+    /// which `condition.emptyGroup` already reports one level down. Without
+    /// the recursion the step-level «everything after this is unreachable»
+    /// warning was simply never raised for it. Conservative by construction:
+    /// one real test, or one nested group that is not itself vacuous, and the
+    /// answer is `false`, so this can only remove false negatives.
     private static func alwaysMatches(_ group: ConditionGroup) -> Bool {
-        group.items.isEmpty && group.mode != .any
+        if group.items.isEmpty { return group.mode != .any }
+        guard group.mode == .all else { return false }
+        return group.items.allSatisfy { item in
+            if case .group(let nested) = item { return alwaysMatches(nested) }
+            return false
+        }
     }
 
     /// Whether a step lets the file fall through to the next one.
@@ -408,19 +430,27 @@ enum RuleValidator {
     /// but by then the user has already been surprised.
     private static func lastComponentCanBeEmpty(_ template: TokenTemplate) -> Bool {
         var component: [TokenTemplate.Node] = []
+        var endsWithSlash = false
         for node in template.nodes {
             switch node {
             case .literal(let text):
                 guard let slash = text.lastIndex(of: "/") else {
                     component.append(node)
+                    endsWithSlash = false
                     continue
                 }
                 let tail = String(text[text.index(after: slash)...])
                 component = tail.isEmpty ? [] : [TokenTemplate.Node.literal(tail)]
+                endsWithSlash = tail.isEmpty
             case .placeholder:
                 component.append(node)
+                endsWithSlash = false
             }
         }
+        // `Invoices/` has no last component at all: `Sanitizer.destination`
+        // drops the empty one and names the *file* «Invoices». The extreme
+        // case of what this check exists for was the case it could not see.
+        if endsWithSlash { return true }
         var sawPlaceholder = false
         for node in component {
             switch node {

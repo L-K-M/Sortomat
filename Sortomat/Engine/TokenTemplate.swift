@@ -53,9 +53,12 @@ struct RenderedTemplate: Equatable {
             case .literal(let text): return text
             case .counter(let pad):
                 let digits = String(counter)
-                return digits.count >= pad
+                // Clamped here too: this part can be built by the pipeline
+                // without passing through the filter above.
+                let width = min(max(pad, 1), 64)
+                return digits.count >= width
                     ? digits
-                    : String(repeating: "0", count: pad - digits.count) + digits
+                    : String(repeating: "0", count: width - digits.count) + digits
             }
         }.joined()
     }
@@ -274,7 +277,10 @@ struct TokenTemplate {
                     current = .text(text ?? "")
                 }
             case "pad":
-                let digits = Int(filter.argument ?? "") ?? 0
+                // Clamped for the same reason `round:` is, two cases down:
+                // `pad:999999999999` asks `String(repeating:count:)` for a
+                // terabyte of zeros. Sixty-four digits is past any real name.
+                let digits = min(max(Int(filter.argument ?? "") ?? 0, 0), 64)
                 let rendered = text ?? stringify(current, timeZone: timeZone)
                 // Nothing pads to nothing. Padding an absent value invented
                 // one — `{invoice|pad:4}` became the literal folder «0000» —
@@ -357,7 +363,10 @@ struct TokenTemplate {
             // template can carry no ReDoS.
             guard let argument = filter.argument else { return input }
             let pieces = splitReplacement(argument)
-            guard pieces.count == 2 else { return input }
+            // An empty find matches at every position — `replace:'':'-'`
+            // turns "ab" into "-a-b-". A malformed argument leaves the value
+            // alone, which is what every other shape of it already does.
+            guard pieces.count == 2, !pieces[0].isEmpty else { return input }
             return input.replacingOccurrences(of: pieces[0], with: pieces[1])
         default:
             return input

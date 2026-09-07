@@ -76,9 +76,13 @@ for folder, _, names in os.walk(root):
         shown = os.path.relpath(path, root)
         for number, raw in enumerate(open(path, encoding="utf-8"), 1):
             clean = code(raw, state)
-            if TEST_FUNC.match(raw) and depth != 1:
+            # `clean`, not `raw`: the whole point of the blanking above is that
+            # a commented-out test suite is not a declaration. Matching the raw
+            # line reported every `func testX()` inside a `/* … */` block as
+            # misplaced — a checker failing CI on correctly commented-out code.
+            if TEST_FUNC.match(clean) and depth != 1:
                 problems.append(f"{shown}:{number}: test at depth {depth}, expected 1")
-            if TOP_TYPE.match(raw) and depth != 0:
+            if TOP_TYPE.match(clean) and depth != 0:
                 problems.append(f"{shown}:{number}: type at depth {depth}, expected 0")
             depth += clean.count("{") - clean.count("}")
         if depth != 0:

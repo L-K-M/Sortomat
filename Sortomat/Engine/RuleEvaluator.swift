@@ -140,8 +140,16 @@ enum RuleEvaluator {
         for (index, step) in rule.steps.enumerated() where index >= startIndex {
             guard step.enabled else { continue }
 
+            // Evaluated against a copy, committed only on a match. A capture
+            // is recorded the moment its condition passes, so in an `all`
+            // group whose *later* condition fails, the capture was surviving
+            // into every following step and into the fallback — a destination
+            // resolving `{match.invoice}` from a condition the user can see
+            // did not apply. `CaptureStore` is a struct, so this is a copy.
+            var stepCaptures = state.captures
             let evaluation = evaluateGroup(step.when, path: "steps[\(index)].when",
-                                           captures: &state.captures, context: context)
+                                           captures: &stepCaptures, context: context)
+            if evaluation.matched { state.captures = stepCaptures }
             state.trace.steps.append(
                 RuleTrace.StepOutcome(stepID: step.id, index: index, name: step.name,
                                       matched: evaluation.matched,

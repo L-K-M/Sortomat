@@ -2,7 +2,7 @@ import Foundation
 
 /// Why a condition did or did not hold.
 ///
-/// Six distinct failure reasons rather than one `false` is the difference
+/// A named reason for every failure, rather than one `false`, is the difference
 /// between "why didn't my photo rule fire?" being answerable at a glance and
 /// being a support thread: a photo with no EXIF date and a photo taken in 2019
 /// are not the same answer.

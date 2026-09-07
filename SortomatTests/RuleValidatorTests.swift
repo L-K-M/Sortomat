@@ -33,6 +33,58 @@ final class RuleValidatorTests: XCTestCase {
         XCTAssertNil(RuleValidator.headline([]))
     }
 
+    func testAGroupHoldingOnlyEmptyGroupsIsStillAHorizon() {
+        // `all` of [empty `all`] is vacuously true exactly like an empty
+        // `all`, and the editor can build it — `condition.emptyGroup` reports
+        // the inner one. Looking only at the top level meant every step after
+        // it kept its silence.
+        let greedy = step(ConditionGroup(mode: .all, items: [
+            .group(ConditionGroup(mode: .all, items: []))
+        ]), [RuleAction(type: .move, template: "{name}")])
+        let later = step(ConditionGroup(mode: .all, items: [when(.ext, .equals, .text("pdf"))]),
+                         [RuleAction(type: .move, template: "PDFs/{name}")], name: "Later")
+        XCTAssertTrue(codes(healthyRule(steps: [greedy, later])).contains("step.unreachable"))
+        // One real condition beside it and the step claims nothing in
+        // particular, so nothing after it is unreachable.
+        let mixed = step(ConditionGroup(mode: .all, items: [
+            .group(ConditionGroup(mode: .all, items: [])),
+            when(.ext, .equals, .text("png"))
+        ]), [RuleAction(type: .move, template: "{name}")])
+        XCTAssertFalse(codes(healthyRule(steps: [mixed, later])).contains("step.unreachable"))
+    }
+
+    func testABetweenThatIsNotAPairIsAnError() {
+        // The old check pattern-matched `.list` first, so a `between` carrying
+        // a single text value — the shape a hand-edited rule gets wrong — was
+        // the one shape that validated.
+        for value in [ConditionValue.text("1"), .number(1), .list(["1"]), .list(["1", "2", "3"])] {
+            let rule = healthyRule(steps: [
+                step(ConditionGroup(mode: .all, items: [.test(ConditionTest(
+                    attribute: .size, op: .between, value: value))]),
+                     [RuleAction(type: .move, template: "{name}")])
+            ])
+            XCTAssertTrue(codes(rule).contains("condition.betweenNeedsTwo"), "accepted \(value)")
+        }
+        let pair = healthyRule(steps: [
+            step(ConditionGroup(mode: .all, items: [.test(ConditionTest(
+                attribute: .size, op: .between, value: .list(["1", "2"])))]),
+                 [RuleAction(type: .move, template: "{name}")])
+        ])
+        XCTAssertFalse(codes(pair).contains("condition.betweenNeedsTwo"))
+    }
+
+    func testADestinationEndingInASlashNamesTheFileAfterTheFolder() {
+        // `Sanitizer.destination` discards the empty last component, so
+        // «Invoices/» files the document as «Invoices.pdf» at the target root.
+        // The most extreme version of the empty-name problem was the one the
+        // check could not see.
+        let risky = healthyRule(steps: [
+            step(ConditionGroup(mode: .all, items: [when(.ext, .equals, .text("pdf"))]),
+                 [RuleAction(type: .move, template: "Invoices/")])
+        ])
+        XCTAssertTrue(codes(risky).contains("action.nameCanBeEmpty"))
+    }
+
     func testAnEmptyAnyGroupCanNeverMatch() {
         let rule = healthyRule(steps: [
             step(ConditionGroup(mode: .any, items: []),

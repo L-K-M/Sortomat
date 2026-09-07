@@ -315,6 +315,23 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(rendered.string(counter: 2), "shot-002.png")
     }
 
+    func testAMistypedPadDoesNotAskForATerabyteOfZeros() {
+        // `round:` is clamped with a comment about not hanging the editor's
+        // live preview; `pad:` had the identical exposure and no clamp, and
+        // `String(repeating:count:)` does not decline politely.
+        XCTAssertEqual(render("{n|pad:999999999999}", ["n": .text("7")]).count, 64)
+        XCTAssertEqual(render("{n|pad:4}", ["n": .text("7")]), "0007")
+        XCTAssertEqual(render("{n|pad:-3}", ["n": .text("7")]), "7")
+    }
+
+    func testReplaceWithNothingToFindLeavesTheValueAlone() {
+        // An empty find matches at every position, so `replace:'':'-'` turned
+        // "ab" into "-a-b-". Every other malformed `replace` argument already
+        // returned the value untouched.
+        XCTAssertEqual(render("{n|replace:'':'-'}", ["n": .text("ab")]), "ab")
+        XCTAssertEqual(render("{n|replace:'a':'-'}", ["n": .text("ab")]), "-b")
+    }
+
     func testUnknownFilterIsReportedRatherThanSwallowed() {
         let template = TokenTemplate("{name|frobnicate}")
         XCTAssertFalse(template.isValid)
@@ -663,6 +680,61 @@ final class RuleEvaluatorTests: XCTestCase {
             return XCTFail("expected a decision")
         }
         XCTAssertEqual(placement.relativePath?.string(), "Finanzen/ACME/Rechnung ACME.pdf")
+    }
+
+    func testACaptureFromAStepThatDidNotMatchDoesNotSurviveIt() {
+        // The capture is recorded the moment its own condition passes, so in
+        // an `all` group whose *later* condition fails, it was still in the
+        // store when the next step rendered its destination.
+        let capturing = RuleStep(name: "Never matches", when: ConditionGroup(mode: .all, items: [
+            .test(ConditionTest(attribute: .stem, op: .matchesRegex,
+                                value: .text("^Rechnung (?<vendor>[A-Za-z]+)"))),
+            .test(ConditionTest(attribute: .ext, op: .equals, value: .text("zip")))
+        ]), then: [RuleAction(type: .move, template: "Nie/{name}")])
+        let later = step("Catch all", ConditionTest(attribute: .name, op: .matchesGlob,
+                                                    value: .text("*")),
+                         [RuleAction(type: .move, template: "Rest/{match.vendor}/{name}")])
+        guard case .decided(let placement, _) = RuleEvaluator.evaluate(
+            context(rule([capturing, later]))
+        ) else {
+            return XCTFail("expected a decision")
+        }
+        let rendered = placement.relativePath?.string() ?? ""
+        XCTAssertFalse(rendered.contains("Rest/ACME"),
+                       "«ACME» was captured by a step that did not claim the file: \(rendered)")
+        XCTAssertTrue(rendered.hasSuffix("Rechnung ACME.pdf"), rendered)
+    }
+
+    func testAModelAnswerCannotEscapeTheTargetRoot() {
+        // Not a change — a guarantee worth pinning. A review round asked for
+        // `modelPath` to strip «..» itself; it does not need to, because
+        // `Sanitizer.destination` refuses a relative path containing «..», a
+        // leading «/» or a leading «~» outright, and every placement goes
+        // through it. This test fails the day that stops being true.
+        let asking = rule([
+            step("Ask", ConditionTest(attribute: .ext, op: .equals, value: .text("pdf")),
+                 [RuleAction(type: .askModel)])
+        ])
+        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(asking)) else {
+            return XCTFail("expected a model request")
+        }
+        let hostile = ModelAnswer(relativePath: "../../Escape/x.pdf", confidence: 0.9)
+        guard case .decided(let placement, _) = RuleEvaluator.resume(
+            token, answer: hostile, context: context(asking)
+        ) else {
+            return XCTFail("expected a decision, not a crash")
+        }
+        let root = URL(fileURLWithPath: "/target")
+        let rendered = placement.relativePath?.string() ?? ""
+        // Refused outright is a correct answer; so is a path that stays inside
+        // the root. Landing outside it is the only failure, and asserting the
+        // guarantee rather than the mechanism keeps this test honest if the
+        // mechanism ever moves.
+        if let destination = try? Sanitizer.destination(target: root, relativePath: rendered,
+                                                        originalExtension: "pdf") {
+            XCTAssertTrue(destination.path.hasPrefix(root.path + "/"),
+                          "a model answer landed outside the target root: \(destination.path)")
+        }
     }
 
     func testNoneGroupNamesTheCulprit() {
