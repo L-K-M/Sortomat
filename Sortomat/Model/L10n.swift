@@ -8,6 +8,11 @@ public enum L10n {
     /// Overridden in tests to force a language; otherwise follows the system.
     public static var forcedLanguage: String?
 
+    /// Every language the tables actually hold. One place, so a test that
+    /// sweeps "does this string exist in every language" keeps sweeping all of
+    /// them when a third is added.
+    public static let supportedLanguages = ["en", "de"]
+
     public static var language: String {
         if let forced = forcedLanguage { return forced }
         let pref = Locale.preferredLanguages.first ?? "en"
@@ -70,6 +75,70 @@ public enum L10n {
         "menu.pause": "Pause",
         "menu.scanNow": "Check now",
         "menu.previewNow": "Preview changes…",
+
+        // Main window
+        "main.window.title": "Sortomat",
+        "menu.openMain": "Open Sortomat",
+        "menu.openHistory": "History…",
+        "sidebar.inbox": "Inbox",
+        "sidebar.history": "History",
+        "sidebar.noFolder": "No folder set",
+
+        // How a rule runs — one choice instead of two toggles
+        "mode.automatic": "Automatic",
+        "mode.automatic.help": "It files matching files by itself. You can undo anything it does from History.",
+        "mode.askFirst": "Ask first",
+        "mode.askFirst.help": "Works out what it would do and puts it in the Inbox for you to approve.",
+        "mode.off": "Off",
+        "mode.off.help": "Doesn't run at all.",
+
+        // How sure the model was
+        "heat.certain": "Certain",
+        "heat.sure": "Sure",
+        "heat.probably": "Probably",
+        "heat.unsure": "Unsure",
+        "heat.exact": "Exact match",
+        "heat.help": "How sure Sortomat is about this one. «Exact match» means a step decided it — no guessing involved.",
+
+        // Where a decision came from — the trust signal
+        "origin.step": "Step",
+        "origin.model": "Model",
+        "origin.folders": "Kept inside your folders",
+        "origin.unsure": "Too unsure to file",
+        "origin.fallback": "No step matched",
+        "origin.system": "Sortomat",
+
+        // Inbox
+        "inbox.count.one": "1 thing to file",
+        "inbox.count.other": "%d things to file",
+        "inbox.check": "Check now",
+        "inbox.apply": "File it",
+        "inbox.skip": "Skip",
+        "inbox.applyAll": "File all",
+        "inbox.skipAll": "Skip all",
+        "inbox.why": "Why?",
+        "inbox.why.hide": "Hide why",
+        "inbox.reveal": "Show in Finder",
+        "inbox.undoLast": "Undo that",
+        "inbox.applied.one": "Filed 1 item.",
+        "inbox.applied.other": "Filed %d items.",
+        "inbox.skipped.one": "Skipped 1 item.",
+        "inbox.skipped.other": "Skipped %d items.",
+        "inbox.empty.title": "Nothing to file",
+        "inbox.empty": "Sortomat is watching your folders. Anything it wants to move will show up here first.",
+        "inbox.empty.noKey.title": "No API key set",
+        "inbox.empty.noKey": "Steps still run without one, but nothing can be handed to the model. Add a key in Settings, or build rules out of steps alone.",
+        "inbox.action.move": "Move to %@",
+        "inbox.action.copy": "Copy to %@",
+        "inbox.action.unsure": "Not sure — park in %@",
+        "inbox.action.duplicate": "Already filed — this is the same file",
+        "inbox.action.skip": "Leave where it is",
+
+        // History
+        "history.empty.title": "Nothing filed yet",
+        "history.refresh": "Reload",
+        "history.reveal": "Show in Finder",
+        "rules.empty.message": "Pick a rule on the left, or add one with the + button.",
         "menu.noActivity": "No activity yet",
         "menu.recentActivity": "Recent activity",
         "menu.openLog": "Open log",
@@ -97,7 +166,6 @@ public enum L10n {
 
         // Settings tabs
         "settings.window.title": "Sortomat — Rules & Settings",
-        "tab.rules": "Rules",
         "tab.general": "Settings",
         "tab.about": "About",
 
@@ -212,27 +280,6 @@ public enum L10n {
         "path.placeholder": "/path/to/folder",
 
         // Preview / dry-run
-        "preview.title": "Preview changes",
-        "preview.empty": "Nothing to file right now.",
-        "preview.apply": "Apply selected",
-        "preview.applyAll": "Apply all",
-        "preview.refresh": "Refresh",
-        "preview.applied.one": "Applied 1 change.",
-        "preview.applied.other": "Applied %d changes.",
-        "preview.dismissed.one": "Dismissed 1 suggestion.",
-        "preview.dismissed.other": "Dismissed %d suggestions.",
-        "preview.dismiss": "Dismiss selected",
-        "preview.empty.noKey": "No API key set — add one under Rules & Settings → Settings to preview changes.",
-        "preview.plan.move": "Move",
-        "preview.plan.copy": "Copy",
-        "preview.plan.skip": "Skip",
-        "preview.plan.quarantine": "Quarantine",
-        "preview.plan.duplicate": "Duplicate",
-        "preview.origin.preRule": "pre-rule",
-        "preview.origin.model": "model",
-        "preview.origin.taxonomy": "taxonomy",
-        "preview.origin.confidence": "low confidence",
-        "preview.origin.system": "system",
 
         // Journal / undo
         "journal.title": "History",
@@ -322,7 +369,7 @@ public enum L10n {
         "activity.wouldMove": "[%@] Would move %@ → %@",
         "activity.wouldSkip": "[%@] Would skip %@ — %@",
         "activity.budgetReached": "[%@] Per-check model-call budget reached (%d).",
-        "activity.stalePlan": "[%@] Skipped %@: the file changed after this suggestion was made — refresh the preview.",
+        "activity.stalePlan": "[%@] Skipped %@: the file changed after this suggestion was made — check again.",
         "activity.keyDeferred.one": "[%2$@] %1$d file needs the model, but no API key is set — pre-rules still ran.",
         "activity.keyDeferred.other": "[%2$@] %1$d files need the model, but no API key is set — pre-rules still ran.",
 
@@ -491,6 +538,70 @@ public enum L10n {
         "menu.pause": "Pausieren",
         "menu.scanNow": "Jetzt prüfen",
         "menu.previewNow": "Änderungen vorschauen…",
+
+        // Main window
+        "main.window.title": "Sortomat",
+        "menu.openMain": "Sortomat öffnen",
+        "menu.openHistory": "Verlauf…",
+        "sidebar.inbox": "Eingang",
+        "sidebar.history": "Verlauf",
+        "sidebar.noFolder": "Kein Ordner gesetzt",
+
+        // How a rule runs — one choice instead of two toggles
+        "mode.automatic": "Automatisch",
+        "mode.automatic.help": "Legt passende Dateien selbstständig ab. Alles lässt sich im Verlauf rückgängig machen.",
+        "mode.askFirst": "Erst fragen",
+        "mode.askFirst.help": "Ermittelt, was zu tun wäre, und legt es zur Freigabe in den Eingang.",
+        "mode.off": "Aus",
+        "mode.off.help": "Läuft gar nicht.",
+
+        // How sure the model was
+        "heat.certain": "Sicher",
+        "heat.sure": "Ziemlich sicher",
+        "heat.probably": "Wahrscheinlich",
+        "heat.unsure": "Unsicher",
+        "heat.exact": "Exakter Treffer",
+        "heat.help": "Wie sicher sich Sortomat hier ist. «Exakter Treffer» heisst: ein Schritt hat entschieden – ganz ohne Raten.",
+
+        // Where a decision came from — the trust signal
+        "origin.step": "Schritt",
+        "origin.model": "Modell",
+        "origin.folders": "In deinen Ordnern gehalten",
+        "origin.unsure": "Zu unsicher zum Ablegen",
+        "origin.fallback": "Kein Schritt hat gepasst",
+        "origin.system": "Sortomat",
+
+        // Inbox
+        "inbox.count.one": "1 Datei wartet",
+        "inbox.count.other": "%d Dateien warten",
+        "inbox.check": "Jetzt prüfen",
+        "inbox.apply": "Ablegen",
+        "inbox.skip": "Überspringen",
+        "inbox.applyAll": "Alle ablegen",
+        "inbox.skipAll": "Alle überspringen",
+        "inbox.why": "Warum?",
+        "inbox.why.hide": "Begründung ausblenden",
+        "inbox.reveal": "Im Finder zeigen",
+        "inbox.undoLast": "Rückgängig",
+        "inbox.applied.one": "1 Datei abgelegt.",
+        "inbox.applied.other": "%d Dateien abgelegt.",
+        "inbox.skipped.one": "1 Datei übersprungen.",
+        "inbox.skipped.other": "%d Dateien übersprungen.",
+        "inbox.empty.title": "Nichts abzulegen",
+        "inbox.empty": "Sortomat beobachtet deine Ordner. Was verschoben werden soll, erscheint zuerst hier.",
+        "inbox.empty.noKey.title": "Kein API-Key hinterlegt",
+        "inbox.empty.noKey": "Schritte laufen auch ohne Key, aber nichts kann ans Modell gehen. Trage in den Einstellungen einen Key ein – oder baue Regeln allein aus Schritten.",
+        "inbox.action.move": "Verschieben nach %@",
+        "inbox.action.copy": "Kopieren nach %@",
+        "inbox.action.unsure": "Unsicher – parken in %@",
+        "inbox.action.duplicate": "Schon abgelegt – dieselbe Datei",
+        "inbox.action.skip": "Liegen lassen",
+
+        // History
+        "history.empty.title": "Noch nichts abgelegt",
+        "history.refresh": "Neu laden",
+        "history.reveal": "Im Finder zeigen",
+        "rules.empty.message": "Wähle links eine Regel oder lege mit + eine neue an.",
         "menu.noActivity": "Noch keine Aktivität",
         "menu.recentActivity": "Letzte Aktivität",
         "menu.openLog": "Protokoll öffnen",
@@ -517,7 +628,6 @@ public enum L10n {
         "edit.selectAll": "Alles auswählen",
 
         "settings.window.title": "Sortomat – Regeln & Einstellungen",
-        "tab.rules": "Regeln",
         "tab.general": "Einstellungen",
         "tab.about": "Über",
 
@@ -627,27 +737,6 @@ public enum L10n {
         "path.choose": "Auswählen…",
         "path.placeholder": "/Pfad/zum/Ordner",
 
-        "preview.title": "Änderungen vorschauen",
-        "preview.empty": "Momentan nichts einzusortieren.",
-        "preview.apply": "Ausgewählte anwenden",
-        "preview.applyAll": "Alle anwenden",
-        "preview.refresh": "Aktualisieren",
-        "preview.applied.one": "1 Änderung angewendet.",
-        "preview.applied.other": "%d Änderungen angewendet.",
-        "preview.dismissed.one": "1 Vorschlag verworfen.",
-        "preview.dismissed.other": "%d Vorschläge verworfen.",
-        "preview.dismiss": "Ausgewählte verwerfen",
-        "preview.empty.noKey": "Kein API-Key gesetzt — unter Regeln & Einstellungen → Einstellungen hinzufügen, um Änderungen vorzuschauen.",
-        "preview.plan.move": "Verschieben",
-        "preview.plan.copy": "Kopieren",
-        "preview.plan.skip": "Überspringen",
-        "preview.plan.quarantine": "Quarantäne",
-        "preview.plan.duplicate": "Duplikat",
-        "preview.origin.preRule": "Vorregel",
-        "preview.origin.model": "Modell",
-        "preview.origin.taxonomy": "Taxonomie",
-        "preview.origin.confidence": "geringe Konfidenz",
-        "preview.origin.system": "System",
 
         "journal.title": "Verlauf",
         "journal.empty": "Noch keine Bewegungen aufgezeichnet.",

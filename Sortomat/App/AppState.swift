@@ -18,13 +18,10 @@ final class AppState: ObservableObject {
     @Published var apiKeyMissing: Bool
     @Published var usage = TokenUsage()
     /// The rule currently open in the editor. It is not executed while being
-    /// edited, so a half-typed rule can't fire mid-edit. Derived from the three
-    /// inputs below rather than set directly, so it's correct however the user
-    /// leaves the editor (switch tab, switch rule, close the window).
+    /// edited, so a half-typed rule can't fire mid-edit. The main window sets
+    /// it from its sidebar selection and clears it when it closes, so there is
+    /// one place that decides rather than three booleans to keep in agreement.
     @Published private(set) var editingRuleID: UUID?
-    private var settingsWindowOpen = false
-    private var rulesTabActive = false
-    private var selectedRuleID: UUID?
 
     private let pipeline = Pipeline()
     private var watchers: [String: FSEventsWatcher] = [:]
@@ -144,11 +141,17 @@ final class AppState: ObservableObject {
         return accepted
     }
 
-    func addRule(from template: RuleTemplate) {
+    /// Returns the new rule's id, like `importRule` does. Reading it back as
+    /// `config.rules.last` assumes an append that nothing enforces: the day
+    /// this inserts or sorts instead, the editor would open a *different*
+    /// existing rule while the user believed they were configuring the new one.
+    @discardableResult
+    func addRule(from template: RuleTemplate) -> UUID {
         var rule = template.makeRule()
         rule.name = uniqueName(rule.name)
         config.rules.append(rule)
         persistAndApply()
+        return rule.id
     }
 
     func duplicate(ruleID: UUID) {
@@ -248,29 +251,12 @@ final class AppState: ObservableObject {
 
     // MARK: - Editing lock
 
-    /// A rule is "being edited" only while the Settings window is open AND the
-    /// Rules tab is showing AND that rule is selected. Any of those changing
-    /// recomputes the lock; when a rule is freed we kick a scan so it runs
-    /// promptly rather than waiting for the next timer tick.
-    func setSettingsWindowOpen(_ open: Bool) {
-        settingsWindowOpen = open
-        recomputeEditing()
-    }
-
-    func setRulesTabActive(_ active: Bool) {
-        rulesTabActive = active
-        recomputeEditing()
-    }
-
-    func setSelectedRule(_ id: UUID?) {
-        selectedRuleID = id
-        recomputeEditing()
-    }
-
-    private func recomputeEditing() {
-        let newValue = (settingsWindowOpen && rulesTabActive) ? selectedRuleID : nil
-        guard newValue != editingRuleID else { return }
-        editingRuleID = newValue
+    /// The rule the main window has open, or nil when it shows something else
+    /// or isn't on screen at all. Freeing a rule kicks a check so it runs
+    /// promptly rather than waiting out the timer.
+    func setEditingRule(_ id: UUID?) {
+        guard id != editingRuleID else { return }
+        editingRuleID = id
         requestScan()
     }
 
@@ -440,9 +426,15 @@ final class AppState: ObservableObject {
     }
 
 
-    func apply(_ plans: [PlannedAction]) async {
+    /// Returns the batch this approval journaled, so the caller can undo
+    /// exactly it. `undoLastBatch` reverses whatever is newest, and a scheduled
+    /// pass — the watcher, the timer — can journal an automatic rule's work
+    /// between the Apply and the Undo, making that the newest batch.
+    @discardableResult
+    func apply(_ plans: [PlannedAction]) async -> UUID {
+        let batchID = UUID()
         let rulesByID = Dictionary(config.rules.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let entries = await pipeline.applyApproved(plans, rules: rulesByID)
+        let entries = await pipeline.applyApproved(plans, rules: rulesByID, batchID: batchID)
         let appliedIDs = Set(plans.map(\.id))
         pendingActions.removeAll { appliedIDs.contains($0.id) }
         if !entries.isEmpty {
@@ -451,6 +443,7 @@ final class AppState: ObservableObject {
             entries.forEach { ConfigStore.appendLog($0.message) }
         }
         await pipeline.persist()
+        return batchID
     }
 
     func dismiss(_ plan: PlannedAction) {
@@ -486,6 +479,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Undo
 
+    /// Undo one *named* batch — the one an Apply just wrote, rather than
+    /// whichever is newest by the time the user clicks.
+    @discardableResult
+    func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
+        let entries = await Task.detached { Journal.recent(limit: .max) }.value
+        return await reverse(entries.filter { $0.batchID == id })
+    }
+
     /// Undo a journaled placement *and* pin the restored file as skipped in
     /// the ledger, so the rule doesn't immediately re-classify and re-move it
     /// (the undo ping-pong). The undo itself runs off the main actor: for a
@@ -509,8 +510,12 @@ final class AppState: ObservableObject {
         // folder can exceed it, and `lastBatch` would then reverse part of the
         // batch while reporting the whole thing undone.
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
+        return await reverse(Journal.lastBatch(in: entries))
+    }
+
+    private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {
         var undone = 0, failed = 0
-        for entry in Journal.lastBatch(in: entries) {
+        for entry in entries {
             do {
                 try await undo(entry, persisting: false)
                 undone += 1

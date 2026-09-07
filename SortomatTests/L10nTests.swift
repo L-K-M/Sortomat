@@ -27,8 +27,8 @@ final class L10nTests: XCTestCase {
 
     func testPluralGerman() {
         L10n.forcedLanguage = "de"
-        XCTAssertEqual(L10n.plural("preview.applied", 1), "1 Änderung angewendet.")
-        XCTAssertEqual(L10n.plural("preview.applied", 5), "5 Änderungen angewendet.")
+        XCTAssertEqual(L10n.plural("inbox.applied", 1), "1 Datei abgelegt.")
+        XCTAssertEqual(L10n.plural("inbox.applied", 5), "5 Dateien abgelegt.")
     }
 
     /// Every plural key must exist in both forms in both tables — a missing

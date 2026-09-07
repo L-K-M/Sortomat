@@ -80,11 +80,13 @@ enum ActionExecutor {
     }
 
     private static func writeTags(_ tags: [String], to url: URL) -> Bool {
-        var target = url
-        var values = URLResourceValues()
-        values.tagNames = tags
         do {
-            try target.setResourceValues(values)
+            // `URLResourceValues.tagNames` is get-only in the Swift overlay —
+            // the struct can report a file's tags but not set them — so the
+            // writable path is `NSURL`'s untyped setter. Bridged explicitly
+            // rather than left to `Any?` inference, because what reaches the
+            // file system here is a Finder tag list and not a Swift array.
+            try (url as NSURL).setResourceValue(tags as NSArray, forKey: .tagNamesKey)
             return true
         } catch {
             Log.pipeline.error("could not write tags: \(error.localizedDescription, privacy: .public)")

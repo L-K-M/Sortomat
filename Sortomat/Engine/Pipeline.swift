@@ -730,8 +730,12 @@ actor Pipeline {
     }
 
     /// Apply a batch of pre-computed plans (used when the user approves a preview).
-    func applyApproved(_ plans: [PlannedAction], rules: [UUID: Rule]) -> [ActivityEntry] {
-        let batchID = UUID() // one approval = one undoable batch
+    /// The batch id is returned so the caller can undo *this* approval rather
+    /// than "the newest batch": background passes journal their own work while
+    /// the window is open, and any of them can become the newest one between
+    /// the Apply and the click on Undo.
+    func applyApproved(_ plans: [PlannedAction], rules: [UUID: Rule],
+                       batchID: UUID = UUID()) -> [ActivityEntry] {
         return plans.compactMap { plan in
             guard let rule = rules[plan.ruleID] else { return nil }
             let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
