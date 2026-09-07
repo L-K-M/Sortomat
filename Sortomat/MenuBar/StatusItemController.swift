@@ -62,7 +62,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     /// The same "sorting funnel" as the app icon, drawn as a template image so it
-    /// tints correctly for light/dark menu bars.
+    /// tints correctly for light and dark menu bars.
+    ///
+    /// Two things about these numbers are deliberate. They are the app icon's
+    /// own funnel, mapped into this box, so the mark in the menu bar and the
+    /// mark in the Dock are the same shape rather than two hand-tuned
+    /// approximations of each other. And the artwork is inset: it used to span
+    /// 0.10–0.90 of an 18-point square as a *solid* fill, which puts far more
+    /// ink on screen than the stroked system symbols beside it and made
+    /// Sortomat's funnel the heaviest thing in the menu bar. Smaller is what
+    /// "the same weight as its neighbours" looks like for a filled glyph.
     static func funnelImage(width: CGFloat = 18) -> NSImage {
         let size = NSSize(width: width, height: width)
         let image = NSImage(size: size, flipped: false) { rect in
@@ -72,12 +81,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 NSPoint(x: rect.minX + x * w, y: rect.minY + (1 - topY) * h)
             }
             let path = NSBezierPath()
-            path.move(to: p(0.10, 0.18))
-            path.line(to: p(0.90, 0.18))
-            path.line(to: p(0.60, 0.52))
-            path.line(to: p(0.60, 0.82))
-            path.line(to: p(0.40, 0.82))
-            path.line(to: p(0.40, 0.52))
+            path.move(to: p(0.170, 0.22))
+            path.line(to: p(0.830, 0.22))
+            path.line(to: p(0.605, 0.50))
+            path.line(to: p(0.605, 0.78))
+            path.line(to: p(0.395, 0.78))
+            path.line(to: p(0.395, 0.50))
             path.close()
             NSColor.black.setFill()
             path.fill()
