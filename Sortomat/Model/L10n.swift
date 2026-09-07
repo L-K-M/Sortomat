@@ -205,7 +205,7 @@ public enum L10n {
         "general.budget": "Max model calls per check (0 = unlimited): %d",
         "general.notifications": "Notify about filed files and failures",
         "general.launchAtLogin": "Launch Sortomat at login",
-        "general.privacyNote": "Note: a file's name, metadata and (unless a rule is metadata-only) a text excerpt are sent to the model to classify it.",
+        "general.privacyNote": "Note: a file's name, metadata and (unless a rule is metadata-only) a text excerpt are sent to the model to classify it. For images and scanned PDFs the excerpt is text recognized on this Mac; nothing else leaves the machine.",
 
         // Paths
         "path.choose": "Choose…",
@@ -335,9 +335,10 @@ public enum L10n {
         "template.screenshots.preSkip": "Everything else",
         "template.screenshots.prompt": """
         File screenshots into the matching project or topic folder, e.g.
-        {Project}/{YYYY-MM}/{filename}. Judge from the file name, its
-        timestamps and any indexed text in the metadata. If no project is
-        recognizable, file it under "General/{YYYY-MM}".
+        {Project}/{YYYY-MM}/{filename}. Judge from the text recognized in the
+        screenshot (window titles, app names, headings), the file name and its
+        timestamps. If no project is recognizable, file it under
+        "General/{YYYY-MM}".
         """,
         "template.invoices.title": "Invoices & receipts",
         "template.invoices.summary": "File PDFs under Year / Sender / Date Subject.",
@@ -514,7 +515,7 @@ public enum L10n {
         "general.budget": "Max. Modell-Aufrufe pro Prüfung (0 = unbegrenzt): %d",
         "general.notifications": "Über einsortierte Dateien und Fehler benachrichtigen",
         "general.launchAtLogin": "Sortomat beim Anmelden starten",
-        "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet.",
+        "general.privacyNote": "Hinweis: Dateiname, Metadaten und (sofern die Regel nicht «nur Metadaten» ist) ein Textauszug werden zur Klassifikation an das Modell gesendet. Bei Bildern und gescannten PDFs ist der Auszug auf diesem Mac erkannter Text; nichts anderes verlässt den Rechner.",
 
         "path.choose": "Auswählen…",
         "path.placeholder": "/Pfad/zum/Ordner",
@@ -633,9 +634,10 @@ public enum L10n {
         "template.screenshots.preSkip": "Alles andere",
         "template.screenshots.prompt": """
         Ordne Screenshots dem passenden Projekt- oder Themenordner zu, z.B.
-        {Projekt}/{JJJJ-MM}/{Dateiname}. Beurteile das anhand des Dateinamens,
-        der Zeitstempel und eventuell mitgelieferter indexierter Texte. Wenn
-        kein Projekt erkennbar ist, lege die Datei unter "Allgemein/{JJJJ-MM}" ab.
+        {Projekt}/{JJJJ-MM}/{Dateiname}. Beurteile das anhand des im Screenshot
+        erkannten Texts (Fenstertitel, App-Namen, Überschriften), des Dateinamens
+        und der Zeitstempel. Wenn kein Projekt erkennbar ist, lege die Datei
+        unter "Allgemein/{JJJJ-MM}" ab.
         """,
         "template.invoices.title": "Rechnungen & Belege",
         "template.invoices.summary": "PDFs nach Jahr / Absender / Datum Betreff ablegen.",

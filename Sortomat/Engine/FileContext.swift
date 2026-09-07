@@ -7,15 +7,33 @@ import PDFKit
 enum FileContext {
     static let sampleLimit = 4000
 
+    /// The model has to know it is reading recognized text rather than a text
+    /// layer. Named so a copy edit cannot silently desynchronize the test.
+    static let ocrNotice = "Content excerpt (text recognized on-device from the image):"
+
     private static let plainTextExtensions: Set<String> = [
         "txt", "md", "markdown", "csv", "tsv", "json", "xml", "yml", "yaml",
-        "html", "htm", "log", "tex", "srt", "rtf",
+        "log", "tex", "srt",
     ]
+    private static let markupExtensions: Set<String> = ["html", "htm", "xhtml"]
+
+    /// What `extractSample` produced, so the description can say where the
+    /// excerpt came from — a model should know it is reading OCR output.
+    enum SampleSource {
+        case none
+        case text
+        case recognized   // on-device OCR of an image or a scanned PDF
+    }
 
     static func describe(url: URL, privacyMode: PrivacyMode = .full) -> String {
         let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
         let size = (attrs[.size] as? Int64) ?? 0
         let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        // The calendar alone is not enough: `dateFormat` still renders through
+        // the locale, so an Arabic-Indic numbering system would send the model
+        // different digits for the same file.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
 
         var lines = ["File:", "Name: \(url.lastPathComponent)"]
@@ -32,6 +50,12 @@ enum FileContext {
         for (label, value) in spotlight.fields where !value.isEmpty {
             lines.append("\(label): \(value)")
         }
+        let ext = url.pathExtension.lowercased()
+        if ImageText.imageExtensions.contains(ext) {
+            for (label, value) in ImageText.facts(imageAt: url) {
+                lines.append("\(label): \(value)")
+            }
+        }
 
         guard privacyMode == .full else {
             lines.append("")
@@ -40,10 +64,21 @@ enum FileContext {
         }
 
         var sample = spotlight.textContent
-        if sample.isEmpty { sample = extractSample(url: url) }
+        // Spotlight indexes a scanner's own stamp — "Scanned by …", a page
+        // number, a date footer — as the file's text content, and a sample
+        // that short is exactly what `minimumPDFTextLayer` exists to reject.
+        // Taking it here would skip the OCR fallback for precisely the scans
+        // this reader was written for, without ever reaching `readPDF`.
+        if ext == "pdf", sample.count < minimumPDFTextLayer { sample = "" }
+        var source: SampleSource = sample.isEmpty ? .none : .text
+        if sample.isEmpty {
+            let extracted = extractSample(url: url)
+            sample = extracted.text
+            source = extracted.source
+        }
         if !sample.isEmpty {
             lines.append("")
-            lines.append("Content excerpt:")
+            lines.append(source == .recognized ? ocrNotice : "Content excerpt:")
             lines.append(String(sample.prefix(sampleLimit)))
         }
         return lines.joined(separator: "\n")
@@ -69,41 +104,98 @@ enum FileContext {
             ("Authors (metadata)", str(kMDItemAuthors)),
             ("Album/Work", str(kMDItemAlbum)),
             ("Description (metadata)", String(str(kMDItemDescription).prefix(800))),
+            ("Downloaded from", withoutQuery(str(kMDItemWhereFroms))),
         ]
         let text = str(kMDItemTextContent)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return (fields, String(text.prefix(sampleLimit)))
     }
 
-    // MARK: - Content extraction
-
-    private static func extractSample(url: URL) -> String {
-        let ext = url.pathExtension.lowercased()
-        if plainTextExtensions.contains(ext) { return readPlainText(url: url) }
-        if ext == "pdf" { return readPDF(url: url) }
-        if ext == "epub" { return EpubReader(url: url)?.classificationText ?? "" }
-        return ""
+    /// A download URL cut at its query string. Where a file came from is worth
+    /// knowing — a bank's domain files differently from a camera's — but the
+    /// query routinely carries a credential: presigned S3 links, OAuth
+    /// redirects and share links all put a token there, and none of it helps
+    /// decide a folder. Spotlight stores a list when a file was downloaded more
+    /// than once, joined with `", "` above — split on that exact separator, not
+    /// on every comma: a comma is legal in a URL path, and cutting there turns
+    /// one origin into two wrong ones.
+    static func withoutQuery(_ value: String) -> String {
+        let parts = value.components(separatedBy: ", ")
+        let trimmed = parts.map { part -> Substring in
+            Substring(part).prefix(while: { $0 != "?" && $0 != "#" })
+        }
+        return trimmed.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
-    private static func readPlainText(url: URL) -> String {
+    // MARK: - Content extraction
+
+    /// The classification sample for a file, by type: plain text and markup,
+    /// office documents, PDFs (text layer first, OCR of a scan second),
+    /// e-books, and images via on-device OCR.
+    static func extractSample(url: URL) -> (text: String, source: SampleSource) {
+        let ext = url.pathExtension.lowercased()
+        if plainTextExtensions.contains(ext) {
+            return (readPlainText(url: url), .text)
+        }
+        if markupExtensions.contains(ext) {
+            // A saved web page's first 64 KiB is routinely *all* <head>, CSS,
+            // scripts and base64 images — strip that and nothing visible is
+            // left. Markup gets a wider read, because what survives stripping
+            // is a fraction of what goes in.
+            let markup = readPlainText(url: url, normalized: false, maxBytes: 512 * 1024)
+            return (normalize(HTMLText.strip(markup)), .text)
+        }
+        if DocumentText.richTextExtensions.contains(ext)
+            || DocumentText.spreadsheetExtensions.contains(ext)
+            || DocumentText.presentationExtensions.contains(ext)
+            || DocumentText.openDocumentExtensions.contains(ext) {
+            return (normalize(DocumentText.text(url: url, limit: sampleLimit * 2)), .text)
+        }
+        if ext == "pdf" { return readPDF(url: url) }
+        if ext == "epub" { return (EpubReader(url: url)?.classificationText ?? "", .text) }
+        if ImageText.imageExtensions.contains(ext) {
+            return (normalize(ImageText.recognize(imageAt: url)), .recognized)
+        }
+        return ("", .none)
+    }
+
+    private static func readPlainText(url: URL, normalized: Bool = true,
+                                      maxBytes: Int = 64 * 1024) -> String {
         guard let handle = try? FileHandle(forReadingFrom: url),
-              let data = try? handle.read(upToCount: 64 * 1024)
+              let data = try? handle.read(upToCount: maxBytes)
         else { return "" }
         try? handle.close()
         // The fixed-size read may have split a multi-byte UTF-8 character at
         // the boundary; trim the partial tail so the whole excerpt doesn't
         // fall back to CP1252 mojibake.
-        return normalize(TextDecoding.decode(TextDecoding.trimmingPartialUTF8Tail(data)))
+        let text = TextDecoding.decode(TextDecoding.trimmingPartialUTF8Tail(data))
+        return normalized ? normalize(text) : text
     }
 
-    private static func readPDF(url: URL) -> String {
-        guard let document = PDFDocument(url: url) else { return "" }
+    /// A PDF text layer shorter than this is a scanner's own mark — "Scanned
+    /// by …", a page number, a date footer — not the document's text. Scanner
+    /// apps and MFP drivers stamp one on routinely, and treating it as the
+    /// sample was how the flagship case for recognition, a scanned page,
+    /// reached the model as a single line of boilerplate with no OCR at all.
+    static let minimumPDFTextLayer = 100
+
+    private static func readPDF(url: URL) -> (text: String, source: SampleSource) {
+        guard let document = PDFDocument(url: url) else { return ("", .none) }
         var text = ""
         for index in 0..<min(document.pageCount, 5) {
             text += document.page(at: index)?.string ?? ""
             if text.count >= sampleLimit { break }
         }
-        return normalize(text)
+        let normalized = normalize(text)
+        if normalized.count >= minimumPDFTextLayer { return (normalized, .text) }
+        // No usable text layer: a scan. Read it the way a person would — and
+        // if recognition finds nothing either, the little the layer did hold
+        // is still better than nothing.
+        let recognized = normalize(ImageText.recognize(scannedPDF: document))
+        if recognized.isEmpty {
+            return normalized.isEmpty ? ("", .none) : (normalized, .text)
+        }
+        return (recognized, .recognized)
     }
 
     private static func normalize(_ text: String) -> String {
