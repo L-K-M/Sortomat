@@ -78,7 +78,7 @@ actor Pipeline {
     /// (used by the preview window). `batchID` groups every journaled move of
     /// one pass so it can be undone together. Returns entries + plans + usage.
     func scan(rule: Rule, config: Config, apiKey: String, forcePreview: Bool = false,
-              batchID: UUID = UUID()) async -> ScanResult {
+              batchID: UUID = UUID(), modelAllowed: Bool = true) async -> ScanResult {
         guard rule.enabled else { return ScanResult() }
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)
@@ -98,7 +98,11 @@ actor Pipeline {
         // Without a key (when the provider needs one), deterministic pre-rules
         // still run — free, predictable sorting isn't held hostage by the key
         // field. Only files that would need the model are deferred.
-        let llmAvailable = !(config.providerRequiresKey && apiKey.isEmpty)
+        // `modelAllowed` is the caller's veto — a monthly spend ceiling reached,
+        // or a laptop on battery. It takes the same path as a missing key:
+        // steps still run and file what they can for free, and only the files
+        // that would have cost money wait for the next pass.
+        let llmAvailable = modelAllowed && !(config.providerRequiresKey && apiKey.isEmpty)
         let candidates = candidateFiles(in: watch, target: target, rule: rule)
 
         var budgetRemaining = config.perScanBudget > 0 ? config.perScanBudget : Int.max
@@ -167,7 +171,9 @@ actor Pipeline {
         if keyDeferred > 0 {
             result.entries.append(ActivityEntry(
                 ok: true,
-                message: L10n.plural("activity.keyDeferred", keyDeferred, rule.name)
+                message: modelAllowed
+                    ? L10n.plural("activity.keyDeferred", keyDeferred, rule.name)
+                    : L10n.plural("activity.modelHeld", keyDeferred, rule.name)
             ))
         }
         return result

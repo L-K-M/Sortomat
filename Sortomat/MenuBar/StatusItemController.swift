@@ -39,12 +39,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .store(in: &cancellables)
         state.$pendingActions.sink { [weak self] _ in Task { @MainActor in self?.updateIcon() } }
             .store(in: &cancellables)
+        state.$holdReason.sink { [weak self] _ in Task { @MainActor in self?.updateIcon() } }
+            .store(in: &cancellables)
+        state.$usage.sink { [weak self] _ in Task { @MainActor in self?.updateIcon() } }
+            .store(in: &cancellables)
     }
 
     private func updateIcon() {
         guard let button = statusItem.button else { return }
         button.image = Self.funnelImage()
-        button.appearsDisabled = state.paused
+        // Greyed while held as well as while paused: the icon is the only
+        // thing on screen, so it has to carry "not running right now".
+        button.appearsDisabled = state.paused || state.holdReason != nil
+            || !state.withinMonthlyBudget
         // Surface pending reviews right in the menu bar: a small count next to
         // the funnel. Without it, queued suggestions were invisible until the
         // menu was opened (the $pendingActions subscription existed but the
@@ -138,6 +145,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             text = L10n.t("app.status.noKey")
         } else if state.paused {
             text = L10n.t("app.status.paused")
+        } else if !state.withinMonthlyBudget {
+            // The same principle as the power holds: model-bound files pile up
+            // deferred while the menu says "Active — 3 rules", and the only
+            // other signal is a caption inside Settings.
+            text = L10n.t("hold.budget")
+        } else if let hold = state.holdReason {
+            // A hold nobody can see is indistinguishable from a broken app:
+            // the funnel sits there, nothing gets filed, and the menu says
+            // "Active".
+            text = hold
         } else {
             text = L10n.plural("app.status.active", state.enabledRuleCount)
         }
