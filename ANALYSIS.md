@@ -444,12 +444,13 @@ nothing needs re-learning.
 
 *[H-Z] and [P1-52] closed with [#45](https://github.com/L-K-M/Sortomat/pull/45):
 the app icon sits on Apple's 824-of-1024 grid (it was full-bleed, so it
-rendered about a quarter larger than every neighbour in the Dock), every size
-is antialiased through a supersampled master — the old generator skipped
-downsampling for the 1024px icon, which is the one on a release page —
-`AccentColor` is exactly the midpoint of the icon's gradient rather than a
-fourth green, and the menu-bar funnel is inset and is now the app icon's own
-shape rather than a second approximation of it.*
+rendered about a quarter larger than every neighbour in the Dock), and every
+size is filtered down from one master — the old generator skipped downsampling
+for the 1024px icon, which is the one on a release page. The icon itself is now
+the artwork in `media-sources/icon.png`: `Tools/generate_icon.py` fits it to
+the grid rather than drawing a tile, so replacing the icon is replacing that
+one PNG. The menu-bar funnel is inset, and stays a monochrome silhouette — a
+photographic icon does not reduce to an 18-point template image.*
 
 - **[H-X] The log is a file, opened in TextEdit.** "Open log" hands
   `activity.log` to whatever owns `.log`; there is no in-app viewer, no
@@ -589,6 +590,14 @@ in.
   exactly this. Measure first — a pass is dominated by disk, and a cache keyed
   by format string plus locale plus time zone is only worth it if it shows up.
   **S**
+- **`AccentColor` is a green the icon no longer contains.** It was set to the
+  midpoint of the old generated icon's green gradient, on the argument that the
+  tint the app draws with and the tile it ships in should be one colour. The
+  icon is now blue, so that argument now points the other way: every capsule,
+  filled dot and `.move` badge in the app is a green that appears nowhere in
+  the Dock. Sampling the artwork's blue is a one-value change; whether the
+  whole UI should follow the icon is the product question underneath it. **S**
+  to retint, **M** to decide.
 - **Tags an undo leaves behind.** `ActionExecutor` writes Finder tags after the
   move is journaled, and `Journal.undo` puts the file back with the tags still
   on it. This matches what Hazel does; the fix is the `SideEffectJournal` in
