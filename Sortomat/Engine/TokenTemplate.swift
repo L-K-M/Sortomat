@@ -11,7 +11,12 @@ enum TemplateValue: Equatable {
 
     var isEmpty: Bool {
         switch self {
-        case .text(let value): return value.trimmingCharacters(in: .whitespaces).isEmpty
+        // Newlines too: `escapeValue` collapses them away, so a value that
+        // is only a newline rendered as nothing while `default:` — which
+        // asks this question — decided it was not empty and stayed quiet.
+        // A model answer arriving with a newline is called ordinary two
+        // hundred lines down.
+        case .text(let value): return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .list(let value): return value.isEmpty
         case .number, .date: return false
         }
@@ -211,7 +216,11 @@ struct TokenTemplate {
         // `replace:'a':'o'` is two quoted arguments, not one: stripping the
         // outer pair would leave «a':'o». Only a genuinely single-quoted
         // argument is unwrapped here; the filter splits its own pair.
-        return inner.contains("'") ? trimmed : inner
+        // `':'` rather than any apostrophe: the wrapping is kept for the
+        // two-piece `replace:'a':'o'` form, and refusing to unwrap on *any*
+        // apostrophe meant `default:'Mike's Mac'` came back with its quotes
+        // still attached and wrote them into the folder name.
+        return inner.contains("':'") ? trimmed : inner
     }
 
     static let knownFilters: Set<String> = [
@@ -311,7 +320,7 @@ struct TokenTemplate {
                 }
             case "default":
                 let rendered = text ?? stringify(current, timeZone: timeZone)
-                if rendered.trimmingCharacters(in: .whitespaces).isEmpty {
+                if rendered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     text = filter.argument ?? ""
                     current = .text(text ?? "")
                 }

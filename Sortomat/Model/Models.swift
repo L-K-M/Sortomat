@@ -278,8 +278,14 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         try c.encode(steps, forKey: .steps)
         try c.encode(fallback, forKey: .fallback)
         try c.encode(destinationRoots, forKey: .destinationRoots)
+        // No steps means no pre-rules — not the ones this rule used to have.
+        // `preRules` is kept in memory as the source the migration read, so
+        // re-encoding it when the user has deleted every step writes rules
+        // nobody asked for: an old build keeps filing by them, and a pack
+        // exported and re-imported brings them back through the memberwise
+        // upgrade, which has no schema guard to stop it.
         let projected = steps.isEmpty
-            ? preRules
+            ? []
             : LegacyMigration.project(steps: steps, fallback: fallback,
                                       copyInsteadOfMove: copyInsteadOfMove)
         try c.encode(projected, forKey: .preRules)

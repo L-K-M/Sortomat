@@ -366,6 +366,23 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(render("{n|replace:'a':'-'}", ["n": .text("ab")]), "-b")
     }
 
+    func testANewlineOnlyValueIsEmptyEnoughForDefault() {
+        // `escapeValue` collapses whitespace, so a value that is only a
+        // newline rendered as nothing — while `default:`, which asks whether
+        // the value is empty, trimmed only spaces and stayed quiet.
+        XCTAssertEqual(render("{a|default:'none'}", ["a": .text("\n")]), "none")
+        XCTAssertEqual(render("{a|default:'none'}", ["a": .text("  ")]), "none")
+        XCTAssertEqual(render("{a|default:'none'}", ["a": .text("x")]), "x")
+    }
+
+    func testAnApostropheInAQuotedArgumentSurvives() {
+        // Refusing to unwrap on *any* apostrophe — to protect the two-piece
+        // `replace:'a':'o'` form — meant a possessive came back with its
+        // quotes still attached and wrote them into the folder name.
+        XCTAssertEqual(render("{a|default:'Mike\'s Mac'}", [:]), "Mike's Mac")
+        XCTAssertEqual(render("{a|replace:'a':'o'}", ["a": .text("banana")]), "bonono")
+    }
+
     func testUnknownFilterIsReportedRatherThanSwallowed() {
         let template = TokenTemplate("{name|frobnicate}")
         XCTAssertFalse(template.isValid)
@@ -1191,6 +1208,23 @@ final class LegacyMigrationTests: XCTestCase {
         // rewrite used to reach inside the escaped braces and turn this into
         // `{{name}}`, which the guard above then refused.
         XCTAssertEqual(LegacyMigration.legacyRoute("Archive/{{stem}}"), "Archive/{stem}")
+    }
+
+    func testDeletingEveryStepDeletesThePreRulesToo() throws {
+        // `preRules` stays in memory as the source the migration read, so
+        // re-encoding it after the user has emptied the rule writes rules
+        // nobody asked for — an old build keeps filing by them, and a pack
+        // exported and re-imported brings them back through the memberwise
+        // upgrade, which has no schema guard to stop it.
+        var rule = try legacyRule([
+            PreRule(name: "Old", match: .glob, pattern: "*.pdf", action: .skip)
+        ])
+        XCTAssertEqual(rule.steps.count, 1, "the migration ran")
+        rule.steps = []
+        XCTAssertTrue(try projection(of: rule).isEmpty)
+        let reimported = try JSONDecoder().decode(
+            Rule.self, from: try JSONEncoder().encode(rule))
+        XCTAssertTrue(reimported.steps.isEmpty, "and they stay deleted")
     }
 
     func testAMigratedRuleProjectsBackToTheSamePreRules() throws {
