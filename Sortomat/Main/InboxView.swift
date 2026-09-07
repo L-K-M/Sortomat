@@ -124,9 +124,20 @@ struct InboxView: View {
             // Keep the button when part of it refused: those files can only be
             // retried one at a time from History otherwise.
             if result.failed == 0 { lastBatch = nil }
-            status = result.failed == 0
-                ? L10n.plural("journal.undoBatchDone", result.undone)
-                : L10n.plural("journal.undoBatchFailed", result.failed)
+            // The same rule the banner and History follow: a count of zero is
+            // a non-answer ("Undid 0 moves." after the batch was already undone
+            // from History), and a refusal without its reason is half a
+            // message.
+            if result.failed > 0 {
+                status = NotificationText.refusal(
+                    count: L10n.plural("journal.undoBatchFailed", result.failed),
+                    reason: result.firstFailure
+                )
+            } else {
+                status = result.undone > 0
+                    ? L10n.plural("journal.undoBatchDone", result.undone)
+                    : L10n.t("notify.undoNothing")
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 
-/// The words a notification says. Pure, so what the user reads at 2 a.m. when
+/// The words a notification says — and, where the window reports the same fact,
+/// the joins those two share. Pure, so what the user reads at 2 a.m. when
 /// twelve files moved on their own can be pinned by a test instead of guessed
 /// at from a screenshot.
 enum NotificationText {
@@ -22,6 +23,47 @@ enum NotificationText {
             text += " → " + (folder.path as NSString).abbreviatingWithTildeInPath
         }
         return text
+    }
+
+    /// What the banner says once an Undo button has been pressed: a title and
+    /// a body, or an empty body when there is nothing more to add.
+    ///
+    /// Pure, and separate from the posting, because the case that matters most
+    /// is the one no screenshot will ever catch. A banner survives in
+    /// Notification Center for days, and `Journal.recent` folds away a move
+    /// that has already been reversed — so pressing Undo on yesterday's banner,
+    /// or pressing it twice, legitimately finds nothing to reverse. The old
+    /// code posted nothing at all in that case: the user pressed a button that
+    /// moves files and the machine went silent, which is the exact fear the
+    /// Undo button exists to answer.
+    static func undoResult(
+        undone: Int, failed: Int, firstFailure: String? = nil
+    ) -> (title: String, body: String) {
+        guard undone + failed > 0 else {
+            return (L10n.t("notify.undoNothing"), L10n.t("notify.undoNothing.body"))
+        }
+        // Nothing moved and something refused: lead with the refusal rather
+        // than with "Put 0 files back".
+        if undone == 0 {
+            return (L10n.plural("notify.undoFailed", failed), firstFailure ?? "")
+        }
+        return (
+            L10n.plural("notify.undone", undone),
+            failed > 0
+                ? refusal(count: L10n.plural("notify.undoFailed", failed), reason: firstFailure)
+                : ""
+        )
+    }
+
+    /// A count of refusals and the reason behind the first, joined the one way
+    /// this app reports a refusal.
+    ///
+    /// Shared with the History list rather than written out twice: "something
+    /// else is at that path now" is the only part of a failure the user can act
+    /// on, both surfaces report it, and two copies of a join are two chances
+    /// for the same fact to arrive punctuated differently.
+    static func refusal(count: String, reason: String?) -> String {
+        [count, reason ?? ""].filter { !$0.isEmpty }.joined(separator: " — ")
     }
 
     /// The deepest folder that contains all of them — the one place a person

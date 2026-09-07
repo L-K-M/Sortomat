@@ -579,21 +579,40 @@ final class AppState: ObservableObject {
     /// user clicks. A banner from ten minutes ago must not quietly undo
     /// whatever has happened since.
     ///
-    /// `announcing` is for the caller that has nowhere to show a result. A
-    /// click on a banner's Undo happens with no window in sight, so without a
+    /// `replyingToBanner` is for the caller that has nowhere to show a result.
+    /// A click on a banner's Undo happens with no window in sight, so without a
     /// word back the user pressed a button that moves files and got no signal
     /// that it worked, or that half of it didn't. The Inbox says so itself and
     /// asks for no banner, because being told twice about a thing you are
     /// looking at is how notifications teach people to dismiss them unread.
+    ///
+    /// Named for where the call came from rather than for what it does,
+    /// because everything below rests on there being exactly one such caller.
     @discardableResult
-    func undo(batch id: UUID, announcing: Bool = false) async -> (undone: Int, failed: Int) {
+    func undo(batch id: UUID, replyingToBanner: Bool = false) async -> UndoOutcome {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
         let result = await reverse(entries.filter { $0.batchID == id })
-        if announcing, config.notificationsEnabled, result.undone + result.failed > 0 {
-            Notifier.post(
-                title: L10n.plural("notify.undone", result.undone),
-                body: result.failed > 0 ? L10n.plural("notify.undoFailed", result.failed) : ""
+        // Every outcome, including the empty one. `Journal.recent` folds away a
+        // move that has already been reversed, so an Undo pressed on a banner
+        // that has been sitting in Notification Center since yesterday finds
+        // nothing to do — and the old `> 0` guard turned that into silence,
+        // which is precisely the "did anything happen?" the button exists to
+        // answer.
+        //
+        // Not gated on `notificationsEnabled`, deliberately. This is a reply
+        // to something the user just pressed, not an unsolicited banner: the
+        // setting means "don't tell me about passes I didn't ask about", and
+        // turning it off between a banner arriving and its Undo being pressed
+        // must not be what makes that press silent.
+        //
+        // What this cannot promise is delivery. With notification permission
+        // revoked at the OS level `Notifier.post` no-ops, and the press is
+        // silent again — a case only a window can answer, not a banner.
+        if replyingToBanner {
+            let text = NotificationText.undoResult(
+                undone: result.undone, failed: result.failed, firstFailure: result.firstFailure
             )
+            Notifier.post(title: text.title, body: text.body)
         }
         return result
     }
@@ -616,7 +635,7 @@ final class AppState: ObservableObject {
 
     /// Undo the newest batch — one scan pass or one approved preview. Returns
     /// how many entries were reversed and how many refused.
-    func undoLastBatch() async -> (undone: Int, failed: Int) {
+    func undoLastBatch() async -> UndoOutcome {
         // The whole journal, not a 500-entry window: one pass over a big
         // folder can exceed it, and `lastBatch` would then reverse part of the
         // batch while reporting the whole thing undone.
@@ -625,17 +644,32 @@ final class AppState: ObservableObject {
     }
 
 
-    private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {
-        var undone = 0, failed = 0
+    /// What one undo actually did. Counts alone can't say *why* a file refused
+    /// to move back, and the reason — something else is at that path now, the
+    /// copy was edited since — is the only part of a failure the user can act
+    /// on. It was being caught and thrown away.
+    struct UndoOutcome {
+        var undone = 0
+        var failed = 0
+        var firstFailure: String?
+    }
+
+    private func reverse(_ entries: [JournalEntry]) async -> UndoOutcome {
+        var result = UndoOutcome()
         for entry in entries {
             do {
                 try await undo(entry, persisting: false)
-                undone += 1
+                result.undone += 1
             } catch {
-                failed += 1
+                result.failed += 1
+                if result.firstFailure == nil {
+                    result.firstFailure = L10n.t("journal.undoFailed",
+                                                 entry.destination.lastPathComponent,
+                                                 error.localizedDescription)
+                }
             }
         }
         await pipeline.persist() // once for the batch, not once per entry
-        return (undone, failed)
+        return result
     }
 }

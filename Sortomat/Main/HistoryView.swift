@@ -93,8 +93,26 @@ struct HistoryView: View {
             let result = await state.undoLastBatch()
             await reload()
             busy = false
-            status = L10n.plural("journal.undoBatchDone", result.undone)
-            if result.failed > 0 { error = L10n.plural("journal.undoBatchFailed", result.failed) }
+            // "Undid 0 moves." is the same non-answer the banner stopped
+            // giving. When everything refused, the error line below is the
+            // message; when there was nothing left to refuse, say so instead
+            // of counting to zero.
+            if result.undone > 0 {
+                status = L10n.plural("journal.undoBatchDone", result.undone)
+            } else {
+                status = result.failed > 0 ? nil : L10n.t("notify.undoNothing")
+            }
+            // The count *and* the first reason. A single-row undo has always
+            // said why it refused; the batch path counted the refusals and
+            // dropped every explanation, leaving "3 couldn't be undone." and
+            // no way to find out what to do about it. Joined by the same
+            // helper the banner uses, so the two cannot drift apart.
+            if result.failed > 0 {
+                error = NotificationText.refusal(
+                    count: L10n.plural("journal.undoBatchFailed", result.failed),
+                    reason: result.firstFailure
+                )
+            }
         }
     }
 }
