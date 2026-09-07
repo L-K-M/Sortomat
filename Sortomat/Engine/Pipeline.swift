@@ -442,7 +442,15 @@ actor Pipeline {
     /// answer is a reassurance, not a report.
     func matchCount(rule: Rule, limit: Int = 500) -> (matched: Int, scanned: Int, needsModel: Int) {
         // A fresh count sees the folder as it is now, and then reuses one
-        // enumeration across all five hundred candidates.
+        // enumeration across all five hundred candidates — but it must not
+        // take the *scan's* snapshot with it. `Pipeline` is an actor and this
+        // method never suspends, so it runs whole between two of a scan's
+        // awaits; clearing outright left the scan to rebuild its index from a
+        // folder it had itself been filing into, and the files it had already
+        // moved then answered "already filed?" for the ones still to come.
+        // Saved and put back, so the pass keeps the enumeration it started.
+        let scanIndexes = targetIndexes
+        defer { targetIndexes = scanIndexes }
         targetIndexes.removeAll()
         let watch = URL(fileURLWithPath: (rule.watchPath as NSString).expandingTildeInPath)
         let target = URL(fileURLWithPath: (rule.targetPath as NSString).expandingTildeInPath)

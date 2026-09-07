@@ -281,6 +281,21 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(cased.when.mode, ConditionGroup.Mode.none)
     }
 
+    func testAnItemsValueThatIsNotAListClaimsNothing() throws {
+        // An object where a list belongs left `.all` with no conditions, which
+        // is vacuously true and claims every file — the same fail-open shape as
+        // an unreadable `when`, one level down.
+        let step = try JSONDecoder().decode(RuleStep.self, from: Data(
+            #"{"when":{"mode":"all","items":{"attr":"kind","op":"is","value":"pdf"}}}"#.utf8))
+        XCTAssertEqual(step.when.mode, .any)
+        XCTAssertTrue(step.when.items.isEmpty)
+        // An *explicitly* empty list is untouched: that is the editor's own
+        // new step, and the validator already says what it does.
+        let empty = try JSONDecoder().decode(RuleStep.self, from: Data(
+            #"{"when":{"mode":"all","items":[]}}"#.utf8))
+        XCTAssertEqual(empty.when.mode, .all)
+    }
+
     func testCaseSensitivityIsReadWhateverItsSpelling() throws {
         // `mode` is case-folded; this was not, so `"Sensitive"` silently became
         // insensitive. `kindSource` is deliberately *not* folded — its cases
@@ -682,6 +697,31 @@ final class RuleEvaluatorTests: XCTestCase {
         XCTAssertEqual(tests[0].attribute, Attribute.text.rawValue)
         XCTAssertEqual(tests[0].op, Operator.contains.rawValue)
         XCTAssertEqual(tests[1].verdict, .fail)
+    }
+
+    func testABareQuarantineActionStillLandsInTheQuarantineFolder() {
+        // `bindModel` and `setTerminal` both default to the rule's quarantine
+        // folder; the explicit action did not, so a `quarantine` step with no
+        // template filed at the target root and split the one folder a review
+        // workflow watches into two.
+        var quarantining = rule([
+            step("Odd", ConditionTest(attribute: .ext, op: .equals, value: .text("pdf")),
+                 [RuleAction(type: .quarantine)])
+        ])
+        quarantining.quarantineSubfolder = "Zu prüfen"
+        guard case .decided(let placement, _) = RuleEvaluator.evaluate(context(quarantining)) else {
+            return XCTFail("expected a decision")
+        }
+        XCTAssertEqual(placement.operation, .quarantine)
+        XCTAssertEqual(placement.relativePath?.string(), "Zu prüfen/Rechnung ACME.pdf")
+
+        // A rule with no quarantine folder still files at the root, which is
+        // what `testEmptyQuarantineFolderFilesAtTheTargetRoot` promises.
+        quarantining.quarantineSubfolder = ""
+        guard case .decided(let flat, _) = RuleEvaluator.evaluate(context(quarantining)) else {
+            return XCTFail("expected a decision")
+        }
+        XCTAssertEqual(flat.relativePath?.string(), "Rechnung ACME.pdf")
     }
 
     func testAnAnswerCannotBindToARuleTheUserHasSinceReplaced() {

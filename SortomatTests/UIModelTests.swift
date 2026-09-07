@@ -133,12 +133,14 @@ final class UIModelTests: XCTestCase {
         // by a distinction a user does not have. What must stay distinct is
         // the promise each one makes.
         XCTAssertEqual(label(.preRule), label(.step))
-        for pair in [(PlannedAction.Origin.step, PlannedAction.Origin.model),
-                     (.model, .taxonomy), (.taxonomy, .confidence),
-                     (.confidence, .fallback), (.fallback, .system),
-                     (.step, .fallback)] {
-            XCTAssertNotEqual(label(pair.0), label(pair.1),
-                              "\(pair.0) and \(pair.1) read the same to a user")
+        // Every remaining pair, not six chosen ones: distinctness is not
+        // transitive, so a hand-written list stays green while `.step` and
+        // `.taxonomy` quietly come to read the same — and it does not grow a
+        // case when `Origin` does.
+        var seen: Set<String> = []
+        for origin in PlannedAction.Origin.allCases where origin != .preRule {
+            XCTAssertTrue(seen.insert(label(origin)).inserted,
+                          "\(origin) reads the same to a user as another origin")
         }
     }
 

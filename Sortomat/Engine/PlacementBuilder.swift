@@ -178,7 +178,18 @@ struct PlacementBuilder {
             let format = action.template.isEmpty ? "yyyy/MM" : action.template
             return "{date|date:'\(format)'}/{name}"
         }
-        if action.template.isEmpty { return "{name}" }
+        if action.template.isEmpty {
+            // The other two quarantine paths — `bindModel` and `setTerminal` —
+            // both default to the rule's quarantine folder, and this one did
+            // not: an explicit `quarantine` action with no template filed the
+            // file at the *target* root instead, splitting the one folder a
+            // review workflow watches into two. The unused `rule` parameter
+            // was the tell.
+            if action.type == .quarantine, !rule.quarantineSubfolder.isEmpty {
+                return "\(rule.quarantineSubfolder)/{name}"
+            }
+            return "{name}"
+        }
         return action.template
     }
 }

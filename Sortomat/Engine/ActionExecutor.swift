@@ -67,17 +67,24 @@ enum ActionExecutor {
         let wanted = effect.values
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+        // Case *and* normalization. "café" typed on one machine is one code
+        // point and on another is two, and Finder shows one tag either way —
+        // so comparing only the case still appended a second, identical-looking
+        // tag, and `removeTags` still left one spelling behind.
+        func key(_ tag: String) -> String {
+            tag.precomposedStringWithCanonicalMapping.lowercased()
+        }
         switch effect.type {
         case .addTags:
             var result = existing
-            var seen = Set(existing.map { $0.lowercased() })
-            for tag in wanted where seen.insert(tag.lowercased()).inserted {
+            var seen = Set(existing.map(key))
+            for tag in wanted where seen.insert(key(tag)).inserted {
                 result.append(tag)
             }
             return result
         case .removeTags:
-            let doomed = Set(wanted.map { $0.lowercased() })
-            return existing.filter { !doomed.contains($0.lowercased()) }
+            let doomed = Set(wanted.map(key))
+            return existing.filter { !doomed.contains(key($0)) }
         default:
             return existing
         }

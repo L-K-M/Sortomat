@@ -140,7 +140,15 @@ public struct ConditionGroup: Equatable, Sendable, Codable, Identifiable {
             items = []
             return
         }
-        items = ((try? container.decodeIfPresent([Condition].self, forKey: .items)) ?? nil) ?? []
+        let decodedItems = ((try? container.decodeIfPresent([Condition].self, forKey: .items)) ?? nil)
+        items = decodedItems ?? []
+        // `"items": {"attr":"kind"}` — an object where a list belongs — left
+        // `.all` with no conditions, which is vacuously true and claims every
+        // file. Present-but-unreadable is the same question as an unreadable
+        // `when`, and gets the same answer. An *explicitly* empty `.all` is
+        // left alone: that is the editor's own new step, and the validator
+        // already says what it does.
+        if container.contains(.items), decodedItems == nil { mode = .any }
     }
 
     public func encode(to encoder: Encoder) throws {
