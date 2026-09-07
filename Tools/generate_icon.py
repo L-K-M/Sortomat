@@ -29,6 +29,10 @@ Four things here are load-bearing and easy to get wrong:
   colour toward transparent black at the rounded corners, which is a dark halo
   on every icon edge. Everything below the mask is premultiplied; the
   un-premultiply happens once, on the way into the PNG.
+* **Scanline filters.** Storing rows unfiltered is fine for flat colour and
+  costs about a third of the file for a photograph, because zlib is then
+  compressing absolute pixel values rather than the differences between
+  neighbours. Every row picks its own filter.
 
 Usage:
     python3 Tools/generate_icon.py [-s SOURCE_PNG] [OUTPUT_APPICONSET_DIR]
@@ -345,11 +349,65 @@ def unpremultiply(row, size):
 # PNG out
 # --------------------------------------------------------------------------
 
+# Byte -> its distance from zero as a signed value, so a row of small
+# corrections scores low and a row of large ones scores high.
+_MAGNITUDE = bytes(min(b, 256 - b) for b in range(256))
+
+
+def _filtered(line, prev, bpp):
+    """The cheapest of the five PNG scanline filters for one row.
+
+    Filter 0 (store the bytes as they are) is the right answer for flat
+    colour and the wrong one for a photograph: zlib then has to compress
+    absolute pixel values instead of the differences between neighbours,
+    which costs about a third of the file. This is the heuristic the PNG
+    spec suggests — pick the candidate whose bytes are smallest read as
+    signed — and it recovers all of it.
+    """
+    stride = len(line)
+    candidates = [(0, bytes(line))]
+
+    sub = bytearray(line)
+    for i in range(stride - 1, bpp - 1, -1):
+        sub[i] = (line[i] - line[i - bpp]) & 0xFF
+    candidates.append((1, bytes(sub)))
+
+    candidates.append((2, bytes((a - b) & 0xFF for a, b in zip(line, prev))))
+
+    avg = bytearray(stride)
+    for i in range(stride):
+        left = line[i - bpp] if i >= bpp else 0
+        avg[i] = (line[i] - ((left + prev[i]) >> 1)) & 0xFF
+    candidates.append((3, bytes(avg)))
+
+    paeth = bytearray(stride)
+    for i in range(stride):
+        left = line[i - bpp] if i >= bpp else 0
+        upleft = prev[i - bpp] if i >= bpp else 0
+        up = prev[i]
+        guess = left + up - upleft
+        dl, du, dul = abs(guess - left), abs(guess - up), abs(guess - upleft)
+        if dl <= du and dl <= dul:
+            pick = left
+        elif du <= dul:
+            pick = up
+        else:
+            pick = upleft
+        paeth[i] = (line[i] - pick) & 0xFF
+    candidates.append((4, bytes(paeth)))
+
+    return min(candidates, key=lambda c: sum(c[1].translate(_MAGNITUDE)))
+
+
 def write_png(path, rows, size):
     raw = bytearray()
+    prev = bytes(size * 4)
     for row in rows:
-        raw.append(0)                   # filter type 0 (None)
-        raw.extend(unpremultiply(row, size))
+        line = unpremultiply(row, size)
+        kind, data = _filtered(line, prev, 4)
+        raw.append(kind)
+        raw.extend(data)
+        prev = line
 
     def chunk(tag, data):
         out = struct.pack(">I", len(data)) + tag + data
