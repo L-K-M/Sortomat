@@ -120,11 +120,26 @@ public struct ConditionGroup: Equatable, Sendable, Codable, Identifiable {
             return
         }
         let raw = ((try? container.decodeIfPresent(String.self, forKey: .mode)) ?? nil) ?? ""
-        // Case-folded: `"Any"` or `"NONE"` would otherwise fall back to `.all`
-        // and widen the step into a catch-all — the fail-open direction, from
-        // nothing worse than a capital letter. An absent mode is still `.all`,
-        // which is the documented default.
-        mode = raw.isEmpty ? .all : (Mode(rawValue: raw.lowercased()) ?? .all)
+        // Three answers, in the order they are asked. An *absent* mode is
+        // `.all`, the documented default. A mode that differs only in case is
+        // still that mode: `"Any"` falling back to `.all` widened the step into
+        // a catch-all over nothing worse than a capital letter. And a mode this
+        // build has never heard of is unintelligible, which this initializer
+        // already answers twice above — never match. Reading it as `.all` was
+        // the fail-open direction: a newer build's `"atLeastTwo"` would have
+        // become "every one of these", or, with no items, "every file".
+        if raw.isEmpty {
+            mode = .all
+        } else if let parsed = Mode(rawValue: raw.lowercased()) {
+            mode = parsed
+        } else {
+            // Properties, not `self = ConditionGroup(…)`: the same shape as the
+            // guard above, and it keeps the id the config carried, so the
+            // editor still recognizes the group it is showing.
+            mode = .any
+            items = []
+            return
+        }
         items = ((try? container.decodeIfPresent([Condition].self, forKey: .items)) ?? nil) ?? []
     }
 
@@ -230,7 +245,10 @@ public struct ConditionTest: Equatable, Sendable, Codable, Identifiable {
         op = ((try? container.decodeIfPresent(Operator.self, forKey: .op)) ?? nil) ?? .contains
         value = ((try? container.decodeIfPresent(ConditionValue.self, forKey: .value)) ?? nil) ?? .none
         let sensitivity = ((try? container.decodeIfPresent(String.self, forKey: .caseSensitivity)) ?? nil) ?? ""
-        caseSensitivity = CaseSensitivity(rawValue: sensitivity) ?? .insensitive
+        // Case-folded like `mode`. Both cases are lower-case words, so this is
+        // safe — unlike `kindSource`, whose `extensionTable` and `utType` are
+        // camel-cased and would stop matching if the input were lowered.
+        caseSensitivity = CaseSensitivity(rawValue: sensitivity.lowercased()) ?? .insensitive
         let source = ((try? container.decodeIfPresent(String.self, forKey: .kindSource)) ?? nil) ?? ""
         kindSource = KindSource(rawValue: source) ?? .utType
         captureAs = ((try? container.decodeIfPresent(String.self, forKey: .captureAs)) ?? nil) ?? nil

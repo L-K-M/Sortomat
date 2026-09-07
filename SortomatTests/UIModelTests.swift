@@ -114,7 +114,11 @@ final class UIModelTests: XCTestCase {
     }
 
     func testEveryOriginSaysWhereTheDecisionCameFrom() {
+        // Restored rather than left set: `setUp` clears it for *this* class,
+        // which does nothing for whichever class the runner picks next.
+        let previous = L10n.forcedLanguage
         L10n.forcedLanguage = "en"
+        addTeardownBlock { L10n.forcedLanguage = previous }
         func label(_ origin: PlannedAction.Origin) -> String {
             InboxItem(plan: plan(origin: origin, confidence: 0.5),
                       target: URL(fileURLWithPath: "/t"), ruleMode: .automatic).originText

@@ -252,10 +252,43 @@ final class TokenTemplateTests: XCTestCase {
             XCTAssertEqual(step.when.mode, .any, "malformed «\(malformed)» must fail closed")
             XCTAssertTrue(step.when.items.isEmpty)
         }
-        // An *absent* `when` is the documented default and still means "every
-        // file" — that is the editor's starting state, not a typo.
+        // An *absent* `when` reads the same way, which reverses what this test
+        // asserted when it was written. The reason given then was that a
+        // missing `when` is "the editor's starting state" — and that is not
+        // true of this path: `RuleStep` has no custom `encode`, and
+        // `ConditionGroup.encode` always writes `mode` and `items`, so a step
+        // this app saved *always* carries a `when` and decodes through the
+        // canonical path. The editor's starting state comes from the
+        // memberwise initializer, which is still `.all`. Nothing but a
+        // hand-written config can reach the line below, which is exactly the
+        // audience this decoder fails closed for.
         let bare = try JSONDecoder().decode(RuleStep.self, from: Data("{\"then\":[]}".utf8))
-        XCTAssertEqual(bare.when.mode, .all)
+        XCTAssertEqual(bare.when.mode, .any)
+        XCTAssertEqual(RuleStep().when.mode, .all, "the editor's own new step is unchanged")
+    }
+
+    func testAModeThisBuildDoesNotKnowMatchesNothing() throws {
+        // A newer build's mode read as `.all` would mean "every one of these",
+        // or, with no items, every file. Unintelligible means never match here,
+        // the same as a `when` that is a string or a number.
+        let step = try JSONDecoder().decode(RuleStep.self, from: Data(
+            #"{"when":{"mode":"atLeastTwo","items":[{"attr":"ext","op":"is","value":"pdf"}]}}"#.utf8))
+        XCTAssertEqual(step.when.mode, .any)
+        XCTAssertTrue(step.when.items.isEmpty)
+        // And a mode that differs only in case is still that mode.
+        let cased = try JSONDecoder().decode(RuleStep.self, from: Data(
+            #"{"when":{"mode":"NONE","items":[]}}"#.utf8))
+        XCTAssertEqual(cased.when.mode, ConditionGroup.Mode.none)
+    }
+
+    func testCaseSensitivityIsReadWhateverItsSpelling() throws {
+        // `mode` is case-folded; this was not, so `"Sensitive"` silently became
+        // insensitive. `kindSource` is deliberately *not* folded — its cases
+        // are camel-cased and lowering the input would stop them matching.
+        let test = try JSONDecoder().decode(ConditionTest.self, from: Data(
+            #"{"attr":"name","op":"is","value":"x","caseSensitivity":"Sensitive","kindSource":"extensionTable"}"#.utf8))
+        XCTAssertEqual(test.caseSensitivity, .sensitive)
+        XCTAssertEqual(test.kindSource, .extensionTable)
     }
 
     func testCounterIsAHoleTheCallerFills() {
@@ -585,9 +618,16 @@ final class RuleEvaluatorTests: XCTestCase {
             ])
         ])
         let file = "whatever.epub"
-        guard case .needsModel(_, let token, _) = RuleEvaluator.evaluate(context(rule, name: file)) else {
+        guard case .needsModel(_, let token, let waiting) = RuleEvaluator.evaluate(
+            context(rule, name: file)
+        ) else {
             return XCTFail("expected a model request")
         }
+        // The trace of a file that is *waiting* has to show the tag too: the
+        // walk returns before the loop's own assignment, so this trace was the
+        // only one that lost it.
+        XCTAssertFalse(waiting.steps.last?.actions.isEmpty ?? true,
+                       "the action before the question is missing while the file waits")
         guard case .decided(let placement, _) = RuleEvaluator.resume(
             token, answer: ModelAnswer(relativePath: "Bücher/x.epub"),
             context: context(rule, name: file)
@@ -636,6 +676,11 @@ final class RuleEvaluatorTests: XCTestCase {
         let tests = trace.steps.first?.tests ?? []
         XCTAssertEqual(tests.count, 2)
         XCTAssertEqual(tests[0].verdict, .notEvaluated, "the content condition must not be reached")
+        // …and it says which condition it was. A blank row could report that
+        // something was skipped but not what, which is the wrong half of the
+        // answer for a trace that exists to explain a rule that did not fire.
+        XCTAssertEqual(tests[0].attribute, Attribute.text.rawValue)
+        XCTAssertEqual(tests[0].op, Operator.contains.rawValue)
         XCTAssertEqual(tests[1].verdict, .fail)
     }
 
@@ -813,7 +858,11 @@ final class KindResolverTests: XCTestCase {
         XCTAssertEqual(MagicBytes.kind(sniffing: Data([0x25, 0x50, 0x44, 0x46, 0x2D])), .pdf)
         XCTAssertEqual(MagicBytes.kind(sniffing: Data([0xFF, 0xD8, 0xFF, 0xE0])), .image)
         XCTAssertEqual(MagicBytes.kind(sniffing: Data([0x50, 0x4B, 0x03, 0x04])), .archive)
-        XCTAssertEqual(MagicBytes.kind(sniffing: Data("#!/bin/sh\n".utf8)), .text)
+        // `.code`, not `.text`: `sh` is a `.code` extension, and a script that
+        // lost its extension must not sort somewhere else than one that kept it.
+        XCTAssertEqual(MagicBytes.kind(sniffing: Data("#!/bin/sh\n".utf8)), .code)
+        XCTAssertEqual(MagicBytes.kind(sniffing: Data([0xCA, 0xFE, 0xBA, 0xBE, 0x00])), .other,
+                       "a universal binary is a binary")
     }
 
     func testTheBrandsInAnISOContainerThatAreNotVideo() {
@@ -1127,6 +1176,7 @@ final class RuleCatalogTests: XCTestCase {
 
     func testTheSummarySentenceReadsLikeASentence() {
         L10n.forcedLanguage = "en"
+        defer { L10n.forcedLanguage = nil }
         let step = RuleStep(
             name: "Invoices",
             when: ConditionGroup(mode: .all, items: [
@@ -1139,6 +1189,5 @@ final class RuleCatalogTests: XCTestCase {
         XCTAssertTrue(sentence.contains("Extension is «pdf»"), sentence)
         XCTAssertTrue(sentence.contains(" and "), sentence)
         XCTAssertTrue(sentence.contains("Move to Finanzen/{name}"), sentence)
-        L10n.forcedLanguage = nil
     }
 }

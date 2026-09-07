@@ -170,7 +170,11 @@ struct InboxItem: Identifiable, Equatable {
     var heat: Heat {
         switch plan.origin {
         case .preRule, .step: return .exact
-        default: return Heat(confidence: plan.confidence)
+        // Listed rather than `default:`, because a new origin landing silently
+        // in the confidence bucket is exactly the mistake `switch_exhaustive.py`
+        // exists to catch — and that checker skips any switch with a `default`.
+        case .model, .taxonomy, .confidence, .fallback, .system:
+            return Heat(confidence: plan.confidence)
         }
     }
     var destinationText: String { plan.relativeDestination(to: target) }

@@ -186,6 +186,13 @@ enum RuleEvaluator {
                     continue
                 }
                 if action.type == .askModel {
+                    // Whatever ran before the question belongs in the trace of
+                    // the file that is *waiting* for an answer, not only in the
+                    // one rebuilt after it: the walk below returns before the
+                    // assignment at the end of the loop.
+                    if let last = state.trace.steps.indices.last {
+                        state.trace.steps[last].actions = descriptions
+                    }
                     guard context.allowModel else { return .deferred(finish(&state, context: context)) }
                     let request = ModelRequest(ruleID: rule.id, stepIndex: index,
                                                actionIndex: actionIndex,
@@ -251,11 +258,25 @@ enum RuleEvaluator {
     static func evaluateGroup(_ group: ConditionGroup, path: String,
                               captures: inout CaptureStore,
                               context: Context) -> GroupEvaluation {
-        var outcomes: [RuleTrace.TestOutcome] = Array(
-            repeating: RuleTrace.TestOutcome(path: path, attribute: "", op: "", expected: "",
-                                             actual: nil, verdict: .notEvaluated, cost: "free"),
-            count: group.items.count
-        )
+        // Named, not blank. A condition the cheap-first order never reached is
+        // the interesting row in "why didn't my rule fire" — and it was
+        // arriving with no attribute, no operator and no expected value, so the
+        // trace could say *that* something was skipped but not *what*.
+        var outcomes: [RuleTrace.TestOutcome] = group.items.indices.map { index in
+            let itemPath = "\(path).\(group.mode.rawValue)[\(index)]"
+            switch group.items[index] {
+            case .test(let test):
+                return RuleTrace.TestOutcome(
+                    path: itemPath, attribute: test.attribute.rawValue, op: test.op.rawValue,
+                    expected: describe(test.value), actual: nil, verdict: .notEvaluated,
+                    cost: context.facts.cost(of: test.attribute).name)
+            case .group(let child):
+                return RuleTrace.TestOutcome(
+                    path: itemPath, attribute: child.mode.rawValue, op: "group",
+                    expected: "\(child.items.count)", actual: nil, verdict: .notEvaluated,
+                    cost: "free")
+            }
+        }
         var nested: [Int: GroupEvaluation] = [:]
         var decided: Bool?
         var culprit: Int?

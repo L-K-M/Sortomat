@@ -81,12 +81,19 @@ enum KindResolver {
         .diskImage: ["dmg", "iso", "pkg", "img", "sparsebundle"]
     ]
 
+    /// `conformance` resolved once. Every entry was being turned back into a
+    /// `UTType` for every candidate of every kind, for every file in a scan —
+    /// a Launch Services lookup per row per file, to answer a question whose
+    /// answer never changes while the app runs. (It can change if an app is
+    /// installed *while* Sortomat runs, which is what a relaunch is for; the
+    /// extension table answers in the meantime.)
+    private static let resolvedConformance: [(Kind, [UTType])] =
+        conformance.map { row in (row.0, row.1.compactMap { UTType($0) }) }
+
     static func kind(forUTI identifier: String?) -> Kind? {
         guard let identifier, let type = UTType(identifier) else { return nil }
-        for (kind, identifiers) in conformance {
-            for candidate in identifiers {
-                if let target = UTType(candidate), type.conforms(to: target) { return kind }
-            }
+        for (kind, targets) in resolvedConformance {
+            for target in targets where type.conforms(to: target) { return kind }
         }
         return nil
     }
@@ -153,8 +160,17 @@ enum MagicBytes {
         if starts([0x50, 0x4B, 0x03, 0x04]) { return .archive }                   // zip
         if starts([0x1F, 0x8B]) { return .archive }                               // gzip
         if starts([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]) { return .archive }       // 7z
-        if starts([0x7F, 0x45, 0x4C, 0x46]) || starts([0xCF, 0xFA, 0xED, 0xFE]) { return .other }
-        if starts([0x23, 0x21]) { return .text }                                  // #!
+        // Mach-O in all three spellings, not just 64-bit little-endian: 32-bit
+        // (`ce fa ed fe`) and the fat/universal header (`ca fe ba be`) are the
+        // same answer, and the fat one is what a shipped binary usually is.
+        if starts([0x7F, 0x45, 0x4C, 0x46]) || starts([0xCF, 0xFA, 0xED, 0xFE])
+            || starts([0xCE, 0xFA, 0xED, 0xFE]) || starts([0xCA, 0xFE, 0xBA, 0xBE]) {
+            return .other
+        }
+        // `.code`, because `sh`, `zsh`, `bash` and the rest are `.code` in the
+        // extension table: a script with an extension and the same script
+        // without one must not sort into two different folders.
+        if starts([0x23, 0x21]) { return .code }                                  // #!
         if !bytes.contains(0), String(data: header, encoding: .utf8) != nil { return .text }
         return nil
     }
