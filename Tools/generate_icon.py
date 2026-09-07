@@ -368,7 +368,8 @@ def _filtered(line, prev, bpp):
     # Sub and Paeth index `prev` and would raise; the Up candidate below is
     # built with zip, which stops at the shorter of the two and would hand
     # back a short scanline that still encodes cleanly and decodes to garbage.
-    assert len(prev) == stride, f"previous row is {len(prev)} bytes, not {stride}"
+    if len(prev) != stride:
+        raise ValueError(f"previous row is {len(prev)} bytes, not {stride}")
     candidates = [(0, bytes(line))]
 
     sub = bytearray(line)
@@ -417,7 +418,8 @@ def write_png(path, rows, size):
         # the row buys the whole class.
         check = bytearray(data)
         _unfilter(kind, check, prev, 4, stride)
-        assert check == line, f"filter {kind} does not round-trip in {path}"
+        if check != line:
+            raise ValueError(f"filter {kind} does not round-trip in {path}")
         raw.append(kind)
         raw.extend(data)
         prev = line
@@ -444,16 +446,22 @@ def check_grid(rows, size):
     The margin is the whole point of the grid, and it is invisible in a diff of
     ten binary files: without this, "the icon looks a bit big" is something a
     person has to notice months later in a Dock full of correctly sized icons.
+
+    Raised rather than asserted, here and at the two guards in `_filtered` and
+    `write_png`: `python3 -O` strips `assert` outright, and a check that a
+    stray `PYTHONOPTIMIZE` can turn off is not a check.
     """
-    assert rows[0][3] == 0, f"the canvas corner is not transparent ({rows[0][3]})"
+    if rows[0][3] != 0:
+        raise ValueError(f"the canvas corner is not transparent ({rows[0][3]})")
     middle = rows[size // 2]
-    assert middle[3] == 0, f"the icon touches the canvas edge ({middle[3]})"
+    if middle[3] != 0:
+        raise ValueError(f"the icon touches the canvas edge ({middle[3]})")
     expected = round((CANVAS - BODY) / 2 * (size / CANVAS))
     first = next(x for x in range(size) if middle[x * 4 + 3] > 0)
-    assert abs(first - expected) <= 1, (
-        f"body starts at {first}px, expected about {expected}px"
-    )
-    assert rows[size // 2][(size // 2) * 4 + 3] == 255, "the artwork did not land"
+    if abs(first - expected) > 1:
+        raise ValueError(f"body starts at {first}px, expected about {expected}px")
+    if rows[size // 2][(size // 2) * 4 + 3] != 255:
+        raise ValueError("the artwork did not land in the middle of the canvas")
     print(f"  grid ok: {first}px margin on a {size}px master")
 
 
