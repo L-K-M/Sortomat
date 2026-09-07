@@ -1,6 +1,7 @@
 import Foundation
 
-/// The words a notification says. Pure, so what the user reads at 2 a.m. when
+/// The words a notification says — and, where the window reports the same fact,
+/// the joins those two share. Pure, so what the user reads at 2 a.m. when
 /// twelve files moved on their own can be pinned by a test instead of guessed
 /// at from a screenshot.
 enum NotificationText {
@@ -46,19 +47,23 @@ enum NotificationText {
         if undone == 0 {
             return (L10n.plural("notify.undoFailed", failed), firstFailure ?? "")
         }
-        return (L10n.plural("notify.undone", undone), refusal(failed, firstFailure))
+        return (
+            L10n.plural("notify.undone", undone),
+            failed > 0
+                ? refusal(count: L10n.plural("notify.undoFailed", failed), reason: firstFailure)
+                : ""
+        )
     }
 
-    /// The count *and* the reason, for every branch that reports a refusal.
-    /// "Something else is at that path now" is the only part of a failure the
-    /// user can act on, and a partial batch — some files back, some refused —
-    /// is the commonest way to meet one. Reporting the reason in the
-    /// all-refused case and dropping it in the mixed case would make the more
-    /// likely message the less useful one.
-    private static func refusal(_ failed: Int, _ firstFailure: String?) -> String {
-        guard failed > 0 else { return "" }
-        return [L10n.plural("notify.undoFailed", failed), firstFailure ?? ""]
-            .filter { !$0.isEmpty }.joined(separator: " — ")
+    /// A count of refusals and the reason behind the first, joined the one way
+    /// this app reports a refusal.
+    ///
+    /// Shared with the History list rather than written out twice: "something
+    /// else is at that path now" is the only part of a failure the user can act
+    /// on, both surfaces report it, and two copies of a join are two chances
+    /// for the same fact to arrive punctuated differently.
+    static func refusal(count: String, reason: String?) -> String {
+        [count, reason ?? ""].filter { !$0.isEmpty }.joined(separator: " — ")
     }
 
     /// The deepest folder that contains all of them — the one place a person

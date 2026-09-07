@@ -98,6 +98,17 @@ final class NotificationTests: XCTestCase {
                       "the mixed case drops the reason: \(text.body)")
     }
 
+    func testTheRefusalJoinIsTheOneBothSurfacesUse() {
+        // The banner and the History list report the same fact. Pinning the
+        // join here is what stops them arriving punctuated differently.
+        XCTAssertEqual(NotificationText.refusal(count: "2 refused", reason: "why"),
+                       "2 refused — why")
+        XCTAssertEqual(NotificationText.refusal(count: "2 refused", reason: nil), "2 refused")
+        XCTAssertEqual(NotificationText.refusal(count: "2 refused", reason: ""), "2 refused",
+                       "an empty reason must not leave a dangling dash")
+        XCTAssertEqual(NotificationText.refusal(count: "", reason: "why"), "why")
+    }
+
     func testUndoResultReadsInGermanToo() {
         L10n.forcedLanguage = "de"
         // Assert the German, not merely the absence of a raw key: every one of

@@ -579,14 +579,17 @@ final class AppState: ObservableObject {
     /// user clicks. A banner from ten minutes ago must not quietly undo
     /// whatever has happened since.
     ///
-    /// `announcing` is for the caller that has nowhere to show a result. A
-    /// click on a banner's Undo happens with no window in sight, so without a
+    /// `replyingToBanner` is for the caller that has nowhere to show a result.
+    /// A click on a banner's Undo happens with no window in sight, so without a
     /// word back the user pressed a button that moves files and got no signal
     /// that it worked, or that half of it didn't. The Inbox says so itself and
     /// asks for no banner, because being told twice about a thing you are
     /// looking at is how notifications teach people to dismiss them unread.
+    ///
+    /// Named for where the call came from rather than for what it does,
+    /// because everything below rests on there being exactly one such caller.
     @discardableResult
-    func undo(batch id: UUID, announcing: Bool = false) async -> UndoOutcome {
+    func undo(batch id: UUID, replyingToBanner: Bool = false) async -> UndoOutcome {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
         let result = await reverse(entries.filter { $0.batchID == id })
         // Every outcome, including the empty one. `Journal.recent` folds away a
@@ -596,13 +599,12 @@ final class AppState: ObservableObject {
         // which is precisely the "did anything happen?" the button exists to
         // answer.
         //
-        // Not gated on `notificationsEnabled`, deliberately. `announcing` is
-        // set by exactly one caller — the handler for a button *on a banner* —
-        // so this is a reply to something the user just pressed, not an
-        // unsolicited banner. The setting means "don't tell me about passes I
-        // didn't ask about"; turning it off between a banner arriving and its
-        // Undo being pressed must not be what makes that press silent.
-        if announcing {
+        // Not gated on `notificationsEnabled`, deliberately. This is a reply
+        // to something the user just pressed, not an unsolicited banner: the
+        // setting means "don't tell me about passes I didn't ask about", and
+        // turning it off between a banner arriving and its Undo being pressed
+        // must not be what makes that press silent.
+        if replyingToBanner {
             let text = NotificationText.undoResult(
                 undone: result.undone, failed: result.failed, firstFailure: result.firstFailure
             )

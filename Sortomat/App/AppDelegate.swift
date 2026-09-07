@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // "Show in Finder" and "Open log" — neither of which touches
                 // the app's state — inert in any situation where it were nil.
                 guard let state = self.state else { return }
-                Task { await state.undo(batch: batch, announcing: true) }
+                Task { await state.undo(batch: batch, replyingToBanner: true) }
             case .reveal(let url):
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             case .openLog:
