@@ -2,13 +2,12 @@
 
 *What is done, what is left, and enough detail on each open item that it can be
 picked up cold. This is the document to read first and to keep current.
-It supersedes the still-open half of `fable-is-awesome.md` (waves 1–3), which
-stays in the tree as the record of how those findings were arrived at, and the
-whole of the wave-4 review document, which lives on the review branch
-`claude/hazel-alternative-review-ve9w1z`.*
+It supersedes the still-open half of two review records that stay in the tree
+for provenance — `fable-is-awesome.md` (waves 1–3) and `fable.md` (wave 4) —
+which say how each finding was arrived at and which of them were refuted.*
 
-*Last updated after wave 5. Every `file:line` reference points at `main` at that
-point unless a branch is named.*
+*Last updated when wave 5 finished merging. Every `file:line` reference points
+at `main` at that point unless a branch is named.*
 
 ---
 
@@ -57,6 +56,17 @@ Seven things that cost real time to learn, in the order they will bite.
    `Mover`, `Journal` and `Ledger` are the four files that decide where bytes go
    and how to undo it. Everything else can be rewritten; these four are changed
    deliberately, with tests, and never as a side effect.
+7. **A run that finishes in ten seconds with no runner is not a build failure.**
+   For two days every workflow on this repository — macOS *and* Linux, on
+   `main` and on every branch — was created, reported "completed" within thirty
+   seconds, ran no steps, and left no log at all (`get_job_logs` answers HTTP
+   404). The cause was **repository visibility**: a private repository draws on
+   the account's included Actions minutes, and when those are gone *every*
+   runner class stops, which is why it looked account-wide rather than like a
+   macOS problem. Public repositories get minutes and artifact storage free,
+   and making the repository public is what brought CI back. Check visibility
+   and the minute allowance first — I spent two days confidently blaming a
+   spending limit, which was the same shape of answer and the wrong one.
 
 ---
 
@@ -68,30 +78,26 @@ Seven things that cost real time to learn, in the order they will bite.
 | 2 | 18 review branches (#17–#34), composed into one train | [#35](https://github.com/L-K-M/Sortomat/pull/35) | merged; the originals are closed as integrated |
 | 4 | CI failure artifacts expire, so a red run stops failing twice | [#36](https://github.com/L-K-M/Sortomat/pull/36) | merged |
 | 4 | Engine-core hardening: fail-closed hashing, verified cross-volume moves, document packages as candidates, the classification valves | [#37](https://github.com/L-K-M/Sortomat/pull/37) | merged |
-| 5 | On-device extraction: office documents, spreadsheets, decks, OpenDocument, HTML text, Vision OCR | [#38](https://github.com/L-K-M/Sortomat/pull/38) | open, six review rounds answered |
-| 5 | The Inbox-first main window | [#39](https://github.com/L-K-M/Sortomat/pull/39) | open |
-| 5 | Undo on the notification itself | [#40](https://github.com/L-K-M/Sortomat/pull/40) | open |
-| 5 | Guardrails: a monthly spend ceiling, power holds, a pause that survives a relaunch | [#41](https://github.com/L-K-M/Sortomat/pull/41) | open |
-| 5 | Pass efficiency: one stability pause per pass, undo that prunes its own folders, byte-aware names | [#42](https://github.com/L-K-M/Sortomat/pull/42) | open |
-| 5 | Half the CI bill, and no artifact upload | [#43](https://github.com/L-K-M/Sortomat/pull/43) | open |
-| 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | open |
-| 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46), stacked on #38 | open; had a second reader's pass |
+| 5 | On-device extraction: office documents, spreadsheets, decks, OpenDocument, HTML text, Vision OCR | [#38](https://github.com/L-K-M/Sortomat/pull/38) | merged, six review rounds answered |
+| 5 | The Inbox-first main window | [#39](https://github.com/L-K-M/Sortomat/pull/39) | merged |
+| 5 | Undo on the notification itself | [#40](https://github.com/L-K-M/Sortomat/pull/40) | merged |
+| 5 | Guardrails: a monthly spend ceiling, power holds, a pause that survives a relaunch | [#41](https://github.com/L-K-M/Sortomat/pull/41) | merged |
+| 5 | Pass efficiency: one stability pause per pass, undo that prunes its own folders, byte-aware names | [#42](https://github.com/L-K-M/Sortomat/pull/42) | merged |
+| 5 | One CI build per push instead of two, artifact upload kept | [#43](https://github.com/L-K-M/Sortomat/pull/43) | merged |
+| 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | merged |
+| 5 | The wave-4 review record kept in the tree (`fable.md`) | [#44](https://github.com/L-K-M/Sortomat/pull/44) | merged |
+| 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46) | open: green on `0f30b91`, 372 tests, awaiting a review round |
+| 5 | Undo that says so when there is nothing left to undo, and a batch undo that says why it refused | [#47](https://github.com/L-K-M/Sortomat/pull/47) | open: green on `731e0a5`, awaiting a review round |
 
-**Read this before merging anything.** #38–#43 were each green, then took one
-or more review rounds whose fixes were pushed **after GitHub Actions stopped
-running jobs on this account** — from about 18:47 UTC on 2026-09-05 every run,
-macOS and Linux alike, fails in under thirty seconds with no runner, no steps
-and no logs (`get_job_logs` answers HTTP 404). The last log a runner did write,
-at 18:46, ends with *"Artifact storage quota has been hit"* — the storage
-counts against the same Actions spending limit that pays for the runners,
-which is what this looks like from the inside and why #43 removes the artifact
-upload. The last commit on each of those branches has therefore never been
-compiled; each has since had a second reader's pass for compile errors and
-logic (see §1 for what that found on the engine branch), which is not the same
-thing. When runners come back: re-run CI on each, fix what it finds, and merge
-in the order #38 → #39–#43 → #45 → #46 (only #38 has a dependent; #46 carries
-#38's commits and its diff shrinks to the engine alone once #38 is in — merge
-`origin/main` into it first).
+**Wave 5 is on `main` except for the last two, which are green and waiting on
+a review round** (#46, #47 — merge them and this table needs one edit). Getting
+here took a two-day detour worth one sentence of memory: the last third of the
+wave was written with no compiler at all, because CI was down for the reason in
+trap 7 above, and each branch got a second reader's pass instead. That pass
+found eight real defects in the engine branch (§1) and the compiler then found
+one more it could not have — `URLResourceValues.tagNames` is get-only in the
+Swift overlay, so tag-writing did not compile. Reading is a good substitute for
+a compiler on logic and a poor one on SDKs.
 
 Findings closed by that work and **not** repeated below: the twenty-three
 wave-3 engine items (W1–W38); the hand-read items H-A, H-B, H-C, H-D, H-F,
@@ -105,10 +111,10 @@ P0-12 and P0-16 (globs), P0-13 (dates), P0-14 (tokens and captures), P0-15
 ## 1. The rule engine — the largest open piece
 
 [#46](https://github.com/L-K-M/Sortomat/pull/46) implements phases 1–3 of the
-five-phase plan: the data model, the pure evaluator, the fact source, lossless
-migration in both directions, the pipeline wiring, a step editor, a validator,
-and the side-effect executor. Green through `26010a4`; everything after that
-was written blind (see the scoreboard) and then read by a second model, which
+five-phase plan: the data model, the pure evaluator, the fact
+source, lossless migration in both directions, the pipeline wiring, a step
+editor, a validator, and the side-effect executor. Two thirds of it was written
+with no compiler (see the scoreboard) and then read by a second model, which
 found and fixed eight things worth knowing the shape of, because each is a
 class rather than a typo: the model's `folder` was never derived from its
 answer, so `{model.folder}` rendered empty through the pipeline while the unit
@@ -121,6 +127,14 @@ a test stub conformed to `FactSource` with one of six requirements; and a
 step's own `ModelStepOptions` were decoded, validated and never read. The
 pattern in all eight: a feature proven by a test that constructs the input the
 real caller never produces. Test through the pipeline, not beside it.
+
+When the compiler came back it found one thing reading had not, and it is the
+honest measure of what reading can do: `URLResourceValues.tagNames` is
+**get-only** in the Swift overlay, so `ActionExecutor` could not write a Finder
+tag at all. It writes through `NSURL.setResourceValue(_:forKey:)` now. One
+compile error in 7 286 lines across 40 files — and exactly the kind of question
+(what does this SDK actually expose?) that no amount of careful reading
+settles.
 
 **What a rule is now.** `Rule` gained `schemaVersion`, `steps`, `fallback` and
 `destinationRoots`; `preRules` survives as a downgrade projection written by a
@@ -166,7 +180,7 @@ which matches what Hazel does, and is worth deciding rather than inheriting.
 
 ### 1.2 `RuleValidator` — done, with one piece left
 
-`RuleValidator.findings(for:)` is on the branch: pure, no disk, no cost, safe to
+`RuleValidator.findings(for:)` is pure: no disk, no cost, safe to
 run on every keystroke, and each finding carries the exact step, condition or
 action it belongs to. It covers the empty `any` group, the step that claims
 every file and strands the ones after it, the step that matches and does
@@ -212,7 +226,7 @@ condition would mean one extraction per file per keystroke. What is *not* built
 on them yet: the menu-bar file drop, the Inbox's Check now, and the live "your
 folder right now" pane (§7).
 
-One thing worth doing when there is a compiler: `matchCount` runs *on* the
+One thing still worth doing: `matchCount` runs *on* the
 `Pipeline` actor — up to five hundred `stat`s that block a pass in flight, and
 that queue behind one. Nothing in `dryDecide`, `matchCount`, `evaluationContext`
 or `candidateFiles` touches actor state, so all four can be `nonisolated` —
@@ -296,19 +310,20 @@ re-arriving pays for a second classification — `Mover.treeDigest` is the fix.
 
 ---
 
-## 2. The interface — what #39 left open
+## 2. The interface — what is still to build
 
-#39 delivers the shell: a main window (⌘0) with Inbox, History and rules grouped
+#39 delivered the shell: a main window (⌘0) with Inbox, History and rules grouped
 by watched folder; one card per file with the decision as a sentence, its origin,
 and the confidence as a word; a single **Automatic · Ask first · Off** mode
 replacing two booleans; and a first launch that opens something. The rest of the
 specification, in build order:
 
-1. **`RuleEditorView` proper [H-I].** #39 wraps the existing `RuleEditor` in a
+1. **`RuleEditorView` proper [H-I].** #39 wrapped the existing `RuleEditor` in a
    header, so the wall of fields — a bare priority stepper, an unexplained
    "preview only", a free-text extension field, a non-native `TextEditor`
    stroke — is still what a user meets. The designed editor is the step list
-   from `claude/rule-engine-v2` plus a Try-it pane, and it needs §1.3.
+   #46 landed plus a Try-it pane, and it needs §1.3. This is the largest
+   single gap between what the engine can now do and what a person can reach.
 2. **Welcome window**, four steps, ending on a preview of the user's *own* files
    — and a template gallery sheet. `AppDelegate.didShowMainWindowKey` is where
    first-run currently branches.
@@ -376,8 +391,8 @@ notice first.
 
 ## 4. Open items from the hand-read
 
-Numbering kept from the wave-4 review document (`fable.md`, on the review
-branch) so nothing needs re-learning.
+Numbering kept from the wave-4 review document (`fable.md`, in the tree) so
+nothing needs re-learning.
 
 **Approachability**
 
@@ -416,32 +431,31 @@ branch) so nothing needs re-learning.
 
 **Chrome**
 
-*[H-Z], [P1-52] and [P1-53] are addressed on [#45](https://github.com/L-K-M/Sortomat/pull/45)
-and are kept here until it merges: the app icon sits on Apple's 824-of-1024
-grid (it was full-bleed, so it rendered about a quarter larger than every
-neighbour in the Dock), every size is antialiased through a supersampled master
-— the old generator skipped downsampling for the 1024px icon, which is the one
-on a release page — `AccentColor` is exactly the midpoint of the icon's
-gradient rather than a fourth green, and the menu-bar funnel is inset and is
-now the app icon's own shape rather than a second approximation of it.*
+*[H-Z] and [P1-52] closed with [#45](https://github.com/L-K-M/Sortomat/pull/45):
+the app icon sits on Apple's 824-of-1024 grid (it was full-bleed, so it
+rendered about a quarter larger than every neighbour in the Dock), every size
+is antialiased through a supersampled master — the old generator skipped
+downsampling for the 1024px icon, which is the one on a release page —
+`AccentColor` is exactly the midpoint of the icon's gradient rather than a
+fourth green, and the menu-bar funnel is inset and is now the app icon's own
+shape rather than a second approximation of it.*
 
 - **[H-X] The log is a file, opened in TextEdit.** "Open log" hands
   `activity.log` to whatever owns `.log`; there is no in-app viewer, no
   filtering by rule or outcome, and no way to get from a line to the file it
   describes. The status popover (§2.3) is where a real one belongs.
-- **[H-Z] No 16 pt-tuned menu-bar variant.** The mark is one filled shape drawn
-  at whatever size it is asked for; a 16 pt version wants slightly different
-  proportions, not the same polygon scaled.
-- **[P1-53] `Color.green` is still used in three views** — the palette is
-  codified in the icon generator and the accent colour now, but two of those
-  three call sites are in files #39 deletes, so changing them would only
-  conflict. Sweep the survivors after #39 merges.
+- **[P1-53] Three `.green` call sites are still hand-picked** rather than
+  taken from the palette: `UIModel.swift:63` (the Automatic mode dot),
+  `UIModel.swift:105` (certain / exact confidence) and
+  `GeneralTab.swift:29` (the connection-test tick). The blocker is gone — the
+  two that lived in files #39 deleted are gone with them — so this is now a
+  three-line sweep onto `Color.accentColor` or a named palette constant. **S**
 
 ---
 
 *Closed since this document was written:* **H-U** — `L10nTests` now compares the
 conversion characters each key consumes in both tables, in order unless either
-side uses positional markers (`claude/rule-engine-v2`). A sweep of all 1 818
+side uses positional markers (#46). A sweep of all 1 818
 `L10n.t`/`L10n.plural` call sites across every open branch found no live
 mismatch, so it is a guard rail for the next string rather than a fix.
 
@@ -491,6 +505,19 @@ in.
   directories a move made, so the cleanup removes any empty chain under the
   target root — including a taxonomy skeleton the user pre-made. Recording the
   created subpath on the journal entry would make it exact. **S**
+- **Both undo paths read the entire journal.** `undo(batch:)` and
+  `undoLastBatch` load every entry with `limit: .max` and filter in memory. The
+  `.max` is deliberate and must stay — a pass over a big folder can exceed any
+  window, and a limit would reverse *part* of a batch while reporting the whole
+  thing undone (#42 fixed exactly that) — but a `Journal.entries(batchID:)` that
+  streams the file and keeps only the matching lines would do the same work
+  without holding the whole history in memory. Worth doing when a journal is
+  big enough to measure, not before. **S**
+- **Tags an undo leaves behind.** `ActionExecutor` writes Finder tags after the
+  move is journaled, and `Journal.undo` puts the file back with the tags still
+  on it. This matches what Hazel does; the fix is the `SideEffectJournal` in
+  §1.1, and until then it is worth stating in the UI rather than discovering.
+  **S** to say, **M** to fix.
 
 ---
 
@@ -653,6 +680,15 @@ against the source.
 - **The rule-signature denylist should be an allowlist** — the denylist fails
   toward spurious re-planning, the allowlist toward stale previews. The safer
   failure is the one we have.
+- **A notification summary for a file at the volume root would say `→ /`** —
+  `commonFolder` ends `guard shared.count > 1 else { return nil }`, and
+  `/one.pdf` yields the single path component `["/"]`, so it already answers
+  nil. `testNoCommonFolderWhenTheAnswerWouldBeTheRoot` pins it.
+- **`Notifier.handler` can run before `AppState` exists** — `state` is assigned
+  at `AppDelegate.swift:29` and the handler is installed at line 47, so the
+  optional can never be nil when a banner is clicked. (The guard was still
+  narrowed to the one case that needs it, because a guard that reads as a
+  dependency should have one.)
 
 Two claims were **right in a way their authors did not realize**, and both are
 worth remembering:
@@ -682,12 +718,16 @@ So a future reader can judge how much to trust each item.
   actionable items, all resolved; the second round never returned), five on #38,
   and one each on #39–#42. Everything applied, declined or refuted is recorded
   in the commit messages, which is where the reasoning lives. The rounds earned
-  their keep twice over: round 5 on #38 caught that round 3 of the same PR had
-  silently disabled the fallback it added, and the round on #41 caught a Core
+  their keep three times over: round 5 on #38 caught that round 3 of the same
+  PR had silently disabled the fallback it added; the round on #41 caught a Core
   Foundation over-release — `takeRetainedValue` on a Get-rule function — that
-  would only ever have crashed in the field.
-- **Tests:** 106 before wave 4, 161 after the integration train, and about 320
-  with wave 5 — the exact figure is whatever the last green CI run reports.
+  would only ever have crashed in the field; and the round on #40, which
+  arrived after #40 had merged and was triaged against `main` rather than
+  dropped with the PR, found that the Undo button on a notification could
+  complete in total silence (#47). A review that lands late is still a review.
+- **Tests:** 106 before wave 4, 161 after the integration train, 301 on `main`
+  today and 372 with the engine branch — the exact figure is whatever the last
+  green CI run reports.
 
 ---
 
