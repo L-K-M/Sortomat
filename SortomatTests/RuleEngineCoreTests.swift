@@ -375,6 +375,20 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(render("{a|default:'none'}", ["a": .text("x")]), "x")
     }
 
+    func testAnOrFallbackIsEscapedByTheTokenThatAnsweredIt() {
+        // Escaping by the placeholder's *first* token meant a title reached
+        // `escapePathValue`, which keeps `/` — so «AC/DC» quietly became a
+        // folder, the one thing `escapeValue` exists to prevent. And the other
+        // way round a real path had its separators mangled into spaces.
+        XCTAssertEqual(render("{model.path|or:title}", ["title": .text("AC/DC")]),
+                       "AC DC", "a title is not a path, whatever asked for it first")
+        XCTAssertEqual(render("{title|or:relpath}", ["relpath": .text("a/b")]),
+                       "a/b", "and a path keeps its separators")
+        // The unchained cases are untouched.
+        XCTAssertEqual(render("{model.path}", ["model.path": .text("a/b")]), "a/b")
+        XCTAssertEqual(render("{title}", ["title": .text("AC/DC")]), "AC DC")
+    }
+
     func testADoubledApostropheIsOneApostrophe() {
         // `''` the way `DateFormatter` spells it. Refusing to unwrap on *any*
         // apostrophe — to protect the two-piece `replace:'a':'o'` form — left

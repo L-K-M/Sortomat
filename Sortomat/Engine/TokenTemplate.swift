@@ -263,13 +263,24 @@ struct TokenTemplate {
                     continue
                 }
                 var value = resolve(token)
+                // Which token the value ended up coming from, not which one was
+                // written first: `or:` chains to another one, and escaping by
+                // the *placeholder's* token meant `{model.path|or:match.title}`
+                // ran a title through `escapePathValue`, which keeps `/` — so a
+                // record called «AC/DC» quietly became a folder, the one thing
+                // `escapeValue` exists to prevent. The other direction mangled
+                // a real path's separators into spaces.
+                var source = token
                 // `or:` chains to another token before anything is stringified.
                 for filter in filters where filter.name == "or" {
                     guard value == nil || value?.isEmpty == true else { break }
-                    if let next = filter.argument { value = resolve(next) }
+                    if let next = filter.argument {
+                        value = resolve(next)
+                        source = next
+                    }
                 }
                 let text = TokenTemplate.apply(filters, to: value, timeZone: timeZone)
-                appendLiteral(TokenTemplate.pathTokens.contains(token)
+                appendLiteral(TokenTemplate.pathTokens.contains(source)
                               ? TokenTemplate.escapePathValue(text)
                               : TokenTemplate.escapeValue(text))
             }
