@@ -24,8 +24,14 @@ enum KindResolver {
                          "com.microsoft.powerpoint.ppt", "com.apple.iwork.keynote.key",
                          "org.oasis-open.opendocument.presentation"]),
         (.image, ["public.image"]),
-        (.video, ["public.movie"]),
+        // Audio ahead of video, and it has to be: `public.mpeg-4-audio`
+        // conforms to `public.audio` *and*, through `public.mpeg-4`, to
+        // `public.movie`. First match wins, so every `.m4a` and `.m4b`
+        // resolved through Launch Services was sorting into the video folder
+        // while the extension table called it audio — an audiobook library
+        // filed as films. The same shape as `.docx` landing in Archives.
         (.audio, ["public.audio"]),
+        (.video, ["public.movie"]),
         (.font, ["public.font"]),
         // `com.apple.installer-package` conforms to `public.archive` and to no
         // disk-image type, so a `.pkg` resolved through Launch Services landed
@@ -163,8 +169,10 @@ enum MagicBytes {
         // Mach-O in all three spellings, not just 64-bit little-endian: 32-bit
         // (`ce fa ed fe`) and the fat/universal header (`ca fe ba be`) are the
         // same answer, and the fat one is what a shipped binary usually is.
-        if starts([0x7F, 0x45, 0x4C, 0x46]) || starts([0xCF, 0xFA, 0xED, 0xFE])
-            || starts([0xCE, 0xFA, 0xED, 0xFE]) || starts([0xCA, 0xFE, 0xBA, 0xBE]) {
+        if starts([0x7F, 0x45, 0x4C, 0x46])                                    // ELF
+            || starts([0xCF, 0xFA, 0xED, 0xFE]) || starts([0xCE, 0xFA, 0xED, 0xFE])
+            || starts([0xFE, 0xED, 0xFA, 0xCF]) || starts([0xFE, 0xED, 0xFA, 0xCE])
+            || starts([0xCA, 0xFE, 0xBA, 0xBE]) {                              // universal
             return .other
         }
         // `.code`, because `sh`, `zsh`, `bash` and the rest are `.code` in the

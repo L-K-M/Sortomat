@@ -68,7 +68,24 @@ struct Glob {
             case "*":
                 if index + 1 < characters.count, characters[index + 1] == "*" {
                     index += 1
-                    append(.star(crossesSeparator: true))
+                    // `**/` is zero *or more* directories, the way bash's
+                    // globstar and gitignore read it. Compiled as one star
+                    // followed by a literal `/`, the slash had to match a real
+                    // one, so `**/*.pdf` — the doc comment's own example of the
+                    // most ordinary rule anyone would write — silently missed
+                    // every file sitting directly in the watched folder. Two
+                    // branches: one that crosses segments, one that is not
+                    // there at all.
+                    if index + 1 < characters.count, characters[index + 1] == "/",
+                       branches.count * 2 <= maxBranches {
+                        let skipping = branches
+                        append(.star(crossesSeparator: true))
+                        append(.literal("/"))
+                        branches += skipping
+                        index += 1          // the `/` belongs to this construct
+                    } else {
+                        append(.star(crossesSeparator: true))
+                    }
                 } else {
                     append(.star(crossesSeparator: false))
                 }

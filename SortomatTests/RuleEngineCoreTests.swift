@@ -102,6 +102,29 @@ final class GlobTests: XCTestCase {
         XCTAssertTrue(Glob(pattern: "[!]]").matches("a"))
         XCTAssertFalse(Glob(pattern: "[!]]").matches("]"))
     }
+
+    func testDoubleStarMatchesNoDirectoriesAtAll() {
+        // `**/` is zero *or more* directories in bash's globstar and in
+        // gitignore, and the doc comment above calls `**/*.pdf` the most
+        // ordinary rule anyone would write — but compiled as a star followed
+        // by a literal `/`, that slash had to match a real one, so every file
+        // sitting directly in the watched folder was silently missed.
+        let anyDepth = Glob(pattern: "**/*.pdf", matchesSeparator: false)
+        XCTAssertTrue(anyDepth.matches("c.pdf"), "a file in the root is at «any depth» too")
+        XCTAssertTrue(anyDepth.matches("a/b/c.pdf"))
+        let between = Glob(pattern: "a/**/b", matchesSeparator: false)
+        XCTAssertTrue(between.matches("a/b"))
+        XCTAssertTrue(between.matches("a/x/b"))
+        XCTAssertTrue(between.matches("a/x/y/b"))
+        // And the guards that must not move: one star still stops at a
+        // separator, and `**` on its own still crosses them.
+        XCTAssertTrue(Glob(pattern: "Invoices/*.pdf", matchesSeparator: false)
+            .matches("Invoices/x.pdf"))
+        XCTAssertFalse(Glob(pattern: "Invoices/*.pdf", matchesSeparator: false)
+            .matches("Invoices/Sub/x.pdf"))
+        XCTAssertFalse(Glob(pattern: "*/*", matchesSeparator: false).matches("a/b/c"))
+        XCTAssertTrue(Glob(pattern: "**", matchesSeparator: false).matches("a/b/c"))
+    }
 }
 
 final class ValueCoercionTests: XCTestCase {
@@ -986,6 +1009,11 @@ final class KindResolverTests: XCTestCase {
         // `.archive` ahead of `.document` in the conformance list, every Word
         // file resolved through Launch Services sorted into Archives —
         // `.spreadsheet` and `.presentation` escaped only by sitting higher up.
+        // `public.mpeg-4-audio` conforms to `public.audio` and, through
+        // `public.mpeg-4`, to `public.movie`. With video first, an audiobook
+        // library resolved through Launch Services filed itself as films.
+        XCTAssertEqual(KindResolver.kind(forUTI: "public.mpeg-4-audio"), .audio)
+        XCTAssertEqual(KindResolver.kind(forExtension: "m4a"), .audio, "and both paths agree")
         for (ext, expected) in [("docx", Kind.document), ("odt", .document),
                                 ("xlsx", .spreadsheet), ("pptx", .presentation),
                                 ("epub", .ebook), ("zip", .archive)] {
