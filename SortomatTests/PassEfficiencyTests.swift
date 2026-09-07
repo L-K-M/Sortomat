@@ -198,14 +198,28 @@ final class PassEfficiencyTests: XCTestCase {
     }
 
     func testTruncationNeverSplitsACharacter() {
-        let emoji = String(repeating: "👩‍👩‍👧‍👦", count: 40)
+        // A joiner-free four-byte emoji, so that "every byte count is a
+        // multiple of the grapheme size" is actually a proof that the cut
+        // landed between graphemes. The family emoji this test used to use is
+        // not one: see the test below.
+        let emoji = String(repeating: "😀", count: 200)
         let cleaned = Sanitizer.sanitizeComponent(emoji)
         XCTAssertLessThanOrEqual(cleaned.utf8.count, Sanitizer.maxComponentBytes)
         XCTAssertFalse(cleaned.isEmpty)
-        // Every family emoji is 25 bytes; an exact multiple is the proof that
-        // the cut landed between graphemes and not inside a joiner sequence.
-        XCTAssertEqual(cleaned.utf8.count, cleaned.count * 25,
+        XCTAssertEqual(cleaned.utf8.count, cleaned.count * 4,
                        "a truncation split a character: \(cleaned.utf8.count) bytes, \(cleaned.count) characters")
+    }
+
+    func testAJoinerSequenceBecomesItsPartsBeforeAnyTruncation() {
+        // Not a truncation bug, and worth pinning because it surprised this
+        // test's own author: `sanitizeComponent` replaces every Unicode format
+        // character with a space — zero-width joiners included — because an
+        // invisible character in a file name is how one name is made to read
+        // as another. A family emoji is four people joined by three of them,
+        // so it arrives as four emoji separated by spaces, and the byte cap
+        // then counts those.
+        let cleaned = Sanitizer.sanitizeComponent("👩‍👩‍👧‍👦")
+        XCTAssertEqual(cleaned, "👩 👩 👧 👦")
     }
 
     func testTheForcedExtensionFitsInsideTheByteLimitToo() throws {

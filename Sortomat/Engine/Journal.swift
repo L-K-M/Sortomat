@@ -205,10 +205,14 @@ enum Journal {
         // the case the expansion was added to handle.
         let root = URL(fileURLWithPath: (targetPath as NSString).expandingTildeInPath)
             .standardizedFileURL
-        var folder = URL(
-            fileURLWithPath: (entry.destination.deletingLastPathComponent().path as NSString)
-                .expandingTildeInPath
-        ).standardizedFileURL
+        // Expanded on the *string*, before the URL exists. `URL(fileURLWithPath:)`
+        // resolves a relative path against the current directory, so by the
+        // time `entry.destination` is a URL a leading `~` sits behind a
+        // working-directory prefix and `expandingTildeInPath` no longer sees
+        // it at the front — which made the previous fix a no-op in exactly the
+        // case it was written for.
+        var folder = URL(fileURLWithPath: (entry.destinationPath as NSString).expandingTildeInPath)
+            .deletingLastPathComponent().standardizedFileURL
         while folder.path.hasPrefix(root.path + "/") {
             guard let contents = try? fm.contentsOfDirectory(atPath: folder.path),
                   contents.allSatisfy({ $0 == ".DS_Store" })
