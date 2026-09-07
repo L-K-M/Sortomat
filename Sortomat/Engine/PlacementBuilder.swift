@@ -71,8 +71,16 @@ struct PlacementBuilder {
     mutating func bindModel(_ answer: ModelAnswer, action: RuleAction?,
                             claimsPlacement: Bool = true) {
         modelAnswer = answer
+        // Whether a model was involved, not who chose the folder — and it has
+        // to be that question, because `UIModel.heat` reads `.step` as
+        // «Exact match», meaning no guessing was involved. A step that places
+        // the file itself with `{model.folder}` filling one slot is still
+        // carrying a guess, so crediting the step here would promise a
+        // certainty the destination does not have. A review round proposed
+        // moving this below the `claimsPlacement` guard; it looks like a
+        // provenance fix and is a confidence bug.
+        origin = answer.quarantined ? .confidence : .model
         if answer.quarantined {
-            origin = .confidence
             operation = .quarantine
             template = rule.quarantineSubfolder.isEmpty
                 ? "{name}"
@@ -80,13 +88,7 @@ struct PlacementBuilder {
             reason = answer.reason ?? ""
             return
         }
-        // Origin only where the model actually decided. Setting it before this
-        // guard claimed provenance for the model in exactly the case this
-        // method exists to support — a step's own `move` placing the file with
-        // `{model.folder}` filling one slot — so the Inbox reported "Model" for
-        // a placement a step had chosen.
         guard claimsPlacement, !isTerminal else { return }
-        origin = .model
         operation = rule.copyInsteadOfMove ? .copy : .move
         template = "{model.path}"
         reason = answer.reason ?? ""

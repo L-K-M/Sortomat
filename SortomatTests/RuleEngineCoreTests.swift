@@ -433,6 +433,10 @@ final class RuleEvaluatorTests: XCTestCase {
         }
         XCTAssertEqual(placement.relativePath?.string(),
                        "Bücher/Science-Fiction/Le Guin — The Dispossessed.epub")
+        // `.model` even though the *step* chose the shape of the destination:
+        // origin answers "was a model involved", which is what lets the Inbox
+        // show a confidence. `.step` maps to «Exact match — no guessing», and
+        // there is a guess in this path.
         XCTAssertEqual(placement.origin, .model)
     }
 
