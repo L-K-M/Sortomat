@@ -610,9 +610,25 @@ final class RuleCodableTests: XCTestCase {
           {"name":"S","when":{"all":[{"attribute":"telepathy","op":"vibesWith","value":"x"}]},
            "then":[{"type":"summon","to":"X/{name}"}]}]}
         """)
-        XCTAssertEqual(rule.fallback, .askModel)
+        // `.skip`, not `.askModel`: a fallback this build cannot read was
+        // written by a newer one, and guessing "hand every unclaimed file to
+        // the model" would spend money and send file content on a setting
+        // nobody here chose. Unknown values are inert everywhere else in this
+        // vocabulary — an unknown attribute or operator evaluates to false —
+        // and this is the inert answer for a fallback.
+        XCTAssertEqual(rule.fallback, .skip)
         XCTAssertEqual(rule.steps.count, 1)
         XCTAssertEqual(rule.steps[0].then[0].type, ActionType("summon"))
+    }
+
+    func testAConfigWithNoFallbackStillAsksTheModel() throws {
+        // The legacy default, and the reason "unknown" and "absent" cannot be
+        // treated alike: every config written before fallbacks existed relies
+        // on this, and it must not drift with the change above.
+        let rule = try decodeRule("""
+        {"name":"R","steps":[{"name":"S","when":{"all":[]},"then":[]}]}
+        """)
+        XCTAssertEqual(rule.fallback, .askModel)
     }
 
     func testGroupSugarRoundTripsToTheCanonicalForm() throws {
