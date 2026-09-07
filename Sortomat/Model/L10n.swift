@@ -347,6 +347,8 @@ public enum L10n {
         "notify.undone.other": "Put %d files back",
         "notify.undoFailed.one": "1 file couldn't be put back",
         "notify.undoFailed.other": "%d files couldn't be put back",
+        "notify.undoNothing": "Nothing left to put back",
+        "notify.undoNothing.body": "These files were already put back, or the record of the move is no longer kept.",
         "notify.failuresMore.one": "%2$@ (and %1$d more failure)",
         "notify.failuresMore.other": "%2$@ (and %1$d more failures)",
 
@@ -717,6 +719,8 @@ public enum L10n {
         "notify.undone.other": "%d Dateien zurückgelegt",
         "notify.undoFailed.one": "1 Datei konnte nicht zurückgelegt werden",
         "notify.undoFailed.other": "%d Dateien konnten nicht zurückgelegt werden",
+        "notify.undoNothing": "Nichts mehr zurückzulegen",
+        "notify.undoNothing.body": "Diese Dateien wurden bereits zurückgelegt, oder der Eintrag dazu wird nicht mehr aufbewahrt.",
         "notify.failuresMore.one": "%2$@ (und %1$d weiterer Fehler)",
         "notify.failuresMore.other": "%2$@ (und %1$d weitere Fehler)",
 

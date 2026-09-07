@@ -22,6 +22,13 @@ struct ActivityEntry: Identifiable, Equatable {
     let placed: URL?
 
     init(ok: Bool, message: String, date: Date = Date(), kind: Kind? = nil, placed: URL? = nil) {
+        // A `.filed` entry with no path is what the notification summary reads
+        // as "nothing was filed": the banner loses the file names, the folder,
+        // and with them the Undo and Show-in-Finder buttons, while the count
+        // still says five. There is one such call site today; this is what
+        // keeps there being one.
+        assert(kind != .filed || placed != nil,
+               "ActivityEntry: a .filed entry needs the path it landed at")
         self.ok = ok
         self.message = message
         self.date = date

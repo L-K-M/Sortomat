@@ -94,7 +94,15 @@ struct HistoryView: View {
             await reload()
             busy = false
             status = L10n.plural("journal.undoBatchDone", result.undone)
-            if result.failed > 0 { error = L10n.plural("journal.undoBatchFailed", result.failed) }
+            // The count *and* the first reason. A single-row undo has always
+            // said why it refused; the batch path counted the refusals and
+            // dropped every explanation, leaving "3 files couldn't be put
+            // back" and no way to find out what to do about it.
+            if result.failed > 0 {
+                error = [L10n.plural("journal.undoBatchFailed", result.failed),
+                         result.firstFailure ?? ""]
+                    .filter { !$0.isEmpty }.joined(separator: " ")
+            }
         }
     }
 }

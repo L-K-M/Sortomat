@@ -40,10 +40,66 @@ final class NotificationTests: XCTestCase {
 
     func testSummaryReadsInGermanToo() {
         L10n.forcedLanguage = "de"
-        let files = (1...4).map { url("/Users/x/Docs/file\($0).pdf") }
+        // Names with no digits in them. This test used to file `file1.pdf`
+        // through `file4.pdf` and assert `contains("2")` — which "file2.pdf"
+        // satisfies whether or not the count is rendered, and whether or not
+        // the string is German. Assert the German phrase instead, and that the
+        // English one is not what came back.
+        let files = ["Rechnung", "Beleg", "Vertrag", "Notiz"].map { url("/Users/x/Docs/\($0).pdf") }
         let text = NotificationText.summary(of: files)
         XCTAssertFalse(text.contains("notify."), "renders a raw key: \(text)")
-        XCTAssertTrue(text.contains("2"), "got: \(text)")
+        XCTAssertTrue(text.contains("und 2 weitere"), "got: \(text)")
+        XCTAssertFalse(text.contains("and 2 more"), "fell back to English: \(text)")
+    }
+
+    // MARK: - What it says after Undo
+
+    func testUndoWithNothingLeftToDoStillSaysSomething() {
+        L10n.forcedLanguage = "en"
+        // The failure this guards: a banner survives in Notification Center for
+        // days, `Journal.recent` folds away an already-reversed move, and so
+        // pressing Undo twice — or once, tomorrow — reverses nothing. Posting
+        // nothing at that point means the user pressed a button that moves
+        // files and heard back silence.
+        let text = NotificationText.undoResult(undone: 0, failed: 0)
+        XCTAssertFalse(text.title.isEmpty, "silence is the bug")
+        XCTAssertFalse(text.body.isEmpty, "says nothing happened, not why")
+        XCTAssertFalse(text.title.contains("0"), "«Put 0 files back» is a non-answer: \(text.title)")
+    }
+
+    func testUndoThatMovedNothingButRefusedSomethingLeadsWithTheRefusal() {
+        L10n.forcedLanguage = "en"
+        let text = NotificationText.undoResult(
+            undone: 0, failed: 2, firstFailure: "Couldn't undo a.pdf: something else is there now"
+        )
+        XCTAssertTrue(text.title.contains("2"), "got: \(text.title)")
+        XCTAssertFalse(text.title.contains("Put 0"), "got: \(text.title)")
+        XCTAssertTrue(text.body.contains("something else is there now"),
+                      "the reason is the only actionable part: \(text.body)")
+    }
+
+    func testUndoThatFullySucceededCountsAndAddsNothing() {
+        L10n.forcedLanguage = "en"
+        let text = NotificationText.undoResult(undone: 3, failed: 0)
+        XCTAssertTrue(text.title.contains("3"), "got: \(text.title)")
+        XCTAssertEqual(text.body, "")
+    }
+
+    func testUndoThatPartlyRefusedReportsBothHalves() {
+        L10n.forcedLanguage = "en"
+        let text = NotificationText.undoResult(undone: 2, failed: 1, firstFailure: "why")
+        XCTAssertTrue(text.title.contains("2"), "got: \(text.title)")
+        XCTAssertTrue(text.body.contains("1"), "got: \(text.body)")
+    }
+
+    func testUndoResultReadsInGermanToo() {
+        L10n.forcedLanguage = "de"
+        for text in [NotificationText.undoResult(undone: 0, failed: 0),
+                     NotificationText.undoResult(undone: 0, failed: 2, firstFailure: "warum"),
+                     NotificationText.undoResult(undone: 3, failed: 1)] {
+            XCTAssertFalse(text.title.contains("notify."), "renders a raw key: \(text.title)")
+            XCTAssertFalse(text.body.contains("notify."), "renders a raw key: \(text.body)")
+        }
     }
 
     // MARK: - Where they went

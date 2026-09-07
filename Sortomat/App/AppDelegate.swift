@@ -45,9 +45,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // What the buttons on a notification do. Installed before the first
         // pass can post one.
         Notifier.handler = { [weak self] action in
-            guard let self, let state = self.state else { return }
+            guard let self else { return }
             switch action {
             case .undo(let batch):
+                // Only this case needs the state. Requiring it up front made
+                // "Show in Finder" and "Open log" — neither of which touches
+                // the app's state — inert in any situation where it were nil.
+                guard let state = self.state else { return }
                 Task { await state.undo(batch: batch, announcing: true) }
             case .reveal(let url):
                 NSWorkspace.shared.activateFileViewerSelecting([url])
