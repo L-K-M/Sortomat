@@ -690,6 +690,23 @@ final class RuleCodableTests: XCTestCase {
 }
 
 final class KindResolverTests: XCTestCase {
+    func testZipContainerDocumentsAreNotArchives() {
+        // OOXML and OpenDocument files are zip containers, so a `.docx`
+        // conforms to `public.zip-archive` as well as to its own type. With
+        // `.archive` ahead of `.document` in the conformance list, every Word
+        // file resolved through Launch Services sorted into Archives —
+        // `.spreadsheet` and `.presentation` escaped only by sitting higher up.
+        for (ext, expected) in [("docx", Kind.document), ("odt", .document),
+                                ("xlsx", .spreadsheet), ("pptx", .presentation),
+                                ("epub", .ebook), ("zip", .archive)] {
+            guard let uti = UTType(filenameExtension: ext)?.identifier else {
+                continue    // not declared on this runner; the extension table covers it
+            }
+            XCTAssertEqual(KindResolver.kind(forUTI: uti), expected,
+                           "«\(ext)» resolved through \(uti)")
+        }
+    }
+
     func testEveryCatalogUTIResolves() {
         // A misspelled identifier would silently kill a whole kind, so it is a
         // red test rather than a mystery.

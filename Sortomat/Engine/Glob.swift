@@ -80,8 +80,12 @@ struct Glob {
                     append(.literal("["))
                 }
             case "{":
+                // `!options.isEmpty` as well: a degenerate `{}` would leave
+                // `branches` empty, and then `append` silently discards the
+                // rest of the pattern and `matches` answers false for every
+                // subject — one brace disabling a whole rule.
                 if let (options, next) = parseAlternation(characters, from: index),
-                   branches.count * options.count <= maxBranches {
+                   !options.isEmpty, branches.count * options.count <= maxBranches {
                     var expanded: [[Token]] = []
                     for branch in branches {
                         for option in options {

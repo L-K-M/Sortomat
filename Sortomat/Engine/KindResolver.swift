@@ -34,7 +34,6 @@ enum KindResolver {
         // no system declares resolves to nil and is skipped, so this is free.
         (.diskImage, ["public.disk-image", "com.apple.disk-image",
                       "com.apple.installer-package"]),
-        (.archive, ["public.archive", "public.zip-archive", "org.gnu.gnu-zip-archive"]),
         (.code, ["public.source-code", "public.shell-script", "public.script"]),
         // `public.rtf` sits with the text types, not here: the legacy table
         // this migration promises to reproduce calls `rtf` text, and it is the
@@ -44,6 +43,13 @@ enum KindResolver {
                      "org.openxmlformats.wordprocessingml.document",
                      "com.microsoft.word.doc", "com.apple.iwork.pages.pages",
                      "org.oasis-open.opendocument.text"]),
+        // After the document types, not before them. OOXML and OpenDocument
+        // files are zip containers — `org.openxmlformats.wordprocessingml.document`
+        // conforms to `public.zip-archive` — so with `.archive` first, every
+        // `.docx` and `.odt` resolved through Launch Services sorted into
+        // Archives. `.spreadsheet`, `.presentation` and `.ebook` are zip
+        // containers too and were only safe because they already sat above it.
+        (.archive, ["public.archive", "public.zip-archive", "org.gnu.gnu-zip-archive"]),
         (.text, ["public.rtf", "public.text"])
     ]
 

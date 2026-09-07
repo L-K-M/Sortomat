@@ -17,6 +17,10 @@ struct PlacementBuilder {
     /// evaluator when a step claims the file — it was `private` and never
     /// written, so `{step}` rendered empty for every rule that used it.
     var stepName: String = ""
+    /// One id for this placement, so `{uuid}` means the same thing in a folder
+    /// component and in the file name beside it.
+    private let renderUUID = UUID().uuidString
+        .replacingOccurrences(of: "-", with: "").lowercased()
 
     var stopped = false
     var continueMatching = false
@@ -120,7 +124,7 @@ struct PlacementBuilder {
             rendered = parsed.render(timeZone: context.timeZone) { token in
                 TemplateResolver.value(for: token, facts: context.facts, captures: captures,
                                        model: modelAnswer, rule: rule, step: stepName,
-                                       now: context.now)
+                                       uuid: renderUUID, now: context.now)
             }
         }
         return Placement(
@@ -151,7 +155,7 @@ struct PlacementBuilder {
                 TokenTemplate(value).render(timeZone: context.timeZone) { token in
                     TemplateResolver.value(for: token, facts: context.facts, captures: captures,
                                            model: modelAnswer, rule: rule, step: stepName,
-                                           now: context.now)
+                                           uuid: renderUUID, now: context.now)
                 }.string()
             })
         }

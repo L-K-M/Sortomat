@@ -127,9 +127,17 @@ final class L10nTests: XCTestCase {
     /// positional prefix when it has one (`1$@`). `%%` is an escaped percent
     /// sign and consumes nothing.
     private static func conversions(in format: String) -> [String] {
-        let pattern = "%(\\d+\\$)?[-+ #0]*[0-9*]*(?:\\.\\d+)?"
+        // No space in the flags class: `%` + space + a letter is ordinary prose
+        // («100 % Rabatt» would otherwise read as a `%o` specifier and fail the
+        // parity check on a translation that is perfectly correct), while the
+        // signed-space format `% d` never appears in UI copy. `.*` precision is
+        // recognised so `%.*f` is checked rather than skipped.
+        let pattern = "%(\\d+\\$)?[-+#0]*[0-9*]*(?:\\.[0-9*]+)?"
             + "(?:hh|h|ll|l|q|L|z|j|t)?([@dioxXufFeEgGcsp%])"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        // Not `try?`: a pattern that stops compiling would make every string
+        // yield no conversions, every comparison trivially equal, and this
+        // whole test a green no-op.
+        let regex = try! NSRegularExpression(pattern: pattern, options: [])
         let text = format as NSString
         let whole = NSRange(location: 0, length: text.length)
         return regex.matches(in: format, options: [], range: whole).compactMap { match -> String? in

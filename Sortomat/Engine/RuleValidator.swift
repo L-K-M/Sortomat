@@ -108,7 +108,12 @@ enum RuleValidator {
                 horizon = index
             }
         }
-        return findings.sorted { left, right in
+        // Deduplicated before sorting: `id` is code|site|message, and two
+        // empty nested groups in one step produce that triple twice. A
+        // `ForEach` keyed on a repeated id drops rows, and both copies draw at
+        // the same place anyway, so nothing is lost by collapsing them.
+        var seen: Set<String> = []
+        return findings.filter { seen.insert($0.id).inserted }.sorted { left, right in
             left.severity == right.severity ? left.code < right.code
                                             : left.severity > right.severity
         }
@@ -156,7 +161,11 @@ enum RuleValidator {
                 add("rule.incompleteRoot", .error, L10n.t("validate.rule.incompleteRoot"))
                 continue
             }
-            if !seenRoots.insert(name.lowercased()).inserted {
+            // Exactly as the engine compares them: `PlacementBuilder` resolves
+            // `action.root` with `$0.name == rootName`, so «Photos» and
+            // «photos» are two distinct working roots. Folding case here
+            // reported them as a duplicate — an *error*, on a rule that runs.
+            if !seenRoots.insert(name).inserted {
                 add("rule.duplicateRoot", .error, L10n.t("validate.rule.duplicateRoot", name))
             }
         }

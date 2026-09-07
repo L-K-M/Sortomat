@@ -22,7 +22,7 @@ enum TemplateResolver {
 
     static func value(for token: String, facts: FileFacts, captures: CaptureStore,
                       model: ModelAnswer?, rule: Rule, step: String,
-                      now: Date) -> TemplateValue? {
+                      now: Date, uuid: String) -> TemplateValue? {
         // Captures: {match.1}, {match.year}, {match.invoice.year}.
         if token.hasPrefix("match.") {
             let key = String(token.dropFirst("match.".count))
@@ -51,7 +51,9 @@ enum TemplateResolver {
         case "rule": return .text(rule.name)
         case "step": return .text(step)
         case "now": return .date(now)
-        case "uuid": return .text(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
+        // Passed in, like `now`: minting one here gave `{uuid}/{uuid}.pdf` two
+        // different ids, and made a preview differ from the move it previewed.
+        case "uuid": return .text(uuid)
         case "tags.first": return firstOf(facts, .tags)
         case "authors.first": return firstOf(facts, .authors)
         case "subjects.first": return firstOf(facts, .subjects)

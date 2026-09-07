@@ -389,7 +389,9 @@ struct TokenTemplate {
         default:
             let formatter = ByteCountFormatter()
             formatter.countStyle = .file
-            return formatter.string(fromByteCount: Int64(bytes))
+            // `Int64(Double)` traps on NaN, on infinity, and outside Int64's
+            // range — the same trapping conversion that crashed `TimeSpan`.
+            return formatter.string(fromByteCount: Int64(exactly: bytes.rounded()) ?? 0)
         }
     }
 
