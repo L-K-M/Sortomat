@@ -8,19 +8,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let state: AppState
     private let onOpenSettings: () -> Void
-    private let onOpenPreview: () -> Void
+    private let onOpenMain: (SidebarSelection) -> Void
     private let onCheckForUpdates: () -> Void
     private var cancellables: Set<AnyCancellable> = []
 
     init(
         state: AppState,
         onOpenSettings: @escaping () -> Void,
-        onOpenPreview: @escaping () -> Void,
+        onOpenMain: @escaping (SidebarSelection) -> Void,
         onCheckForUpdates: @escaping () -> Void
     ) {
         self.state = state
         self.onOpenSettings = onOpenSettings
-        self.onOpenPreview = onOpenPreview
+        self.onOpenMain = onOpenMain
         self.onCheckForUpdates = onCheckForUpdates
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
@@ -95,11 +95,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        if !state.pendingActions.isEmpty {
-            menu.addItem(BlockMenuItem(title: L10n.plural("menu.pendingReview", state.pendingActions.count)) {
-                [weak self] in self?.onOpenPreview()
-            })
-        }
+        menu.addItem(BlockMenuItem(
+            title: state.pendingActions.isEmpty
+                ? L10n.t("menu.openMain")
+                : L10n.plural("menu.pendingReview", state.pendingActions.count)
+        ) { [weak self] in self?.onOpenMain(.inbox) })
+        menu.addItem(BlockMenuItem(title: L10n.t("menu.openHistory")) { [weak self] in
+            self?.onOpenMain(.history)
+        })
         menu.addItem(BlockMenuItem(title: state.paused ? L10n.t("menu.resume") : L10n.t("menu.pause")) {
             [weak self] in self?.state.paused.toggle()
         })
@@ -108,7 +111,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         menu.addItem(scanItem)
         menu.addItem(BlockMenuItem(title: L10n.t("menu.previewNow")) { [weak self] in
-            self?.onOpenPreview()
+            self?.onOpenMain(.inbox)
             Task { await self?.state.refreshPreview() }
         })
 

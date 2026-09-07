@@ -6,7 +6,10 @@ import AppKit
 /// fields in the Settings window can't cut/copy/paste/select-all/undo. Installing
 /// a real main menu (shown only while one of our windows is active) fixes that.
 enum MainMenu {
-    static func build() -> NSMenu {
+    /// No default for `onOpenMain`: a call site that omitted it would install
+    /// ⌘0 as a menu item that does nothing — the same "a surface that isn't
+    /// there" failure the item exists to fix.
+    static func build(onOpenMain: @escaping () -> Void) -> NSMenu {
         let mainMenu = NSMenu()
 
         // App menu. (Localized like everything else — these were the last
@@ -31,12 +34,16 @@ enum MainMenu {
         appMenu.addItem(withTitle: L10n.t("menu.quitApp"),
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        // File menu — just Close, so ⌘W works on the Settings/Preview windows
-        // (without it, windows are mouse-close only).
+        // File menu — Close, so ⌘W works on our windows (without it they are
+        // mouse-close only), and the way back to the main window: closing it
+        // used to mean the app had no visible surface but the menu bar.
         let fileItem = NSMenuItem()
         mainMenu.addItem(fileItem)
         let fileMenu = NSMenu(title: L10n.t("menu.file"))
         fileItem.submenu = fileMenu
+        fileMenu.addItem(BlockMenuItem(title: L10n.t("menu.openMain"), keyEquivalent: "0",
+                                       handler: onOpenMain))
+        fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: L10n.t("menu.close"),
                          action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
 

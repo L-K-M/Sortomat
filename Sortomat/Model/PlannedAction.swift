@@ -13,7 +13,7 @@ struct PlannedAction: Identifiable, Equatable {
     }
 
     /// Where the decision came from — surfaced so the user can trust it.
-    enum Origin: String, Equatable {
+    enum Origin: String, Equatable, CaseIterable {
         case preRule
         case model
         case taxonomy      // model answered but was constrained/redirected by taxonomy

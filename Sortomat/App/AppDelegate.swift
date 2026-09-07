@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var state: AppState!
     private var statusItem: StatusItemController!
     private var settingsWindow: SettingsWindowController!
-    private var previewWindow: PreviewWindowController!
+    private var mainWindow: MainWindowController!
     private var updateChecker: UpdateChecker!
 
     static var isRunningTests: Bool {
@@ -26,9 +26,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Don't boot the full app under XCTest — the test host stays quiet.
         guard !Self.isRunningTests else { return }
 
-        // A real Edit menu so ⌘X/⌘C/⌘V/⌘A/⌘Z work in text fields.
-        NSApp.mainMenu = MainMenu.build()
-
         state = AppState()
         updateChecker = UpdateChecker(configuration: .init(
             owner: AppInfo.repoOwner,
@@ -37,11 +34,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             currentVersion: AppInfo.shortVersion
         ))
         settingsWindow = SettingsWindowController(state: state)
-        previewWindow = PreviewWindowController(state: state)
+        mainWindow = MainWindowController(state: state)
         statusItem = StatusItemController(
             state: state,
             onOpenSettings: { [weak self] in self?.settingsWindow.show() },
-            onOpenPreview: { [weak self] in self?.previewWindow.show() },
+            onOpenMain: { [weak self] selection in self?.mainWindow.show(selection) },
             onCheckForUpdates: { [weak self] in Task { await self?.updateChecker.check(userInitiated: true) } }
         )
 
@@ -57,12 +54,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .openLog:
                 NSWorkspace.shared.open(ConfigStore.logFile)
             case .open:
-                self.previewWindow.show()
+                // The Preview window this used to open is gone; the Inbox is
+                // where a pending decision lives now.
+                self.mainWindow.show(.inbox)
             }
+        }
+
+        // A real Edit menu so ⌘X/⌘C/⌘V/⌘A/⌘Z work in text fields, and ⌘0 to
+        // bring the main window back once it has been closed. Built after the
+        // window controller exists, because ⌘0 needs something to open.
+        NSApp.mainMenu = MainMenu.build(onOpenMain: { [weak self] in self?.mainWindow.show() })
+
+        // A menu-bar-only app that opens nothing on its first launch is
+        // indistinguishable from one that didn't launch: there is no window, no
+        // Dock icon, and the funnel in the menu bar is 18 points of monochrome
+        // among twenty others. Show the window once, the first time.
+        if !UserDefaults.standard.bool(forKey: Self.didShowMainWindowKey) {
+            UserDefaults.standard.set(true, forKey: Self.didShowMainWindowKey)
+            mainWindow.show(.inbox)
         }
 
         updateChecker.checkOnLaunch()
     }
+
+    static let didShowMainWindowKey = "SortomatDidShowMainWindow"
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
