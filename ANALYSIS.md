@@ -22,10 +22,11 @@ Seven things that cost real time to learn, in the order they will bite.
    `Testing failed:` block — `xcbeautify` prints the error messages there
    without file or line, and the full text a few lines further down. A round
    trip is about seventy seconds. **Run `Tools/check/run` before every push**:
-   four scripts that answer, without a compiler, the questions a compiler asks
+   five scripts that answer, without a compiler, the questions a compiler asks
    first — every localized key exists in both languages, every format string
    consumes what its call site passes, every type that claims a protocol
-   implements it, every initializer call site still matches its type. Each
+   implements it, every initializer call site still matches its type, and
+   every exhaustive switch still covers its enum (trap 3 below). Each
    exists because that mistake was made here and cost a cycle. They do not
    typecheck; a clean run means the mechanical mistakes are gone, not that the
    branch builds. `Tools/check/README.md` says what each one cannot see.

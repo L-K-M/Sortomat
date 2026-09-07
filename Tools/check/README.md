@@ -46,6 +46,19 @@ unlabelled arguments, a type name declared twice, a trailing closure.
 It checks *call sites*. Adding a stored property to a type with an explicit
 initializer is an error inside that initializer, which no call site shows.
 
+## `switch_exhaustive.py` — a switch still covers the enum it switches over
+
+ANALYSIS records this one as having cost a CI round: widen an enum — a new
+`PlannedAction.Origin`, a new `Placement.Operation` — and every exhaustive
+switch over it stops compiling, in files the change never touched.
+
+It identifies the enum from the case names a switch matches rather than from
+the type of the switched expression, which needs no type checking: a switch
+whose patterns are all `.member` of exactly one project enum, with no
+`default`, must name every case. Switches it cannot pin to exactly one enum
+are skipped, as are switches over an `Optional`, whose own `.none` would
+otherwise match some unrelated enum that happens to have one.
+
 ## What none of them do
 
 They do not typecheck. An expression that is well-formed but wrongly typed, a
