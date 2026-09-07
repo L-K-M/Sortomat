@@ -399,7 +399,7 @@ final class AppState: ObservableObject {
                 ingest(result)
                 passResults.append(result)
             }
-            notify(pass: passResults)
+            notify(pass: passResults, batch: batchID)
             await pipeline.persist()
             pruneStalePending()
             persistSpend()
@@ -465,13 +465,16 @@ final class AppState: ObservableObject {
     /// notifying from `ingest` produced once more than one rule was active.
     /// A missing watch folder alerts once per outage; the log still records
     /// every pass, and `ingest` re-arms the alert when the folder returns.
-    private func notify(pass results: [ScanResult]) {
+    private func notify(pass results: [ScanResult], batch: UUID?) {
         guard config.notificationsEnabled else { return }
         let entries = results.flatMap(\.entries)
 
-        let filed = entries.filter { $0.kind == .filed }.count
-        if filed > 0 {
-            Notifier.post(title: "Sortomat", body: L10n.plural("notify.filed", filed))
+        let filed = entries.filter { $0.kind == .filed }
+        if !filed.isEmpty {
+            // The banner carries Undo and Show in Finder, so it needs the paths
+            // as well as the count — "Sortomat / Filed 5 files." told you
+            // something had happened and nothing about what.
+            Notifier.postFiled(filed.compactMap(\.placed), count: filed.count, batch: batch)
         }
 
         let failures = entries.filter { $0.kind == .failed }
@@ -479,7 +482,7 @@ final class AppState: ObservableObject {
             let body = failures.count == 1
                 ? first.message
                 : L10n.plural("notify.failuresMore", failures.count - 1, first.message)
-            Notifier.post(title: "Sortomat", body: body)
+            Notifier.postFailed(count: failures.count, message: body)
         }
 
         // Outages are their own bucket so a folder that stays missing doesn't
@@ -508,7 +511,8 @@ final class AppState: ObservableObject {
             ingest(result)
             passResults.append(result)
         }
-        notify(pass: passResults)
+        // A refreshed preview files nothing, so there is no batch to undo.
+        notify(pass: passResults, batch: nil)
         pruneStalePending()
         // A preview can spend real tokens; without this the meter only reached
         // disk on the next scan pass or at quit.
@@ -570,12 +574,28 @@ final class AppState: ObservableObject {
 
     // MARK: - Undo
 
-    /// Undo one *named* batch — the one an Apply just wrote, rather than
-    /// whichever is newest by the time the user clicks.
+    /// Undo one *named* batch — the one an Apply just wrote, or the pass a
+    /// notification is about — rather than whichever is newest by the time the
+    /// user clicks. A banner from ten minutes ago must not quietly undo
+    /// whatever has happened since.
+    ///
+    /// `announcing` is for the caller that has nowhere to show a result. A
+    /// click on a banner's Undo happens with no window in sight, so without a
+    /// word back the user pressed a button that moves files and got no signal
+    /// that it worked, or that half of it didn't. The Inbox says so itself and
+    /// asks for no banner, because being told twice about a thing you are
+    /// looking at is how notifications teach people to dismiss them unread.
     @discardableResult
-    func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
+    func undo(batch id: UUID, announcing: Bool = false) async -> (undone: Int, failed: Int) {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
-        return await reverse(entries.filter { $0.batchID == id })
+        let result = await reverse(entries.filter { $0.batchID == id })
+        if announcing, config.notificationsEnabled, result.undone + result.failed > 0 {
+            Notifier.post(
+                title: L10n.plural("notify.undone", result.undone),
+                body: result.failed > 0 ? L10n.plural("notify.undoFailed", result.failed) : ""
+            )
+        }
+        return result
     }
 
     /// Undo a journaled placement *and* pin the restored file as skipped in
@@ -603,6 +623,7 @@ final class AppState: ObservableObject {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
         return await reverse(Journal.lastBatch(in: entries))
     }
+
 
     private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {
         var undone = 0, failed = 0
