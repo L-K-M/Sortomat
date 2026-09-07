@@ -450,12 +450,28 @@ final class AppState: ObservableObject {
 
     // MARK: - Undo
 
-    /// Undo one *named* batch — the one an Apply just wrote, rather than
-    /// whichever is newest by the time the user clicks.
+    /// Undo one *named* batch — the one an Apply just wrote, or the pass a
+    /// notification is about — rather than whichever is newest by the time the
+    /// user clicks. A banner from ten minutes ago must not quietly undo
+    /// whatever has happened since.
+    ///
+    /// `announcing` is for the caller that has nowhere to show a result. A
+    /// click on a banner's Undo happens with no window in sight, so without a
+    /// word back the user pressed a button that moves files and got no signal
+    /// that it worked, or that half of it didn't. The Inbox says so itself and
+    /// asks for no banner, because being told twice about a thing you are
+    /// looking at is how notifications teach people to dismiss them unread.
     @discardableResult
-    func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
+    func undo(batch id: UUID, announcing: Bool = false) async -> (undone: Int, failed: Int) {
         let entries = await Task.detached { Journal.recent(limit: .max) }.value
-        return await reverse(entries.filter { $0.batchID == id })
+        let result = await reverse(entries.filter { $0.batchID == id })
+        if announcing, config.notificationsEnabled, result.undone + result.failed > 0 {
+            Notifier.post(
+                title: L10n.plural("notify.undone", result.undone),
+                body: result.failed > 0 ? L10n.plural("notify.undoFailed", result.failed) : ""
+            )
+        }
+        return result
     }
 
     /// Undo a journaled placement *and* pin the restored file as skipped in
@@ -484,25 +500,6 @@ final class AppState: ObservableObject {
         return await reverse(Journal.lastBatch(in: entries))
     }
 
-    /// Undo one *named* pass. The Undo button on a notification has to reverse
-    /// the pass that notification is about — a banner from ten minutes ago
-    /// must not quietly undo whatever happened since.
-    @discardableResult
-    func undo(batch id: UUID) async -> (undone: Int, failed: Int) {
-        let entries = await Task.detached { Journal.recent(limit: .max) }.value
-        let result = await reverse(entries.filter { $0.batchID == id })
-        // The click that started this happened in a banner, with no window in
-        // sight: without a word back, the user pressed a button that moves
-        // files and got no signal at all that it worked — or that half of it
-        // didn't.
-        if config.notificationsEnabled, result.undone + result.failed > 0 {
-            Notifier.post(
-                title: L10n.plural("notify.undone", result.undone),
-                body: result.failed > 0 ? L10n.plural("notify.undoFailed", result.failed) : ""
-            )
-        }
-        return result
-    }
 
     private func reverse(_ entries: [JournalEntry]) async -> (undone: Int, failed: Int) {
         var undone = 0, failed = 0

@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let state = self.state else { return }
             switch action {
             case .undo(let batch):
-                Task { await state.undo(batch: batch) }
+                Task { await state.undo(batch: batch, announcing: true) }
             case .reveal(let url):
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             case .openLog:
