@@ -218,9 +218,15 @@ struct TokenTemplate {
         // argument is unwrapped here; the filter splits its own pair.
         // `':'` rather than any apostrophe: the wrapping is kept for the
         // two-piece `replace:'a':'o'` form, and refusing to unwrap on *any*
-        // apostrophe meant `default:'Mike's Mac'` came back with its quotes
-        // still attached and wrote them into the folder name.
-        return inner.contains("':'") ? trimmed : inner
+        // apostrophe left `'Mike''s Mac'` with its quotes still attached, to be
+        // written into the folder name.
+        guard !inner.contains("':'") else { return trimmed }
+        // `''` is one apostrophe, the way `DateFormatter` spells it. A lone
+        // one cannot be written: the scanners toggle on every `'`, so an odd
+        // count makes the closing brace look quoted and the placeholder is
+        // reported unterminated. ANALYSIS carries that as a follow-up; the
+        // doubled form is what works today and it should mean what it says.
+        return inner.replacingOccurrences(of: "''", with: "'")
     }
 
     static let knownFilters: Set<String> = [

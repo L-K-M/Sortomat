@@ -375,12 +375,16 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(render("{a|default:'none'}", ["a": .text("x")]), "x")
     }
 
-    func testAnApostropheInAQuotedArgumentSurvives() {
-        // Refusing to unwrap on *any* apostrophe — to protect the two-piece
-        // `replace:'a':'o'` form — meant a possessive came back with its
-        // quotes still attached and wrote them into the folder name.
-        XCTAssertEqual(render("{a|default:'Mike\'s Mac'}", [:]), "Mike's Mac")
+    func testADoubledApostropheIsOneApostrophe() {
+        // `''` the way `DateFormatter` spells it. Refusing to unwrap on *any*
+        // apostrophe — to protect the two-piece `replace:'a':'o'` form — left
+        // the quotes attached, to be written into the folder name.
+        XCTAssertEqual(render("{a|default:'Mike\'\'s Mac'}", [:]), "Mike's Mac")
         XCTAssertEqual(render("{a|replace:'a':'o'}", ["a": .text("banana")]), "bonono")
+        // A *lone* apostrophe still cannot be written: every scanner toggles on
+        // `'`, so an odd count makes the closing brace look quoted. That is the
+        // parser half of this, and it is a follow-up rather than a fix here.
+        XCTAssertFalse(TokenTemplate("{a|default:'Mike\'s Mac'}").isValid)
     }
 
     func testUnknownFilterIsReportedRatherThanSwallowed() {
