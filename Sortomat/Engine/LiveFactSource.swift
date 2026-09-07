@@ -48,11 +48,15 @@ struct LiveFactSource: FactSource {
     }
 
     static func packageBytes(_ url: URL) -> Double? {
+        // A box rather than a captured `var`: the error handler is an escaping
+        // closure and is `@Sendable` on some SDKs, where mutating a captured
+        // local is an error rather than a warning.
+        final class Walk { var failed = false }
+        let walk = Walk()
         var bytes = 0
-        var walkFailed = false
         guard let enumerator = FileManager.default.enumerator(
             at: url, includingPropertiesForKeys: [.fileSizeKey], options: [],
-            errorHandler: { _, _ in walkFailed = true; return true }
+            errorHandler: { _, _ in walk.failed = true; return true }
         ) else { return nil }
         for case let child as URL in enumerator {
             bytes += (try? child.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
@@ -60,7 +64,7 @@ struct LiveFactSource: FactSource {
         // A half-read package is not a small package. Reporting the bytes we
         // happened to reach would quietly answer "under 5 MB" for a bundle
         // whose unreadable half is a gigabyte.
-        return walkFailed ? nil : Double(bytes)
+        return walk.failed ? nil : Double(bytes)
     }
 
     // MARK: - Spotlight

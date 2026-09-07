@@ -115,7 +115,8 @@ public struct ConditionGroup: Equatable, Sendable, Codable, Identifiable {
         // written where a group belongs. Reaching the `mode` default here made
         // it an empty `.all`, which matches every file; fail closed instead.
         guard container.contains(.mode) || container.contains(.items) else {
-            self.init(mode: .any)
+            mode = .any
+            items = []
             return
         }
         let raw = ((try? container.decodeIfPresent(String.self, forKey: .mode)) ?? nil) ?? ""
