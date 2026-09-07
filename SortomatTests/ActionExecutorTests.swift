@@ -22,17 +22,18 @@ final class ActionExecutorTests: XCTestCase {
         XCTAssertEqual(result, ["Steuern"], "the spelling already on the file wins")
     }
 
-    func testATagIsNotAddedTwiceInADifferentNormalization() {
-        // "café" is one code point when typed on one machine and two when
-        // typed on another; Finder shows one tag either way. Comparing only
-        // the case appended a second, identical-looking tag.
+    func testCanonicallyEquivalentTagsAreAlreadyOneTag() {
+        // Not a normalization fix — a demonstration that none is needed. Swift
+        // compares strings by canonical equivalence, so the two spellings of
+        // "café" are `==` before `resolve` sees them, and the case-folded set
+        // already treats them as the same tag.
         let composed = "caf\u{00E9}"        // é
         let decomposed = "cafe\u{0301}"     // e + combining acute
-        XCTAssertNotEqual(composed, decomposed, "the two spellings really are different strings")
+        XCTAssertEqual(composed, decomposed, "Swift compares by canonical equivalence")
         XCTAssertEqual(ActionExecutor.resolve([composed], applying: effect(.addTags, [decomposed])),
-                       [composed], "the spelling already on the file wins")
+                       [composed])
         XCTAssertEqual(ActionExecutor.resolve([decomposed], applying: effect(.removeTags, [composed])),
-                       [], "and removing one spelling removes the other")
+                       [])
     }
 
     func testBlankTagsAreIgnoredRatherThanWritten() {

@@ -67,24 +67,23 @@ enum ActionExecutor {
         let wanted = effect.values
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        // Case *and* normalization. "café" typed on one machine is one code
-        // point and on another is two, and Finder shows one tag either way —
-        // so comparing only the case still appended a second, identical-looking
-        // tag, and `removeTags` still left one spelling behind.
-        func key(_ tag: String) -> String {
-            tag.precomposedStringWithCanonicalMapping.lowercased()
-        }
+        // Case alone is enough, and normalizing here would be theatre: Swift
+        // compares strings by *canonical equivalence*, so "café" written as one
+        // code point and as `e` + U+0301 are already `==`, and `Set<String>`
+        // hashes them together. A review round asked for
+        // `precomposedStringWithCanonicalMapping` on top of this; CI refuted it
+        // by failing the assertion that the two spellings are different strings.
         switch effect.type {
         case .addTags:
             var result = existing
-            var seen = Set(existing.map(key))
-            for tag in wanted where seen.insert(key(tag)).inserted {
+            var seen = Set(existing.map { $0.lowercased() })
+            for tag in wanted where seen.insert(tag.lowercased()).inserted {
                 result.append(tag)
             }
             return result
         case .removeTags:
-            let doomed = Set(wanted.map(key))
-            return existing.filter { !doomed.contains(key($0)) }
+            let doomed = Set(wanted.map { $0.lowercased() })
+            return existing.filter { !doomed.contains($0.lowercased()) }
         default:
             return existing
         }
