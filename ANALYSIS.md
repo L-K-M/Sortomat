@@ -14,14 +14,21 @@ point unless a branch is named.*
 
 ## How to work on this repo
 
-Six things that cost real time to learn, in the order they will bite.
+Seven things that cost real time to learn, in the order they will bite.
 
 1. **CI is the only compiler.** There is no macOS toolchain in the review
    environment, so `.github/workflows/ci.yml` (Xcode 16.2 on `macos-14`) is
    where Swift is first parsed. Push early, push small, and read the
    `Testing failed:` block — `xcbeautify` prints the error messages there
    without file or line, and the full text a few lines further down. A round
-   trip is about seventy seconds.
+   trip is about seventy seconds. **Run `Tools/check/run` before every push**:
+   four scripts that answer, without a compiler, the questions a compiler asks
+   first — every localized key exists in both languages, every format string
+   consumes what its call site passes, every type that claims a protocol
+   implements it, every initializer call site still matches its type. Each
+   exists because that mistake was made here and cost a cycle. They do not
+   typecheck; a clean run means the mechanical mistakes are gone, not that the
+   branch builds. `Tools/check/README.md` says what each one cannot see.
 2. **The project uses `PBXFileSystemSynchronizedRootGroup`** (objectVersion
    70). New files *and new folders* under `Sortomat/` and `SortomatTests/` are
    compiled automatically — **no `project.pbxproj` edit is ever needed.**
