@@ -365,6 +365,10 @@ def _filtered(line, prev, bpp):
     signed — and it recovers all of it.
     """
     stride = len(line)
+    # Sub and Paeth index `prev` and would raise; the Up candidate below is
+    # built with zip, which stops at the shorter of the two and would hand
+    # back a short scanline that still encodes cleanly and decodes to garbage.
+    assert len(prev) == stride, f"previous row is {len(prev)} bytes, not {stride}"
     candidates = [(0, bytes(line))]
 
     sub = bytearray(line)
@@ -401,10 +405,19 @@ def _filtered(line, prev, bpp):
 
 def write_png(path, rows, size):
     raw = bytearray()
-    prev = bytes(size * 4)
+    stride = size * 4               # RGBA; the IHDR below says colour type 6
+    prev = bytes(stride)
     for row in rows:
         line = unpremultiply(row, size)
         kind, data = _filtered(line, prev, 4)
+        # Unfilter what we just filtered, with the same code that reads a PNG
+        # back in. A filter bug does not corrupt the file — it produces a
+        # well-formed one that decodes to garbage, which nothing downstream
+        # would report and a person would have to see. One extra pass over
+        # the row buys the whole class.
+        check = bytearray(data)
+        _unfilter(kind, check, prev, 4, stride)
+        assert check == line, f"filter {kind} does not round-trip in {path}"
         raw.append(kind)
         raw.extend(data)
         prev = line
