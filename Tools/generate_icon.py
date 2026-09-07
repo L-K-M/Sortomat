@@ -370,6 +370,12 @@ def _filtered(line, prev, bpp):
     # back a short scanline that still encodes cleanly and decodes to garbage.
     if len(prev) != stride:
         raise ValueError(f"previous row is {len(prev)} bytes, not {stride}")
+    # A fully transparent row — every margin row of a margined icon, about a
+    # fifth of them — has nothing to predict from. Filter 0 scores zero, which
+    # is the floor, and `min` keeps the first of equal scores, so the search
+    # below already returns exactly this. Skipping it is not an approximation.
+    if not any(line):
+        return 0, bytes(line)
     candidates = [(0, bytes(line))]
 
     sub = bytearray(line)
@@ -415,12 +421,18 @@ def write_png(path, rows, size):
         # back in. A filter bug does not corrupt the file — it produces a
         # well-formed one that decodes to garbage, which nothing downstream
         # would report and a person would have to see. One extra pass over
-        # the row buys the whole class.
+        # the row buys the whole class — bar the one case it cannot see: a
+        # misreading of the spec present in *both* halves of the pair, which
+        # agrees with itself and with nothing else. Closing that needs an
+        # outside decoder, so check an output against Pillow or pngcheck
+        # whenever this filter code changes.
         check = bytearray(data)
         _unfilter(kind, check, prev, 4, stride)
         if check != line:
+            bad = next(i for i in range(stride) if check[i] != line[i])
             raise ValueError(
-                f"filter {kind} does not round-trip at row {y} of {path}"
+                f"filter {kind} does not round-trip at row {y} of {path}: "
+                f"byte {bad} came back {check[bad]}, not {line[bad]}"
             )
         raw.append(kind)
         raw.extend(data)
@@ -458,12 +470,17 @@ def check_grid(rows, size):
     middle = rows[size // 2]
     if middle[3] != 0:
         raise ValueError(f"the icon touches the canvas edge ({middle[3]})")
+    # Before the margin is measured, not after: this is also what makes the
+    # search below total. An empty canvas would otherwise reach `next` with
+    # nothing to find and raise a bare StopIteration — the mute failure this
+    # function exists to replace — two lines above the check that says what
+    # actually went wrong.
+    if middle[(size // 2) * 4 + 3] != 255:
+        raise ValueError("the artwork did not land in the middle of the canvas")
     expected = round((CANVAS - BODY) / 2 * (size / CANVAS))
     first = next(x for x in range(size) if middle[x * 4 + 3] > 0)
     if abs(first - expected) > 1:
         raise ValueError(f"body starts at {first}px, expected about {expected}px")
-    if rows[size // 2][(size // 2) * 4 + 3] != 255:
-        raise ValueError("the artwork did not land in the middle of the canvas")
     print(f"  grid ok: {first}px margin on a {size}px master")
 
 
