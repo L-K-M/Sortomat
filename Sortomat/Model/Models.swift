@@ -187,6 +187,10 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
             )
             self.steps = upgraded.steps
             if fallback == .askModel { self.fallback = upgraded.fallback }
+            // And the version, which `init(from:)` also bumps. A rule that has
+            // been upgraded is not a schema-1 rule any more, whatever the
+            // caller passed.
+            self.schemaVersion = max(schemaVersion, Rule.currentSchema)
         }
     }
 

@@ -150,11 +150,22 @@ final class ValueCoercionTests: XCTestCase {
     }
 
     func testCalendarArithmeticUsesRealMonths() {
-        let calendar = Calendar(identifier: .gregorian)
+        // The date is written down rather than computed. Asserting against
+        // `calendar.date(byAdding: .month, value: -1, to: now)` is what
+        // `cutoff` *does*, so the test restated the implementation and could
+        // not fail for the right reason. A month before 31 March 2026 is 28
+        // February — the whole point of using the calendar instead of 30 days
+        // — and the zone is pinned because a literal date needs one.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
         let now = DateComponents(calendar: calendar, year: 2026, month: 3, day: 31).date!
-        let cutoff = TimeSpan(amount: 1, unit: .months).cutoff(from: now, calendar: calendar)
-        let expected = calendar.date(byAdding: .month, value: -1, to: now)
-        XCTAssertEqual(cutoff, expected)
+        let expected = DateComponents(calendar: calendar, year: 2026, month: 2, day: 28).date!
+        XCTAssertEqual(TimeSpan(amount: 1, unit: .months).cutoff(from: now, calendar: calendar),
+                       expected)
+        // Thirty days would be 1 March, which is the answer this exists to
+        // rule out.
+        XCTAssertNotEqual(TimeSpan(amount: 1, unit: .months).cutoff(from: now, calendar: calendar),
+                          now.addingTimeInterval(-30 * 86_400))
     }
 
     func testADateMeansTheSameThingOnEveryCalendar() {

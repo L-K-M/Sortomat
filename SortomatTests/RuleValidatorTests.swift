@@ -233,6 +233,14 @@ final class RuleValidatorTests: XCTestCase {
         let found = codes(rule)
         XCTAssertTrue(found.contains("action.badTemplate"), "got: \(found)")
         XCTAssertTrue(found.contains("action.unknownToken"), "got: \(found)")
+        // The name of this test is a claim about *severity* — a rule that
+        // cannot do what it says versus one that works and surprises its
+        // author — and it was asserting only that both were mentioned.
+        let findings = RuleValidator.findings(for: rule)
+        XCTAssertEqual(findings.first { $0.code == "action.badTemplate" }?.severity, .error)
+        // `.warning` is the enum's spelling of what the docs call a note:
+        // a rule that works and probably surprises its author.
+        XCTAssertEqual(findings.first { $0.code == "action.unknownToken" }?.severity, .warning)
     }
 
     func testADestinationWhoseLastPartCanRenderEmptyIsANote() {

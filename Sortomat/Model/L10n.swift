@@ -361,7 +361,7 @@ public enum L10n {
         "step.action.add": "Add action",
         "step.condition.nested": "Nested group (%@, %@ conditions) — edit in config.json",
         "step.condition.needsContent": "This rule never reads file contents, so this condition can never match.",
-        "step.action.template": "Destination, e.g. Finanzen/{modified|date:'yyyy'}/{name}",
+        "step.action.template": "Destination, e.g. Finance/{modified|date:'yyyy'}/{name}",
         "step.action.tags": "Tags, comma separated",
         "step.action.prompt": "What to ask — leave empty to use the rule's instruction",
         "step.join.all": " and ",
