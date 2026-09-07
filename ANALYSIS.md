@@ -87,7 +87,7 @@ Seven things that cost real time to learn, in the order they will bite.
 | 5 | Chrome: the icon on Apple's grid, antialiased at every size, one palette, a lighter menu-bar mark | [#45](https://github.com/L-K-M/Sortomat/pull/45) | merged |
 | 5 | The wave-4 review record kept in the tree (`fable.md`) | [#44](https://github.com/L-K-M/Sortomat/pull/44) | merged |
 | 5 | Rule engine v2 — typed conditions, real globs, five date attributes, a template language, traces, lossless migration, a step editor with a live match count, a dry run, a rule validator, side effects that run, the model as one word in a destination | [#46](https://github.com/L-K-M/Sortomat/pull/46) | open: green on `0f30b91`, 372 tests, awaiting a review round |
-| 5 | Undo that says so when there is nothing left to undo, and a batch undo that says why it refused | [#47](https://github.com/L-K-M/Sortomat/pull/47) | open: green on `731e0a5`, awaiting a review round |
+| 5 | Undo that says so when there is nothing left to undo, and a batch undo that says why it refused | [#47](https://github.com/L-K-M/Sortomat/pull/47) | open: green, 306 tests, two review rounds answered |
 
 **Wave 5 is on `main` except for the last two, which are green and waiting on
 a review round** (#46, #47 — merge them and this table needs one edit). Getting
@@ -513,6 +513,17 @@ in.
   streams the file and keeps only the matching lines would do the same work
   without holding the whole history in memory. Worth doing when a journal is
   big enough to measure, not before. **S**
+- **`AppState` cannot be constructed in a test, so none of its behaviour is
+  pinned.** Every test reaches it through `nonisolated static` helpers only,
+  because `init()` acquires the process lock, reads the Keychain, requests
+  notification authorization, builds FSEvents watchers, starts the timer and
+  requests a scan — a unit test that built one would watch the developer's own
+  folders. That leaves the class holding most of the app's decisions (when to
+  scan, when to hold, what to announce) provable only by reading. An `init`
+  that takes its collaborators, or a `.forTesting` construction that starts
+  nothing, would unlock a whole category of tests; a `Notifier` delivery hook
+  (the shape `L10n.forcedLanguage` already uses) would let those tests assert
+  what the app *said*. **M**, and the highest-leverage **M** in this list.
 - **Tags an undo leaves behind.** `ActionExecutor` writes Finder tags after the
   move is journaled, and `Journal.undo` puts the file back with the tags still
   on it. This matches what Hazel does; the fix is the `SideEffectJournal` in
