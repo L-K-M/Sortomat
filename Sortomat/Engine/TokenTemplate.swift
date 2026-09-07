@@ -290,8 +290,12 @@ struct TokenTemplate {
                 current = .text(text ?? "")
             case "round":
                 if case .number(let number)? = current {
-                    let places = Int(filter.argument ?? "") ?? 0
-                    text = String(format: "%.\(max(0, places))f", number)
+                    // Clamped: `round:999999999999` would ask `String(format:)`
+                    // for a trillion digits, and a Double carries about
+                    // sixteen. One mistyped template should not be able to
+                    // hang the editor's live preview.
+                    let places = min(max(Int(filter.argument ?? "") ?? 0, 0), 16)
+                    text = String(format: "%.\(places)f", number)
                     current = .text(text ?? "")
                 }
             case "unit":

@@ -227,7 +227,11 @@ public struct Rule: Codable, Identifiable, Equatable, Sendable {
         // value, and one such value would send the whole config to
         // `config.json.corrupt-…`.
         let fallbackRaw = try c.decodeIfPresent(String.self, forKey: .fallback) ?? ""
-        fallback = Fallback(rawValue: fallbackRaw) ?? .askModel
+        // Absent means a config written before fallbacks existed, where the
+        // model decided — that stays. A *present* value we cannot read comes
+        // from a newer build, and guessing "ask the model" there would spend
+        // money and send file content on a setting nobody chose.
+        fallback = fallbackRaw.isEmpty ? .askModel : (Fallback(rawValue: fallbackRaw) ?? .skip)
         destinationRoots = try c.decodeIfPresent([DestinationRoot].self, forKey: .destinationRoots) ?? []
 
         // A rule written before steps existed is upgraded on the way in, so

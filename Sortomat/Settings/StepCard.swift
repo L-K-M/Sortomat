@@ -137,6 +137,9 @@ struct StepCard: View {
             Toggle("", isOn: $step.enabled)
                 .labelsHidden()
                 .help(L10n.t("step.enabled.help"))
+                // `labelsHidden` hides it from VoiceOver too, which then reads
+                // the switch as nothing at all.
+                .accessibilityLabel(L10n.t("step.enabled.help"))
             Button(action: onMoveUp) { Image(systemName: "chevron.up") }
                 .buttonStyle(.borderless).disabled(!canMoveUp)
             Button(action: onMoveDown) { Image(systemName: "chevron.down") }
@@ -279,6 +282,14 @@ struct ConditionRow: View {
 
 struct ConditionTestRow: View {
     @Binding var test: ConditionTest
+    /// What the user has actually typed, while they are typing it.
+    ///
+    /// The value field round-trips through `ConditionValue`, and for the
+    /// list-valued operators the setter parses `"a,"` into `["a"]` — so the
+    /// getter re-rendered `"a"` and ate the separator the instant it was
+    /// typed. Six operators, including the everyday ones (a list of
+    /// extensions, a list of tags), could only be filled in by pasting.
+    @State private var typedValue: String?
     let findings: [RuleValidator.Finding]
     let onDelete: () -> Void
 
@@ -322,10 +333,13 @@ struct ConditionTestRow: View {
         // the engine would then report it as invalid on every file. Fall
         // back to the first operator the attribute does offer.
         .onChange(of: test.attribute) { attribute in
+            // The value is about to mean something else; show it afresh.
+            typedValue = nil
             let offered = RuleCatalog.operators(for: attribute)
             guard !offered.contains(test.op), let first = offered.first else { return }
             test.op = first
         }
+        .onChange(of: test.op) { _ in typedValue = nil }
     }
 
     private var needsValue: Bool {
@@ -340,12 +354,14 @@ struct ConditionTestRow: View {
     private var valueText: Binding<String> {
         Binding(
             get: {
+                if let typedValue { return typedValue }
                 switch test.value {
                 case .list(let items): return items.joined(separator: ", ")
                 default: return ValueCoercion.string(test.value) ?? ""
                 }
             },
             set: { typed in
+                typedValue = typed
                 let trimmed = typed.trimmingCharacters(in: .whitespaces)
                 if trimmed.isEmpty {
                     test.value = .none
@@ -365,6 +381,10 @@ struct ConditionTestRow: View {
 
 struct ActionRow: View {
     @Binding var action: RuleAction
+    /// The same raw-text hold as the condition value field: the tags binding
+    /// splits and re-joins, so a typed comma disappeared before the next
+    /// keystroke and a second tag could not be entered.
+    @State private var typedTags: String?
     let findings: [RuleValidator.Finding]
     let onDelete: () -> Void
 
@@ -384,6 +404,7 @@ struct ActionRow: View {
             }
             .labelsHidden()
             .frame(width: 200)
+            .onChange(of: action.type) { _ in typedTags = nil }
 
             if RuleCatalog.takesTemplate(action.type) {
                 TextField(L10n.t("step.action.template"), text: $action.template)
@@ -419,8 +440,9 @@ struct ActionRow: View {
 
     private var tagsText: Binding<String> {
         Binding(
-            get: { action.tags.joined(separator: ", ") },
+            get: { typedTags ?? action.tags.joined(separator: ", ") },
             set: {
+                typedTags = $0
                 action.tags = $0.split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }

@@ -27,14 +27,24 @@ enum KindResolver {
         (.video, ["public.movie"]),
         (.audio, ["public.audio"]),
         (.font, ["public.font"]),
-        (.diskImage, ["public.disk-image", "com.apple.disk-image"]),
+        // `com.apple.installer-package` conforms to `public.archive` and to no
+        // disk-image type, so a `.pkg` resolved through Launch Services landed
+        // in Archives while the extension fallback said Disk Images. Named
+        // explicitly, and ahead of `.archive`, both paths agree. An identifier
+        // no system declares resolves to nil and is skipped, so this is free.
+        (.diskImage, ["public.disk-image", "com.apple.disk-image",
+                      "com.apple.installer-package"]),
         (.archive, ["public.archive", "public.zip-archive", "org.gnu.gnu-zip-archive"]),
         (.code, ["public.source-code", "public.shell-script", "public.script"]),
-        (.document, ["com.apple.rtfd", "public.rtf",
+        // `public.rtf` sits with the text types, not here: the legacy table
+        // this migration promises to reproduce calls `rtf` text, and it is the
+        // extension fallback that must stay verbatim. RTFD — a package with
+        // attachments — is a document on both paths, as it was.
+        (.document, ["com.apple.rtfd",
                      "org.openxmlformats.wordprocessingml.document",
                      "com.microsoft.word.doc", "com.apple.iwork.pages.pages",
                      "org.oasis-open.opendocument.text"]),
-        (.text, ["public.text"])
+        (.text, ["public.rtf", "public.text"])
     ]
 
     /// Types no *system* declares: they exist only when an app that reads

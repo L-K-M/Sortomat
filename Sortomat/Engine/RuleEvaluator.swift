@@ -141,6 +141,11 @@ enum RuleEvaluator {
 
             var descriptions: [String] = []
             for (actionIndex, action) in step.then.enumerated() {
+                // A `stop` ends the step, not just the walk. The outer loop
+                // checked this and the inner one did not, so `[stop, askModel]`
+                // still reached the model — a paid call, and a `.needsModel`
+                // for a file the walk had already decided.
+                if state.builder.stopped { break }
                 // When resuming, the asking action is answered rather than
                 // asked again. The actions *before* it run like any other:
                 // the builder is fresh on every walk, so a tag added ahead of

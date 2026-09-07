@@ -86,6 +86,10 @@ struct PlacementBuilder {
                 ? "{name}"
                 : "\(rule.quarantineSubfolder)/{name}"
             reason = answer.reason ?? ""
+            // And not into the root some earlier action picked: a refused
+            // answer must not be filed against a destination that answer was
+            // never trusted to choose.
+            rootName = nil
             return
         }
         guard claimsPlacement, !isTerminal else { return }

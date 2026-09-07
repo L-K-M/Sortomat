@@ -110,6 +110,14 @@ public struct ConditionGroup: Equatable, Sendable, Codable, Identifiable {
             self.items = items
             return
         }
+        // A keyed container that names no group key at all is not a group —
+        // `"when": {"attr":"kind","op":"is","value":"pdf"}` is a single test
+        // written where a group belongs. Reaching the `mode` default here made
+        // it an empty `.all`, which matches every file; fail closed instead.
+        guard container.contains(.mode) || container.contains(.items) else {
+            self.init(mode: .any)
+            return
+        }
         let raw = ((try? container.decodeIfPresent(String.self, forKey: .mode)) ?? nil) ?? ""
         // Case-folded: `"Any"` or `"NONE"` would otherwise fall back to `.all`
         // and widen the step into a catch-all — the fail-open direction, from

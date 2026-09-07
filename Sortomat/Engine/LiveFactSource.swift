@@ -48,14 +48,19 @@ struct LiveFactSource: FactSource {
     }
 
     static func packageBytes(_ url: URL) -> Double? {
-        guard let enumerator = FileManager.default.enumerator(
-            at: url, includingPropertiesForKeys: [.fileSizeKey], options: []
-        ) else { return nil }
         var bytes = 0
+        var walkFailed = false
+        guard let enumerator = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: [.fileSizeKey], options: [],
+            errorHandler: { _, _ in walkFailed = true; return true }
+        ) else { return nil }
         for case let child as URL in enumerator {
             bytes += (try? child.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         }
-        return Double(bytes)
+        // A half-read package is not a small package. Reporting the bytes we
+        // happened to reach would quietly answer "under 5 MB" for a bundle
+        // whose unreadable half is a gigabyte.
+        return walkFailed ? nil : Double(bytes)
     }
 
     // MARK: - Spotlight

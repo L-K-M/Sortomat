@@ -172,6 +172,51 @@ final class TokenTemplateTests: XCTestCase {
         XCTAssertEqual(render("{s|replace:'a':'o'}", ["s": .text("cat")]), "cot")
     }
 
+    func testAStarMatchesAcrossAnEarlierDoubleStar() {
+        // The matcher kept one backtrack point for the whole match, which is
+        // only correct when every star can absorb any character. `*` may not
+        // cross a separator, so a dead end that killed the newest star was
+        // treated as the end of the match — even though an earlier `**` could
+        // still stretch and re-align everything after it. The first case here
+        // is the most ordinary rule anyone would write.
+        for (pattern, subject) in [("**/*.pdf", "a/b/c.pdf"),
+                                   ("**/*x", "x/1/2x"),
+                                   ("**/*.tmp", "z/.tmp/a.tmp"),
+                                   ("a**b*c", "ab/bc")] {
+            XCTAssertTrue(Glob(pattern: pattern, matchesSeparator: false).matches(subject),
+                          "«\(pattern)» should match «\(subject)»")
+        }
+        // And the separator restriction still holds.
+        XCTAssertFalse(Glob(pattern: "*a", matchesSeparator: false).matches("b/a"))
+        XCTAssertFalse(Glob(pattern: "*", matchesSeparator: false).matches("a/b"))
+        XCTAssertFalse(Glob(pattern: "*/*", matchesSeparator: false).matches("a/b/c"))
+        XCTAssertTrue(Glob(pattern: "**a", matchesSeparator: false).matches("b/a"))
+        XCTAssertTrue(Glob(pattern: "*/*", matchesSeparator: false).matches("a/b"))
+    }
+
+    func testANegatedSetIsNotAWildcardForTheSeparator() {
+        // `?` never crossed a separator; a negated set did, which let a
+        // path-shaped rule reach into a subfolder it did not name.
+        XCTAssertFalse(Glob(pattern: "a[!x]b", matchesSeparator: false).matches("a/b"))
+        XCTAssertTrue(Glob(pattern: "a[!x]b", matchesSeparator: true).matches("a/b"))
+        // A bracket right after the negation marker is a member, not the close.
+        XCTAssertTrue(Glob(pattern: "[!]]").matches("a"))
+        XCTAssertFalse(Glob(pattern: "[!]]").matches("]"))
+    }
+
+    func testEveryValueInAListIsChecked() {
+        // `isIn` means "one of these", and `notIn` failed open: a file tagged
+        // `urgent` passed "notIn work, urgent" because only `work` was read.
+        let file = facts(source: StubFactSource(stat: StatFacts(tags: ["urgent"])))
+        // "urgent" is the *second* value; only the first was ever read.
+        XCTAssertEqual(
+            evaluate(ConditionTest(attribute: .tags, op: .isIn,
+                                   value: .list(["work", "urgent"])), file).verdict, .pass)
+        XCTAssertEqual(
+            evaluate(ConditionTest(attribute: .tags, op: .notIn,
+                                   value: .list(["work", "urgent"])), file).verdict, .fail)
+    }
+
     func testPaddingNothingProducesNothing() {
         // Padding an absent value invented one: `{n|pad:4}` became the literal
         // folder «0000», and because `default:` only fires on empty text it

@@ -145,7 +145,10 @@ enum ValueCoercion {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd", "yyyy/MM/dd"] {
+        // The `T` form too: `ISO8601DateFormatter` below wants a zone offset,
+        // so a bare `2026-01-01T09:30:00` fell through everything.
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss",
+                       "yyyy-MM-dd HH:mm", "yyyy-MM-dd", "yyyy/MM/dd"] {
             formatter.dateFormat = format
             if let date = formatter.date(from: text) { return date }
         }

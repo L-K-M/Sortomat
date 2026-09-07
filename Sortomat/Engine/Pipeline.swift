@@ -589,7 +589,10 @@ actor Pipeline {
         if let prompt = options.prompt, !prompt.trimmingCharacters(in: .whitespaces).isEmpty {
             effective.prompt = prompt
         }
-        if let taxonomy = options.taxonomy { effective.taxonomy = taxonomy }
+        // Non-empty, like the prompt above: an empty list is an untouched
+        // field, not an instruction to drop the rule's taxonomy — and dropping
+        // it would quietly retire the folder enforcement for that one ask.
+        if let taxonomy = options.taxonomy, !taxonomy.isEmpty { effective.taxonomy = taxonomy }
         if let privacyMode = options.privacyMode { effective.privacyMode = privacyMode }
         if let threshold = options.confidenceThreshold { effective.confidenceThreshold = threshold }
         return effective

@@ -344,7 +344,13 @@ enum RuleValidator {
         guard !action.template.isEmpty else { return findings }
         // `sortIntoDatedFolder` reads its template as a date format, not as a
         // token template — `yyyy/MM` has no placeholders and is not an error.
-        guard action.type != .sortIntoDatedFolder else { return findings }
+        // `runShortcut` is the same: its template holds a Shortcuts *name*
+        // (the emptiness check above treats it as one), so a shortcut called
+        // "Convert {heic}" would be reported as a broken template — an error,
+        // on a rule that is fine. A validator that cries wolf gets switched off.
+        guard action.type != .sortIntoDatedFolder, action.type != .runShortcut else {
+            return findings
+        }
         let template = TokenTemplate(action.template)
         for error in template.errors {
             add("action.badTemplate", .error,

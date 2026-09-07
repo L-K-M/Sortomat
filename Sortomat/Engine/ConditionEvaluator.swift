@@ -156,12 +156,17 @@ enum ConditionEvaluator {
             .map { TextKey.fold($0, caseSensitive: caseSensitive) }
 
         switch test.op {
+        // Every expected value, not just the first. `isIn` means "the subject
+        // is one of these", so reading one entry of the list was never right;
+        // and `notIn` failed *open* — "tags notIn work, urgent" passed for a
+        // file tagged `urgent`, because only `work` was ever looked at. These
+        // now read exactly as `containsAny` and `containsNone` below.
         case .contains, .isIn:
-            guard let first = expected.first else { return TestResult(.invalidValue, actual: actual) }
-            return TestResult(folded.contains(first) ? .pass : .fail, actual: actual)
+            guard !expected.isEmpty else { return TestResult(.invalidValue, actual: actual) }
+            return TestResult(expected.contains { folded.contains($0) } ? .pass : .fail, actual: actual)
         case .notContains, .notIn:
-            guard let first = expected.first else { return TestResult(.invalidValue, actual: actual) }
-            return TestResult(folded.contains(first) ? .fail : .pass, actual: actual)
+            guard !expected.isEmpty else { return TestResult(.invalidValue, actual: actual) }
+            return TestResult(expected.contains { folded.contains($0) } ? .fail : .pass, actual: actual)
         case .containsAny:
             guard !expected.isEmpty else { return TestResult(.invalidValue, actual: actual) }
             return TestResult(expected.contains { folded.contains($0) } ? .pass : .fail, actual: actual)
@@ -178,6 +183,9 @@ enum ConditionEvaluator {
                 return TestResult(.invalidValue, actual: actual)
             }
             let glob = Glob(pattern: pattern, caseSensitive: caseSensitive)
+            // Same guard the scalar path has: an uncompilable pattern is
+            // `.invalidPattern`, not a silent non-match.
+            guard !glob.branches.isEmpty else { return TestResult(.invalidPattern, actual: actual) }
             let hit = subject.contains { glob.matches($0) }
             return TestResult((test.op == .matchesGlob) == hit ? .pass : .fail, actual: actual)
         default:
@@ -230,7 +238,11 @@ enum ConditionEvaluator {
             switch test.op {
             case .olderThan: return TestResult(older ? .pass : .fail, actual: actual)
             case .newerThan, .inLast: return TestResult(older ? .fail : .pass, actual: actual)
-            default: return TestResult(older ? .pass : .fail, actual: actual)   // notInLast
+            // Named, not defaulted: the outer case lists exactly four
+            // operators, so a fifth added there would silently inherit
+            // `notInLast`'s answer instead of failing the switch.
+            case .notInLast: return TestResult(older ? .pass : .fail, actual: actual)
+            default: return TestResult(.unknownOperator, actual: actual)
             }
         default:
             return TestResult(.unknownOperator, actual: actual)

@@ -118,7 +118,10 @@ struct Glob {
         var sawClose = false
         while index < characters.count {
             let character = characters[index]
-            if character == "]", !members.isEmpty || index > start + 1 {
+            // The first member slot sits one further along when a negation
+            // marker was consumed, so `[!]]` means "anything but ]" rather
+            // than an empty negated set followed by a stray literal.
+            if character == "]", !members.isEmpty || index > start + (negated ? 2 : 1) {
                 sawClose = true
                 break
             }
@@ -186,44 +189,63 @@ struct Glob {
     /// of naive recursion.
     private static func match(_ tokens: [Token], _ subject: [Character],
                               matchesSeparator: Bool) -> Bool {
+        // One backtrack point per open star, not one for the whole match.
+        //
+        // The textbook single-point algorithm is only correct when every star
+        // can absorb any character. Here `*` may not cross a separator, so a
+        // dead end that kills the newest star is not the end of the match — an
+        // earlier `**` may still stretch further and re-align everything after
+        // it. With one shared point that earlier star's position had already
+        // been overwritten, and the matcher gave up: `**/*.pdf` did not match
+        // `a/b/c.pdf`, which is the most ordinary rule anyone would write.
+        //
+        // Still O(subject × pattern): a star's reach only ever advances.
+        var backtrack: [(tokenIndex: Int, stretchedTo: Int, crossesSeparator: Bool)] = []
         var subjectIndex = 0
         var tokenIndex = 0
-        var starIndex = -1
-        var starCrossesSeparator = false
-        var resumeIndex = 0
 
         func consumes(_ token: Token, _ character: Character) -> Bool {
             switch token {
             case .literal(let expected): return expected == character
             case .any: return matchesSeparator || character != "/"
-            case .set(let members, let negated): return members.contains(character) != negated
+            case .set(let members, let negated):
+                // A negated set is still not a wildcard for "/": `[!a]` must
+                // no more cross a separator than `?` does. An explicitly
+                // listed "/" (`[/]`) still matches.
+                let inSet = members.contains(character)
+                if character == "/", !inSet, !matchesSeparator { return false }
+                return inSet != negated
             case .star: return false
             }
         }
 
-        while subjectIndex < subject.count {
+        while true {
+            if tokenIndex == tokens.count, subjectIndex == subject.count { return true }
             if tokenIndex < tokens.count, case .star(let crosses) = tokens[tokenIndex] {
-                starIndex = tokenIndex
-                starCrossesSeparator = crosses || matchesSeparator
-                resumeIndex = subjectIndex
+                backtrack.append((tokenIndex, subjectIndex, crosses || matchesSeparator))
                 tokenIndex += 1
                 continue
             }
-            if tokenIndex < tokens.count, consumes(tokens[tokenIndex], subject[subjectIndex]) {
+            if tokenIndex < tokens.count, subjectIndex < subject.count,
+               consumes(tokens[tokenIndex], subject[subjectIndex]) {
                 tokenIndex += 1
                 subjectIndex += 1
                 continue
             }
-            guard starIndex >= 0 else { return false }
-            // Widen the last star by one character — unless it is a single
-            // star and that character is a path separator.
-            if !starCrossesSeparator, subject[resumeIndex] == "/" { return false }
-            resumeIndex += 1
-            subjectIndex = resumeIndex
-            tokenIndex = starIndex + 1
+            // Widen the newest star that can still absorb a character; a "/"
+            // stops one that may not cross separators. A star that cannot
+            // widen is abandoned and the one before it gets its turn.
+            while let last = backtrack.last {
+                if last.stretchedTo < subject.count,
+                   last.crossesSeparator || subject[last.stretchedTo] != "/" {
+                    backtrack[backtrack.count - 1].stretchedTo += 1
+                    tokenIndex = last.tokenIndex + 1
+                    subjectIndex = last.stretchedTo + 1
+                    break
+                }
+                backtrack.removeLast()
+            }
+            if backtrack.isEmpty { return false }
         }
-
-        while tokenIndex < tokens.count, case .star = tokens[tokenIndex] { tokenIndex += 1 }
-        return tokenIndex == tokens.count
     }
 }

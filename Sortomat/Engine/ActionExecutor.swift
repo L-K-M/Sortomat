@@ -30,9 +30,12 @@ enum ActionExecutor {
         for effect in effects where supported.contains(effect.type) {
             switch effect.type {
             case .addTags, .removeTags:
-                guard let updated = tags(of: url).map({ resolve($0, applying: effect) }),
-                      writeTags(updated, to: url)
-                else { continue }
+                // Nothing to do is not something done: adding a tag the file
+                // already carries would otherwise rewrite the file's metadata
+                // and report the effect as carried out.
+                guard let existing = tags(of: url) else { continue }
+                let updated = resolve(existing, applying: effect)
+                guard updated != existing, writeTags(updated, to: url) else { continue }
                 performed.append(effect.type)
             case .notify:
                 guard notify(effect, about: url) else { continue }
