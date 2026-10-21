@@ -16,7 +16,9 @@ permissions:
 jobs:
   review:
     name: Review PR with GLM 5.2
-    runs-on: ubuntu-latest
+    # A ZAI_REVIEW_RUNNER repository variable (e.g. truenas) moves the review
+    # to self-hosted runners with that label; unset, GitHub hosts it.
+    runs-on: ${{ vars.ZAI_REVIEW_RUNNER || 'ubuntu-latest' }}
     if: ${{ github.event.pull_request.draft == false }}
     env:
       ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
